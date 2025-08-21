@@ -25,3 +25,14 @@ Template:
 - **Outcome:** Adopted BRoA-based guidelines for human and AI agent collaboration.
 - **Rationale:** Provide shared principles for working with AI agents and mixed human–AI teams.
 - **Details:** See [docs/broa-agent-guidelines.md](broa-agent-guidelines.md).
+
+## [0002] - Adopt AI-Augmented Engineering Handbook
+- **Date Added:** 2025-08-21
+- **Version:** Unreleased
+- **Branch:** main
+- **Submitter:** automated agent
+- **Decision Maker:** project maintainers
+- **Decision Date:** 2025-08-21
+- **Outcome:** Adopted comprehensive engineering handbook for humans and AI agents.
+- **Rationale:** Provide evidence-based principles and practices to guide collaboration and delivery.
+- **Details:** See [docs/engineering-handbook.md](engineering-handbook.md).
