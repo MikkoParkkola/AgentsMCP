@@ -11,3 +11,10 @@ Template:
 - **Message:** summary
 - **Follow-up:** next steps
 -->
+
+## 2025-08-21 23:11 UTC
+- **From:** user
+- **To:** contributors
+- **Type:** instruction
+- **Message:** Include Business Rules of Acquisition as broa.md and link from AGENTS.md.
+- **Follow-up:** Document added and linked.

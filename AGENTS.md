@@ -10,6 +10,10 @@ The full project overview, including goals and architecture, is available in [do
 - Document any new behaviors or configuration options.
 - Keep the codebase small and modular to support multiple cooperating agents.
 
+## Additional Guidelines
+
+- [broa.md](broa.md) – Business Rules of Acquisition for broader wisdom on collaboration and business.
+
 ## Operational Logs
 
 These markdown files must remain up to date and merged across branches so every contributor can access current information:
