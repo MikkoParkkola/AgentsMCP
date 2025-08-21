@@ -18,3 +18,10 @@ Template:
 - **Type:** instruction
 - **Message:** Include Business Rules of Acquisition as broa.md and link from AGENTS.md.
 - **Follow-up:** Document added and linked.
+
+## 2025-08-21 23:54 UTC
+- **From:** user
+- **To:** contributors
+- **Type:** instruction
+- **Message:** Implement engineering handbook and guidelines for humans and AI agents.
+- **Follow-up:** Handbook added and AGENTS.md updated.
