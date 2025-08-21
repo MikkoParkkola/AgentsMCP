@@ -25,3 +25,13 @@ Template:
 - **Outcome:** Adopted BRoA-based guidelines for human and AI agent collaboration.
 - **Rationale:** Provide shared principles for working with AI agents and mixed human–AI teams.
 - **Details:** See [docs/broa-agent-guidelines.md](broa-agent-guidelines.md).
+## [0002] - Adopt GitHub Actions CI with automerge
+- **Date Added:** 2025-08-21
+- **Version:** Unreleased
+- **Branch:** main
+- **Submitter:** automated agent
+- **Decision Maker:** project maintainers
+- **Decision Date:** 2025-08-21
+- **Outcome:** Implemented GitHub Actions workflows for CI, security scanning, and automerge with branch cleanup.
+- **Rationale:** Provide baseline automation and safety nets before product code exists.
+- **Details:** See `.github/workflows` directory.

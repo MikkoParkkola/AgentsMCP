@@ -18,3 +18,9 @@ Template:
 - **Type:** instruction
 - **Message:** Include Business Rules of Acquisition as broa.md and link from AGENTS.md.
 - **Follow-up:** Document added and linked.
+## 2025-08-21 23:34 UTC
+- **From:** automated agent
+- **To:** contributors
+- **Type:** instruction
+- **Message:** Set up CI, automerge, security scanning, and dependency automation.
+- **Follow-up:** Define CODEOWNERS and expand tests as code evolves.

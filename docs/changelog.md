@@ -3,6 +3,7 @@
 This file records notable changes to the project. Keep entries in reverse chronological order.
 
 ## [Unreleased]
+- Establish automated CI pipeline with linting, testing, security scans, and automerge.
 - Add BRoA-based guidelines for human and AI agent collaboration.
 - Initial placeholder.
 - Added Business Rules of Acquisition guidelines and linked them from AGENTS.md.
