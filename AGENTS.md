@@ -3,6 +3,8 @@
 Welcome! This repository contains resources for building a CLI-driven MCP agent system.
 
 The full project overview, including goals and architecture, is available in [docs/project-overview.md](docs/project-overview.md). Start there for context before making changes.
+Guidelines for human and AI agent collaboration based on the Business Rules of Acquisition are in [docs/broa-agent-guidelines.md](docs/broa-agent-guidelines.md).
+
 
 ## Conventions
 
