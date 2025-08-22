@@ -25,10 +25,12 @@ Template:
 - **Outcome:** Adopted BRoA-based guidelines for human and AI agent collaboration.
 - **Rationale:** Provide shared principles for working with AI agents and mixed human–AI teams.
 - **Details:** See [docs/broa-agent-guidelines.md](broa-agent-guidelines.md).
+
 ## [0002] - Adopt GitHub Actions CI with automerge
 - **Outcome:** Implemented GitHub Actions workflows for CI, security scanning, and automerge with branch cleanup.
 - **Rationale:** Provide baseline automation and safety nets before product code exists.
 - **Details:** See `.github/workflows` directory.
+
 ## [0003] - Adopt AI-Augmented Engineering Handbook
 - **Date Added:** 2025-08-21
 - **Version:** Unreleased
@@ -39,7 +41,9 @@ Template:
 - **Outcome:** Adopted comprehensive engineering handbook for humans and AI agents.
 - **Rationale:** Provide evidence-based principles and practices to guide collaboration and delivery.
 - **Details:** See [docs/engineering-handbook.md](engineering-handbook.md).
-## [0004] - Fix CI lint and Danger configuration
+
+
+## [0004] - Adopt AI-Agent Project Best Practices
 - **Date Added:** 2025-08-22
 - **Version:** Unreleased
 - **Branch:** main
@@ -49,8 +53,15 @@ Template:
 - **Outcome:** Updated lint job to use `ruff check` and passed `GITHUB_TOKEN` to Danger.
 - **Rationale:** Previous configuration caused CI failures despite no code changes.
 - **Details:** See `.github/workflows/ci.yml`.
+
 ## [0005] - Auto-install Danger via npx
 - **Date Added:** 2025-08-22
+- **Outcome:** Documented baseline principles for AI-agent team software projects.
+- **Rationale:** Standardize quality gates and collaboration practices for multi-agent development.
+- **Details:** See [docs/ai-agent-project-principles.md](ai-agent-project-principles.md).
+
+## [0006] - Reorganize Documentation Structure
+- **Date Added:** 2025-08-23
 - **Version:** Unreleased
 - **Branch:** main
 - **Submitter:** automated agent
@@ -59,3 +70,10 @@ Template:
 - **Outcome:** Added `--yes` flag to `npx danger@11 ci` to avoid interactive install prompts.
 - **Rationale:** Prevent unknown errors caused by cancelled npx installations.
 - **Details:** See `.github/workflows/ci.yml`.
+- **Decision Date:** 2025-08-23
+- **Outcome:** Split documentation into generic, AI-specific, and product-specific best practices plus status and details files.
+- **Rationale:** Provide a clearer blueprint template for future projects.
+- **Details:** See [docs/generic-best-practices.md](generic-best-practices.md), [docs/ai-agent-best-practices.md](ai-agent-best-practices.md), [docs/product-best-practices.md](product-best-practices.md), [docs/product-status.md](product-status.md), and [docs/product-details.md](product-details.md).
+
+## [0007] - Fix CI lint and Danger configuration
+
