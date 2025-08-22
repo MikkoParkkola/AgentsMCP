@@ -47,3 +47,14 @@ Template:
 - **Outcome:** Documented baseline principles for AI-agent team software projects.
 - **Rationale:** Standardize quality gates and collaboration practices for multi-agent development.
 - **Details:** See [docs/ai-agent-project-principles.md](ai-agent-project-principles.md).
+
+## [0004] - Reorganize Documentation Structure
+- **Date Added:** 2025-08-23
+- **Version:** Unreleased
+- **Branch:** main
+- **Submitter:** automated agent
+- **Decision Maker:** project maintainers
+- **Decision Date:** 2025-08-23
+- **Outcome:** Split documentation into generic, AI-specific, and product-specific best practices plus status and details files.
+- **Rationale:** Provide a clearer blueprint template for future projects.
+- **Details:** See [docs/generic-best-practices.md](generic-best-practices.md), [docs/ai-agent-best-practices.md](ai-agent-best-practices.md), [docs/product-best-practices.md](product-best-practices.md), [docs/product-status.md](product-status.md), and [docs/product-details.md](product-details.md).
