@@ -24,6 +24,12 @@ Template:
 - **Type:** instruction
 - **Message:** Set up CI, automerge, security scanning, and dependency automation.
 - **Follow-up:** Define CODEOWNERS and expand tests as code evolves.
+## 2025-08-21 23:54 UTC
+- **From:** user
+- **To:** contributors
+- **Type:** instruction
+- **Message:** Implement engineering handbook and guidelines for humans and AI agents.
+- **Follow-up:** Handbook added and AGENTS.md updated.
 ## 2025-08-22 00:15 UTC
 - **From:** user
 - **To:** contributors
