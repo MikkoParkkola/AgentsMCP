@@ -25,3 +25,10 @@ Template:
 - **Type:** instruction
 - **Message:** Implement engineering handbook and guidelines for humans and AI agents.
 - **Follow-up:** Handbook added and AGENTS.md updated.
+
+## 2025-08-22 00:58 UTC
+- **From:** user
+- **To:** contributors
+- **Type:** instruction
+- **Message:** Incorporate AI-agent team project best practices into product documentation.
+- **Follow-up:** Best practices documented and referenced.

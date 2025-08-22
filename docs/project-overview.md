@@ -9,6 +9,8 @@ Key capabilities:
 - **Configurable runtime** – adapt transports, storage, and tools through configuration files.
 - **Multi-agent DevOps** – support specialized agents for linting, testing, deployment, and other lifecycle tasks.
 
+For foundational practices on running these projects, see [ai-agent-project-principles.md](ai-agent-project-principles.md).
+
 For additional background and context, see the original project description:
 
 <https://chatgpt.com/s/dr_68a797b295e08191aee3dc2b2523646b>
