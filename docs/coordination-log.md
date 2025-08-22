@@ -32,3 +32,10 @@ Template:
 - **Type:** instruction
 - **Message:** Incorporate AI-agent team project best practices into product documentation.
 - **Follow-up:** Best practices documented and referenced.
+
+## 2025-08-23 01:00 UTC
+- **From:** user
+- **To:** contributors
+- **Type:** instruction
+- **Message:** Separate documentation into generic, AI-specific, product-specific, status, and product details sections.
+- **Follow-up:** Docs reorganized and references updated.
