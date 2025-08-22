@@ -36,3 +36,14 @@ Template:
 - **Outcome:** Adopted comprehensive engineering handbook for humans and AI agents.
 - **Rationale:** Provide evidence-based principles and practices to guide collaboration and delivery.
 - **Details:** See [docs/engineering-handbook.md](engineering-handbook.md).
+
+## [0003] - Adopt AI-Agent Project Best Practices
+- **Date Added:** 2025-08-22
+- **Version:** Unreleased
+- **Branch:** main
+- **Submitter:** automated agent
+- **Decision Maker:** project maintainers
+- **Decision Date:** 2025-08-22
+- **Outcome:** Documented baseline principles for AI-agent team software projects.
+- **Rationale:** Standardize quality gates and collaboration practices for multi-agent development.
+- **Details:** See [docs/ai-agent-project-principles.md](ai-agent-project-principles.md).
