@@ -1,6 +1,10 @@
 {
   "name": "agentsmcp",
   "private": true,
+  "bin": {
+    "prettier": "scripts/prettier.sh",
+    "eslint": "scripts/eslint.sh"
+  },
   "scripts": {
     "lint": "npx prettier -w . && npx eslint --fix .",
     "format": "npx prettier -w .",
