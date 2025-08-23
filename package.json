@@ -2,8 +2,8 @@
   "name": "agentsmcp",
   "private": true,
   "scripts": {
-    "lint": "prettier -w . && eslint --fix .",
-    "format": "prettier -w ."
+    "lint": "npx prettier -w . && npx eslint --fix .",
+    "format": "npx prettier -w ."
   },
   "devDependencies": {
     "eslint": "^8.57.0",
