@@ -236,7 +236,7 @@ class Config(BaseModel):
 
         with open(path, "w") as f:
             yaml.dump(
-                self.dict(exclude_unset=True), f, default_flow_style=False, indent=2
+                self.model_dump(exclude_unset=True), f, default_flow_style=False, indent=2
             )
 
     def get_agent_config(self, agent_type: str) -> Optional[AgentConfig]:
