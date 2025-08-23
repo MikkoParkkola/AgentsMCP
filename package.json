@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "lint": "npx prettier -w . && npx eslint --fix .",
-    "format": "npx prettier -w ."
+    "format": "npx prettier -w .",
+    "test": "python -m pytest -q"
   },
   "devDependencies": {
     "eslint": "^8.57.0",
