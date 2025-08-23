@@ -1,9 +1,10 @@
-import pytest
-from pathlib import Path
 import tempfile
+from pathlib import Path
+
+import pytest
 import yaml
 
-from agentsmcp.config import Config, ServerConfig, AgentConfig, RAGConfig
+from agentsmcp.config import AgentConfig, Config, RAGConfig, ServerConfig
 
 
 def test_default_config():

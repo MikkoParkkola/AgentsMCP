@@ -5,43 +5,66 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   lint:
+    name: Lint (ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
-      - run: pip install .[dev]
-      - run: pip install -U ruff
-      - run: ruff check src tests
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install ".[dev]"
+      - name: Ruff check
+        run: ruff check src tests
 
   test:
+    name: Tests (pytest + coverage)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
-      - run: pip install .[dev]
-      - run: pip install -U pytest
-      - run: pytest
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install ".[dev]"
+      - name: Run tests with coverage
+        run: pytest --cov-report=xml --cov-report=term-missing
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.xml
 
   security:
+    name: Security (bandit, pip-audit)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
-      - run: pip install .[dev]
-      - run: pip install -U bandit pip-audit
-      - run: bandit -r src
-      - run: pip-audit
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        run: pip install ".[dev]"
+      - name: Bandit
+        run: bandit -r src -x tests
+      - name: pip-audit
+        run: pip-audit
 
   danger:
     if: github.event_name == 'pull_request' && hashFiles('dangerfile.*', 'Dangerfile.*') != ''
+    name: Danger CI
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

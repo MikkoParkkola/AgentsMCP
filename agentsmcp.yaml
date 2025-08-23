@@ -17,16 +17,30 @@ agents:
     model: gpt-4
     system_prompt: "You are a code generation and analysis expert."
     tools: [filesystem, git, bash]
+    mcp: [git-mcp]
   claude:
     type: claude
     model: claude-3-sonnet
     system_prompt: "You are a helpful AI assistant with deep reasoning capabilities."
     tools: [filesystem, web_search]
+    mcp: []
   ollama:
     type: ollama
     model: llama2
     system_prompt: "You are a cost-effective AI assistant for general tasks."
     tools: [filesystem]
+    mcp: []
+
+# Optional MCP servers - toggle enabled: true/false
+mcp:
+  - name: git-mcp
+    enabled: true
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-git"]
+    env: {}
+    cwd: null
+
+# Built-in tools
 tools:
   - name: filesystem
     type: filesystem

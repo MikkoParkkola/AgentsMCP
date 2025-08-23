@@ -71,9 +71,52 @@ class ToolConfig(BaseModel):
     enabled: bool = True
 
 
+class ProviderConfig(BaseModel):
+    name: ProviderType
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+
+
+class MCPServerConfig(BaseModel):
+    """Config for a single MCP server.
+
+    Supports simple stdio (command) or URL-based transports (sse/websocket).
+    """
+
+    name: str
+    enabled: bool = True
+    transport: Optional[str] = Field(
+        default="stdio", description="Transport: stdio|sse|websocket"
+    )
+    command: Optional[List[str]] = Field(
+        default=None, description="Executable + args for stdio transport"
+    )
+    url: Optional[str] = Field(default=None, description="URL for sse/websocket")
+    env: Dict[str, str] = Field(default_factory=dict)
+    cwd: Optional[str] = None
+
+
+class ProviderType(str, Enum):
+    OPENAI = "openai"
+    OPENROUTER = "openrouter"
+    OLLAMA = "ollama"
+    CUSTOM = "custom"
+
+
 class AgentConfig(BaseModel):
     type: str
     model: Optional[str] = None
+    # Optional prioritized list of models; first is preferred when no explicit model is set
+    model_priority: List[str] = Field(default_factory=list)
+    provider: ProviderType = Field(default=ProviderType.OPENAI)
+    api_base: Optional[str] = Field(
+        default=None,
+        description="Override API base URL (e.g., OpenRouter: https://openrouter.ai/api/v1)",
+    )
+    api_key_env: Optional[str] = Field(
+        default=None, description="Env var name to read API key from (for CUSTOM)"
+    )
+
     max_tokens: int = Field(
         default=4000, description="Maximum tokens for agent responses"
     )
@@ -83,6 +126,12 @@ class AgentConfig(BaseModel):
         default_factory=list, description="Available tools for this agent"
     )
     system_prompt: Optional[str] = None
+    mcp: List[str] = Field(
+        default_factory=list,
+        description=(
+            "List of MCP server names this agent can access via the generic mcp_call tool."
+        ),
+    )
 
     @field_validator("temperature")
     def validate_temperature(cls, v):
@@ -127,6 +176,9 @@ class Config(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     rag: RAGConfig = Field(default_factory=RAGConfig)
 
+    # Optional per-provider credentials/base URLs
+    providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
+
     agents: Dict[str, AgentConfig] = Field(
         default_factory=lambda: {
             "codex": AgentConfig(
@@ -166,6 +218,9 @@ class Config(BaseModel):
             ToolConfig(name="web_search", type="web_search", config={}),
         ]
     )
+
+    # Optional MCP servers (disabled by default)
+    mcp: List[MCPServerConfig] = Field(default_factory=list)
 
     @classmethod
     def from_file(cls, path: Path) -> "Config":
