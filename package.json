@@ -1,9 +1,14 @@
 {
   "name": "agentsmcp",
   "private": true,
+  "bin": {
+    "prettier": "scripts/prettier.sh",
+    "eslint": "scripts/eslint.sh"
+  },
   "scripts": {
-    "lint": "prettier -w . && eslint --fix .",
-    "format": "prettier -w ."
+    "lint": "npx prettier -w . && npx eslint --fix .",
+    "format": "npx prettier -w .",
+    "test": "python -m pytest -q"
   },
   "devDependencies": {
     "eslint": "^8.57.0",

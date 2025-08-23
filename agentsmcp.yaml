@@ -1,0 +1,60 @@
+server:
+  host: localhost
+  port: 8000
+transport:
+  type: http
+storage:
+  type: memory
+rag:
+  embedding_model: sentence-transformers/all-MiniLM-L6-v2
+  chunk_size: 512
+  chunk_overlap: 50
+  max_results: 10
+  similarity_threshold: 0.7
+agents:
+  codex:
+    type: codex
+    model: gpt-4
+    system_prompt: "You are a code generation and analysis expert."
+    tools: [filesystem, git, bash]
+    mcp: [git-mcp]
+  claude:
+    type: claude
+    model: claude-3-sonnet
+    system_prompt: "You are a helpful AI assistant with deep reasoning capabilities."
+    tools: [filesystem, web_search]
+    mcp: []
+  ollama:
+    type: ollama
+    model: llama2
+    system_prompt: "You are a cost-effective AI assistant for general tasks."
+    tools: [filesystem]
+    mcp: []
+
+# Optional MCP servers - toggle enabled: true/false
+mcp:
+  - name: git-mcp
+    enabled: true
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-git"]
+    env: {}
+    cwd: null
+
+# Built-in tools
+tools:
+  - name: filesystem
+    type: filesystem
+    config:
+      allowed_paths:
+        - /tmp
+        - .
+  - name: git
+    type: git
+    config: {}
+  - name: bash
+    type: bash
+    config:
+      timeout: 60
+  - name: web_search
+    type: web_search
+    config: {}

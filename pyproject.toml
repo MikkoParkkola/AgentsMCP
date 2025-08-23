@@ -2,13 +2,21 @@
 name = "agentsmcp"
 version = "1.0.0"
 description = "CLI-driven MCP agent system with extensible RAG pipeline"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
-    "click>=8.0",
-    "fastapi>=0.104",
-    "uvicorn>=0.24",
+    "click",
+    "fastapi",
+    "uvicorn[standard]",
     "pydantic>=2.0",
-    "pyyaml>=6.0",
+    "pydantic-settings",
+    "pyyaml",
+    "httpx",
+    "structlog",
+    "rich",
+    "openai-agents>=0.2.9",
+    "openai>=1.0.0",
+    "python-json-logger",
+    "prometheus-fastapi-instrumentator",
 ]
 
 [project.scripts]
@@ -16,16 +24,16 @@ agentsmcp = "agentsmcp.cli:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.2",
-    "pytest-cov>=5.0",
-    "pytest-asyncio>=0.24",
-    "ruff>=0.4",
-    "bandit>=1.7",
-    "pip-audit>=2.7",
+    "pytest",
+    "pytest-cov",
+    "pytest-asyncio",
+    "ruff",
+    "bandit",
+    "pip-audit",
 ]
 rag = [
-    "sentence-transformers>=2.2",
-    "numpy>=1.24",
+    "sentence-transformers",
+    "numpy",
 ]
 
 [tool.pytest.ini_options]

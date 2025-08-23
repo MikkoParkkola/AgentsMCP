@@ -1,12 +1,12 @@
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from dataclasses import dataclass
 from typing import Optional
 
 
 class JobState(str, Enum):
     PENDING = "pending"
-    RUNNING = "running" 
+    RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -21,7 +21,7 @@ class JobStatus:
     error: Optional[str] = None
     created_at: datetime = None
     updated_at: datetime = None
-    
+
     def __post_init__(self):
         if self.created_at is None:
             self.created_at = datetime.utcnow()
