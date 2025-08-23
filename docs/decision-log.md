@@ -76,4 +76,3 @@ Template:
 - **Details:** See [docs/generic-best-practices.md](generic-best-practices.md), [docs/ai-agent-best-practices.md](ai-agent-best-practices.md), [docs/product-best-practices.md](product-best-practices.md), [docs/product-status.md](product-status.md), and [docs/product-details.md](product-details.md).
 
 ## [0007] - Fix CI lint and Danger configuration
-

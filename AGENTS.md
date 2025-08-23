@@ -33,3 +33,12 @@ These markdown files must remain up to date and merged across branches so every 
 - [docs/coordination-log.md](docs/coordination-log.md) – log help requests, feedback, instructions, and other coordination notes.
 
 Pull requests should follow [.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md).
+
+
+---
+
+## Model Rate Limits
+
+Please be aware that all cloud-based models (including Codex, Claude, Gemini, etc.) are subject to rate limits. If a model becomes unresponsive, it is likely that it has hit a rate limit. These limits will reset after a certain period of time.
+
+The only model not subject to rate limits is the locally-run Ollama.
