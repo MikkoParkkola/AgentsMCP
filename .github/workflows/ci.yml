@@ -14,6 +14,7 @@ jobs:
         with:
           python-version: '3.x'
       - run: pip install .[dev]
+      - run: pip install -U ruff
       - run: ruff check src tests
 
   test:
@@ -24,6 +25,7 @@ jobs:
         with:
           python-version: '3.x'
       - run: pip install .[dev]
+      - run: pip install -U pytest
       - run: pytest
 
   security:
@@ -34,11 +36,12 @@ jobs:
         with:
           python-version: '3.x'
       - run: pip install .[dev]
+      - run: pip install -U bandit pip-audit
       - run: bandit -r src
       - run: pip-audit
 
   danger:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && hashFiles('dangerfile.*', 'Dangerfile.*') != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
