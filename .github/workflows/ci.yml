@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.x'
       - run: pip install .[dev]
-      - run: ruff src tests
+      - run: ruff check src tests
 
   test:
     runs-on: ubuntu-latest
@@ -45,4 +45,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npx danger@11 ci
+      - run: npx --yes danger@11 ci
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,9 +2,15 @@
 
 Welcome! This repository contains resources for building a CLI-driven MCP agent system.
 
-The full project overview, including goals and architecture, is available in [docs/project-overview.md](docs/project-overview.md). Start there for context before making changes.
-Guidelines for human and AI agent collaboration based on the Business Rules of Acquisition are in [docs/broa-agent-guidelines.md](docs/broa-agent-guidelines.md).
+For product details, including goals, architecture, and backlog, see [docs/product-details.md](docs/product-details.md). Current status is tracked in [docs/product-status.md](docs/product-status.md).
 
+Baseline guidance is split into:
+- [docs/generic-best-practices.md](docs/generic-best-practices.md) – applies to any software project.
+- [docs/ai-agent-best-practices.md](docs/ai-agent-best-practices.md) – additional practices when using AI agents.
+- [docs/product-best-practices.md](docs/product-best-practices.md) – lessons specific to projects like this one.
+
+Guidelines for human and AI agent collaboration based on the Business Rules of Acquisition are in [docs/broa-agent-guidelines.md](docs/broa-agent-guidelines.md).
+An engineering handbook with principles and practices for AI-augmented software teams is available in [docs/engineering-handbook.md](docs/engineering-handbook.md).
 
 ## Conventions
 
@@ -15,6 +21,7 @@ Guidelines for human and AI agent collaboration based on the Business Rules of A
 ## Additional Guidelines
 
 - [broa.md](broa.md) – Business Rules of Acquisition for broader wisdom on collaboration and business.
+- [docs/engineering-handbook.md](docs/engineering-handbook.md) – Playbook for humans and AI agents collaborating on software delivery.
 
 ## Operational Logs
 

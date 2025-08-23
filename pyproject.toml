@@ -2,7 +2,7 @@
 name = "agentsmcp"
 version = "1.0.0"
 description = "CLI-driven MCP agent system with extensible RAG pipeline"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "click>=8.0",
     "fastapi>=0.104",
@@ -33,6 +33,8 @@ addopts = "--cov=agentsmcp --cov-fail-under=80"
 
 [tool.ruff]
 line-length = 88
+
+[tool.ruff.lint]
 select = ["E", "F", "I"]
 
 [tool.bandit]
