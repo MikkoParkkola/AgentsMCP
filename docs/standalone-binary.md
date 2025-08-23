@@ -46,3 +46,9 @@ This produces a single optimized binary. Nuitka can yield smaller/faster binarie
   - Exclude: `tests`, CI, heavy optional modules
 - Provide the same console script entry point `agentsmcp`
 - Publish to PyPI for easy install: `pip install agentsmcp-client`
+
+## Prebuilt macOS (Apple Silicon, arm64)
+
+- Our GitHub Actions release pipeline builds a native macOS arm64 binary on `macos-14` runners and attaches it to each tagged release (see Releases).
+- File name: `agentsmcp` (no extension). Download, `chmod +x agentsmcp`, and run.
+- For local builds on M-series Macs, simply run the PyInstaller command on your machine to get an arm64-native binary.
