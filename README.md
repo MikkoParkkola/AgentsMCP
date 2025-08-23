@@ -9,4 +9,6 @@ Documentation is organized into:
 - [docs/product-status.md](docs/product-status.md)
 - [docs/product-details.md](docs/product-details.md)
 
+A sample MCP configuration (`agentsmcp.yaml`) defines default agents and tool access for clients.
+
 Use these as a blueprint when creating new projects or customizing this one.

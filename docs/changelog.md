@@ -3,6 +3,7 @@
 This file records notable changes to the project. Keep entries in reverse chronological order.
 
 ## [Unreleased]
+- Document roadmap and backlog and add default MCP client configuration.
 - Run Danger CI non-interactively to avoid npx install prompts.
 - Correct CI lint command and supply token for Danger to avoid spurious failures.
 - Establish automated CI pipeline with linting, testing, security scans, and automerge.

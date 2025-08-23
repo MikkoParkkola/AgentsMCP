@@ -60,3 +60,10 @@ Template:
 - **Type:** instruction
 - **Message:** Separate documentation into generic, AI-specific, product-specific, status, and product details sections.
 - **Follow-up:** Docs reorganized and references updated.
+
+## 2025-08-23 09:50 UTC
+- **From:** user
+- **To:** contributors
+- **Type:** instruction
+- **Message:** Document roadmap and backlog and provide MCP client configuration for tool access.
+- **Follow-up:** Product docs updated and default configuration file added.

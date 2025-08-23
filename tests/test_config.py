@@ -117,3 +117,11 @@ def test_get_tool_config():
     
     missing_config = config.get_tool_config("nonexistent")
     assert missing_config is None
+
+def test_repository_config_file_loads():
+    """Repository configuration file should load without errors."""
+    path = Path("agentsmcp.yaml")
+    config = Config.from_file(path)
+    assert "codex" in config.agents
+    assert any(tool.name == "filesystem" for tool in config.tools)
+
