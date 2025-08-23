@@ -37,3 +37,11 @@ select = ["E", "F", "I"]
 
 [tool.bandit]
 skips = ["B101"]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agentsmcp*"]
