@@ -144,6 +144,9 @@ class BaseAgent(ABC):
 
     async def execute_task(self, task: str) -> str:
         """Execute a task using the OpenAI Agents SDK."""
+        # Test/Mock mode: avoid network calls and return deterministic output for local/CI tests
+        if os.getenv("AGENTSMCP_TEST_MODE") == "1":
+            return await self._simulate(task)
         try:
             self.logger.info(f"Executing task with {self.agent_config.type} agent")
 
@@ -191,3 +194,8 @@ class BaseAgent(ABC):
         if getattr(self.agent_config, "model_priority", None):
             return self.agent_config.model_priority[0]
         return None
+
+    async def _simulate(self, task: str) -> str:
+        """Default simulation output in test mode. Subclasses should override for specificity."""
+        model = self.get_model() or "unknown-model"
+        return f"{self.agent_config.type.title()} Agent Simulation: {task} (model {model})"

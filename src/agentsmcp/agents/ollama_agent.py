@@ -128,3 +128,7 @@ RESOURCE MANAGEMENT:
         """Get the model optimized for local execution."""
         # Default to gpt-oss:20b as mentioned in CLAUDE.md guidance
         return self.agent_config.model or "gpt-oss:20b"
+
+    async def _simulate(self, task: str) -> str:
+        model = self.get_model()
+        return f"Ollama Agent: {task} (model {model})"
