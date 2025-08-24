@@ -30,7 +30,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: build
+    needs: [build, binary-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,10 +39,17 @@ jobs:
         with:
           name: dist
           path: dist
+      - name: Download macOS binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-macos-arm64
+          path: artifacts
       - name: Create release and upload assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            dist/*
+            artifacts/*
           generate_release_notes: true
 
   publish-pypi:
@@ -67,3 +74,22 @@ jobs:
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
         run: twine upload dist/*
 
+  binary-macos:
+    name: Build macOS (arm64) binary
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project (runtime only) and PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pyinstaller
+      - name: Build single-file binary
+        run: bash scripts/build_binary.sh
+      - name: Upload macOS binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-macos-arm64
+          path: dist/agentsmcp

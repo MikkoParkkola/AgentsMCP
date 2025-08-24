@@ -30,3 +30,9 @@
 - [ ] Conventional Commit used
 - [ ] Changelog auto-updates correctly
 - [ ] Preview environment link(s) included
+ - [ ] CI acceptance criteria met (see docs/ci/*):
+   - Lint passes (ruff)
+   - Tests pass (matrix) and coverage artifact uploaded
+   - Security scans pass (bandit, pip-audit, semgrep, gitleaks, sbom)
+ - [ ] Interfaces adhered to (see docs/interfaces/*); deviations documented
+ - [ ] Backlog item(s) reference (see docs/backlog.md) and scope ≤500 LOC per task
