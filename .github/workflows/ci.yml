@@ -26,6 +26,8 @@ jobs:
   test:
     name: Tests (pytest + coverage)
     runs-on: ubuntu-latest
+    env:
+      AGENTSMCP_TEST_MODE: '1'
     strategy:
       fail-fast: false
       matrix:
