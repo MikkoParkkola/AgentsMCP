@@ -1,5 +1,10 @@
 # AgentsMCP
 
+![CI](https://github.com/MikkoParkkola/AgentsMCP/actions/workflows/ci.yml/badge.svg)
+![Tests](https://github.com/MikkoParkkola/AgentsMCP/actions/workflows/python-ci.yml/badge.svg)
+![CodeQL](https://github.com/MikkoParkkola/AgentsMCP/actions/workflows/codeql-python.yml/badge.svg)
+![Semgrep](https://github.com/MikkoParkkola/AgentsMCP/actions/workflows/semgrep.yml/badge.svg)
+
 Production-ready MCP server for managing AI agents (Claude, Codex, Ollama) with extensible RAG pipeline and comprehensive CLI/API interfaces.
 
 ## Features
@@ -220,6 +225,11 @@ See [docs/deployment.md](docs/deployment.md) for comprehensive deployment guidan
 ### Best Practices
 - [docs/generic-best-practices.md](docs/generic-best-practices.md)
 - [docs/ai-agent-best-practices.md](docs/ai-agent-best-practices.md)
+
+## Binaries
+
+- macOS (Apple Silicon, arm64): prebuilt binary attached to Releases.
+- Build locally: see [docs/standalone-binary.md](docs/standalone-binary.md).
 - [docs/product-best-practices.md](docs/product-best-practices.md)
 
 ## License
