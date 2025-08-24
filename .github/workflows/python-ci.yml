@@ -9,6 +9,8 @@ on:
 jobs:
   lint-test:
     runs-on: ubuntu-latest
+    env:
+      AGENTSMCP_TEST_MODE: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,7 +30,7 @@ jobs:
           python -m pip install ruff
           ruff check src
 
-      - name: Run tests
+      - name: Run tests (mock mode)
         run: |
           pytest -q
 
