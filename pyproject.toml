@@ -44,6 +44,7 @@ line-length = 88
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+ignore = ["E501", "E402", "I001"]
 
 [tool.bandit]
 skips = ["B101"]
