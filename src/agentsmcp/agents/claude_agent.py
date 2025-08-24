@@ -124,3 +124,7 @@ Based on the {criteria} criteria, a detailed comparison would consider multiple 
         """Get the model optimized for reasoning tasks."""
         # Default to Claude-3 models if available, or fall back to GPT-4 for reasoning
         return self.agent_config.model or "gpt-4-turbo"
+
+    async def _simulate(self, task: str) -> str:
+        model = self.get_model()
+        return f"Claude Agent Analysis: {task} (model {model})"

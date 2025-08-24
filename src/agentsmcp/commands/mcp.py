@@ -21,7 +21,9 @@ def _load_config(config_path: Optional[str]) -> Config:
 
 
 def _save_config(cfg: Config, config_path: Optional[str]) -> Path:
-    path = Path(config_path) if config_path else Path("agentsmcp.yaml")
+    # Default to per-user config under ~/.agentsmcp
+    default_path = Config.default_config_path()
+    path = Path(config_path) if config_path else default_path
     cfg.save_to_file(path)
     return path
 

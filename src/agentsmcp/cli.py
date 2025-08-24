@@ -19,7 +19,7 @@ from .settings import AppSettings
 from .commands.mcp import mcp as mcp_group
 from .commands.chat import chat as chat_cmd
 
-PID_FILE = Path(".agentsmcp.pid")
+PID_FILE = Path(os.path.expanduser("~/.agentsmcp/.agentsmcp.pid"))
 
 
 def _load_config(config_path: Optional[str]) -> Config:
@@ -27,10 +27,15 @@ def _load_config(config_path: Optional[str]) -> Config:
     base: Config
     if config_path and Path(config_path).exists():
         base = Config.from_file(Path(config_path))
-    elif Path("agentsmcp.yaml").exists():
-        base = Config.from_file(Path("agentsmcp.yaml"))
     else:
-        base = Config()
+        # Prefer per-user config under ~/.agentsmcp
+        user_cfg = Config.default_config_path()
+        if user_cfg.exists():
+            base = Config.from_file(user_cfg)
+        elif Path("agentsmcp.yaml").exists():
+            base = Config.from_file(Path("agentsmcp.yaml"))
+        else:
+            base = Config()
     return env.to_runtime_config(base)
 
 
