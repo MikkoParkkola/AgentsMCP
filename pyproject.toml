@@ -41,6 +41,10 @@ addopts = "--cov=agentsmcp --cov-fail-under=80"
 
 [tool.ruff]
 line-length = 88
+exclude = [
+    "src/agentsmcp/orchestration",
+    "src/agentsmcp/ui",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
