@@ -72,7 +72,7 @@ class ToolConfig(BaseModel):
 
 
 class ProviderConfig(BaseModel):
-    name: ProviderType
+    name: "ProviderType"
     api_key: Optional[str] = None
     api_base: Optional[str] = None
 
