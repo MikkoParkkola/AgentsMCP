@@ -77,3 +77,7 @@ class CodexAgent(BaseAgent):
         """Get the model optimized for coding tasks."""
         # Use the configured model or default to a code-optimized model
         return self.agent_config.model or "gpt-4-turbo"
+
+    async def _simulate(self, task: str) -> str:
+        model = self.get_model()
+        return f"Codex Simulation: {task} (model {model})"

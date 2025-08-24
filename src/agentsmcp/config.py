@@ -71,8 +71,15 @@ class ToolConfig(BaseModel):
     enabled: bool = True
 
 
+class ProviderType(str, Enum):
+    OPENAI = "openai"
+    OPENROUTER = "openrouter"
+    OLLAMA = "ollama"
+    CUSTOM = "custom"
+
+
 class ProviderConfig(BaseModel):
-    name: "ProviderType"
+    name: ProviderType
     api_key: Optional[str] = None
     api_base: Optional[str] = None
 
@@ -96,11 +103,7 @@ class MCPServerConfig(BaseModel):
     cwd: Optional[str] = None
 
 
-class ProviderType(str, Enum):
-    OPENAI = "openai"
-    OPENROUTER = "openrouter"
-    OLLAMA = "ollama"
-    CUSTOM = "custom"
+    # moved up
 
 
 class AgentConfig(BaseModel):
@@ -275,18 +278,24 @@ class Config(BaseModel):
 
         If `path` not provided, uses AGENTSMCP_CONFIG if set.
         """
-        cfg_path = path or (
-            Path(os.getenv("AGENTSMCP_CONFIG"))
-            if os.getenv("AGENTSMCP_CONFIG")
-            else None
-        )
-        if cfg_path:
-            return cls.from_file(cfg_path)
+        # Determine default config path under user's home directory
+        home_cfg = Path(os.path.expanduser("~/.agentsmcp/agentsmcp.yaml"))
+        explicit = path or (Path(os.getenv("AGENTSMCP_CONFIG")) if os.getenv("AGENTSMCP_CONFIG") else None)
+        cfg_path = explicit or (home_cfg if home_cfg.exists() else None)
+        if cfg_path and Path(cfg_path).exists():
+            return cls.from_file(Path(cfg_path))
+        # Fallback: legacy cwd file if present
+        legacy = Path("agentsmcp.yaml")
+        if legacy.exists():
+            return cls.from_file(legacy)
         # Merge env overrides onto defaults
         return cls.from_env()
 
     def save_to_file(self, path: Path):
         """Save configuration to a YAML file."""
+        # Default to ~/.agentsmcp/agentsmcp.yaml if a bare filename was provided
+        if not path.is_absolute():
+            path = Path(os.path.expanduser("~/.agentsmcp")) / path
         path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(path, "w") as f:
@@ -295,6 +304,8 @@ class Config(BaseModel):
             )
 
     def get_agent_config(self, agent_type: str) -> Optional[AgentConfig]:
+from __future__ import annotations
+
         """Get configuration for a specific agent type."""
         return self.agents.get(agent_type)
 
@@ -304,3 +315,8 @@ class Config(BaseModel):
             if tool.name == tool_name:
                 return tool
         return None
+
+    @staticmethod
+    def default_config_path() -> Path:
+        """Return the default per-user config path under ~/.agentsmcp."""
+        return Path(os.path.expanduser("~/.agentsmcp/agentsmcp.yaml"))

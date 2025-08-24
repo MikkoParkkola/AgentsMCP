@@ -6,6 +6,8 @@ Legend: [Size] S ≤200 LOC, M ≤500 LOC, D = docs-only.
 
 ## Providers & Models
 
+Delight & Automation: Auto-detect available providers from env; on failure, show a one-line fix. Cache model lists with gentle refresh; highlight recommended defaults. Zero-config works for Ollama localhost.
+
 B1. Providers module skeleton [S]
 - Scope: Add `src/agentsmcp/providers.py` with types (`ProviderType`, `ProviderConfig`, `Model`) and error classes; no HTTP calls yet.
 - Files: new providers.py only.
@@ -38,6 +40,8 @@ B6. Agent hook `discover_models()` [S]
 
 ## Chat CLI: Models & Provider UX
 
+Delight & Automation: `/models` is fast, filter-as-you-type, and marks “best fit” models for your provider. Smart defaults; remembers last choice. Minimal prompts; clear, consistent feedback.
+
 C1. Command plumbing: `/models` [S]
 - Scope: Register command, parse arg `[provider?]`, call providers facade.
 - Files: `src/agentsmcp/commands/chat.py` only.
@@ -60,6 +64,8 @@ C4. Apply selection to runtime [S]
 
 ## API Keys: Validation & Persistence
 
+Delight & Automation: Wizard-grade prompts; masked input; tests keys immediately with friendly remediation. Idempotent writes; no surprises.
+
 K1. Validation helpers [S]
 - Scope: Implement `validate_provider_config` probing endpoints; no prompts.
 - Files: providers.py or `src/agentsmcp/providers_validate.py` (choose one file only).
@@ -76,6 +82,8 @@ K3. Wire validation into `/provider` and `/models` [S]
 - Acceptance: UX degrades gracefully without blocking.
 
 ## MCP Gateway: Version Negotiation
+
+Delight & Automation: Logs a single concise negotiation line. Automatically down-converts schemas; warns only when truly incompatible.
 
 M1. `negotiate_version()` [S]
 - Scope: Implement version selection with safe defaults.
@@ -94,6 +102,8 @@ M3. Wire negotiation + downconversion [S]
 
 ## Context Window Management
 
+Delight & Automation: Intelligent trimming with context awareness (keep recent conversation and system), optional pinning of key messages. Predictable and explained in UI.
+
 X1. Token estimation + Trim function [S]
 - Scope: Implement `estimate_tokens`, `trim_history` as pure helpers.
 - Files: new `src/agentsmcp/context.py` only.
@@ -105,6 +115,8 @@ X2. Integrate `/context` command [S]
 - Acceptance: long threads get trimmed; setting applies immediately.
 
 ## Streaming
+
+Delight & Automation: Smooth streaming by default when provider supports it; automatic fallback to non-stream; progress indicator in chat UI.
 
 S1. Unified `generate_stream()` interface [S]
 - Scope: Introduce provider-agnostic streaming function and `Chunk` type.
@@ -123,6 +135,8 @@ S3. Chat UI rendering [S]
 
 ## Packaging & E2E
 
+Delight & Automation: One-command build scripts; prebuilt binaries in releases; smoke tests verify the most common paths and give clear guidance on failures.
+
 P1. PyInstaller script [S]
 - Scope: Add `scripts/build_binary.sh`; minimal options; prints output path.
 - Files: new script only.
@@ -134,6 +148,8 @@ P2. E2E smoke workflow [S]
 - Acceptance: lists tools; returns 0; on failure uploads logs.
 
 ## Delegation (Docs-first)
+
+Delight & Automation: Clean command pattern to spawn short-lived workers. Guardrails built-in; confirmation flows are one-liners; audit logs human-readable.
 
 D1. Delegation spec docs [D]
 - Scope: Fill `docs/delegation.md` with sequence diagrams and states.
@@ -147,3 +163,63 @@ Guidelines:
 - Prefer pure functions and local wiring per task; integration tasks are separate items.
 - If implementation exceeds 500 LOC, split by moving adapters/UI/integration to a new backlog item.
 
+## Agent Discovery & Coordination (New)
+
+AD1. Discovery protocol spec [D]
+- Scope: Author `docs/interfaces/agent-discovery.md` describing discovery/announce protocol, identifiers (agent id, name, capabilities, transport), and security model (allowlist, tokens).
+- Files: docs only.
+- Acceptance: clear, implementable spec with compatibility notes (Zeroconf/mDNS, broadcast, or registry fallback).
+
+AD2. Announcer/registry (daemon) [M]
+- Scope: Implement a lightweight announcer that advertises this agent’s presence and capabilities.
+- Option A: Zeroconf/mDNS service record with TXT for capabilities.
+- Option B: Fallback to a local registry file or Unix domain socket broker.
+- Files: new `src/agentsmcp/discovery/announcer.py` (and optional `registry.py`).
+- Acceptance: running agent appears in `agentsmcp discovery list` on the same host; respects enable/disable flag.
+
+AD3. Discovery client [S]
+- Scope: Implement `agentsmcp discovery list` to enumerate other agents with id/name/capabilities and endpoint.
+- Files: `src/agentsmcp/commands/discovery.py` + `src/agentsmcp/discovery/client.py`.
+- Acceptance: lists at least the local agent when announcer is enabled; handles unreachable entries gracefully.
+
+AD4. Coordination handshake [M]
+- Scope: Define and implement a minimal handshake to exchange capabilities and a control channel URL (MCP or REST).
+- Files: `discovery/client.py`, `discovery/announcer.py`.
+- Acceptance: two local agents can discover each other and exchange a test message (e.g., ping/capabilities).
+
+AD5. Security & config [S]
+- Scope: Config flags (enable/disable), allowlists, optional shared secret/token; docs in `docs/usage.md`.
+- Files: `src/agentsmcp/config.py` (flags), `docs/usage.md`.
+- Acceptance: discovery disabled by default; enabling requires explicit opt-in; allowlist enforced when set.
+
+## Local Web Interface + SSE (New)
+
+WUI1. SSE event bus [S]
+- Scope: Add SSE endpoint (e.g., `/events`) that streams job lifecycle events, logs, and status updates.
+- Files: `src/agentsmcp/server.py` (FastAPI route), small event publisher util.
+- Acceptance: `curl` can subscribe and receive events when jobs start/finish; documented retry policy.
+
+WUI2. REST control & status [S]
+- Scope: Endpoints for current status, list jobs, spawn, cancel; basic JSON payloads.
+- Files: `src/agentsmcp/server.py`.
+- Acceptance: Can spawn and cancel via REST; status returns JSON reflecting AgentManager state.
+
+WUI3. Web UI scaffold [M]
+- Scope: Static assets (no build step preferred): HTML + minimal JS to render dashboard and subscribe to SSE.
+- Files: `src/agentsmcp/web/static/` and template in `server.py`.
+- Acceptance: Opening `/ui` shows status tiles and updates live via SSE.
+
+WUI4. Metrics & charts [M]
+- Scope: Add metrics endpoint or reuse existing; UI charts for jobs per hour, success/failure, latency.
+- Files: `server.py` (metrics JSON), `web/static` (charts with small lib or vanilla JS).
+- Acceptance: Charts render with real data; no blocking calls on server path.
+
+WUI5. Controls in UI [S]
+- Scope: Buttons to spawn predefined agent tasks and cancel running jobs; confirmation prompts.
+- Files: `web/static` JS + REST calls.
+- Acceptance: Actions reflect immediately in UI; errors surfaced as notifications.
+
+WUI6. Docs & config [D]
+- Scope: Document how to enable/disable UI, set bind host/port, and use SSE; troubleshooting.
+- Files: `docs/usage.md`, `docs/deployment.md`.
+- Acceptance: A fresh user can enable UI and see live dashboard in under 2 minutes.
