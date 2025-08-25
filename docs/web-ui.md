@@ -54,6 +54,19 @@ uvicorn agentsmcp.ui:app --host 0.0.0.0 --port 8000
 # Then visit: http://localhost:8000
 ```
 
+## Built-in Minimal Dashboard (No Build Step)
+
+AgentsMCP also ships a lightweight, built-in dashboard exposed by the server:
+
+- Start the server: `agentsmcp server start`
+- Open: `http://localhost:8000/ui`
+- Live events (SSE): `http://localhost:8000/events`
+- JSON stats: `http://localhost:8000/stats`
+- JSON metrics: `http://localhost:8000/metrics`
+- Job controls: spawn via UI form, cancel via job id
+
+This dashboard requires no additional build tooling and is intended as a simple operational surface while the richer UI evolves.
+
 ## Integration with AgentsMCP Binary
 
 The web UI provides a real-time window into your AgentsMCP orchestration system:

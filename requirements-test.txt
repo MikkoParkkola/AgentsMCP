@@ -1,0 +1,8 @@
+pytest>=7.0.0
+pytest-xdist>=3.0.0
+pytest-html>=3.0.0
+pytest-timeout>=2.0.0
+pytest-rerunfailures>=11.0
+pexpect>=4.8.0
+requests>=2.25.0
+pyyaml>=6.0

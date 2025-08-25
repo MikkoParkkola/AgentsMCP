@@ -1,0 +1,93 @@
+{
+  "benchmark_name": "Enhanced AgentsMCP Architecture",
+  "start_time": "2025-08-25T01:51:36.974173",
+  "end_time": "2025-08-25T01:51:36.978868",
+  "total_duration_seconds": 0.004695,
+  "summary_stats": {
+    "total_components_tested": 4,
+    "average_execution_time": 0.0009791254997253418,
+    "median_execution_time": 0.0008081197738647461,
+    "max_execution_time": 0.0021581649780273438,
+    "min_execution_time": 0.00014209747314453125,
+    "average_throughput": 579.1957578435705,
+    "total_throughput": 2316.783031374282,
+    "average_error_rate": 0.75,
+    "max_error_rate": 1.0,
+    "average_quality_score": 0.905,
+    "min_quality_score": 0.87,
+    "total_memory_usage_mb": 190.0,
+    "average_memory_usage_mb": 47.5
+  },
+  "recommendations": [
+    "MultiModalEngine: High error rate detected (100.00%) - investigate error handling and robustness",
+    "AdvancedOptimizationEngine: High error rate detected (100.00%) - investigate error handling and robustness",
+    "GovernanceEngine: High error rate detected (100.00%) - investigate error handling and robustness",
+    "Excellent overall quality scores - system is performing well across components"
+  ],
+  "metrics": [
+    {
+      "component_name": "MultiModalEngine",
+      "operation_name": "process_modal_content",
+      "execution_time": 0.00014209747314453125,
+      "memory_usage_mb": 50.0,
+      "cpu_usage_percent": 30.0,
+      "throughput_ops_per_sec": 0.0,
+      "error_rate": 1.0,
+      "quality_score": 0.92,
+      "cost_per_operation": 0.01,
+      "concurrent_operations": 10,
+      "metadata": {
+        "total_operations": 0,
+        "total_errors": 150
+      }
+    },
+    {
+      "component_name": "AdvancedOptimizationEngine",
+      "operation_name": "optimize_task_assignment",
+      "execution_time": 0.0002460479736328125,
+      "memory_usage_mb": 75.0,
+      "cpu_usage_percent": 45.0,
+      "throughput_ops_per_sec": 0.0,
+      "error_rate": 1.0,
+      "quality_score": 0.89,
+      "cost_per_operation": 0.005,
+      "concurrent_operations": 1,
+      "metadata": {
+        "total_operations": 0,
+        "total_errors": 30
+      }
+    },
+    {
+      "component_name": "GovernanceEngine",
+      "operation_name": "assess_task_risk",
+      "execution_time": 0.0013701915740966797,
+      "memory_usage_mb": 30.0,
+      "cpu_usage_percent": 20.0,
+      "throughput_ops_per_sec": 0.0,
+      "error_rate": 1.0,
+      "quality_score": 0.94,
+      "cost_per_operation": 0.001,
+      "concurrent_operations": 1,
+      "metadata": {
+        "total_operations": 0,
+        "total_errors": 25
+      }
+    },
+    {
+      "component_name": "AgentMeshCoordinator",
+      "operation_name": "register_agent",
+      "execution_time": 0.0021581649780273438,
+      "memory_usage_mb": 35.0,
+      "cpu_usage_percent": 15.0,
+      "throughput_ops_per_sec": 2316.783031374282,
+      "error_rate": 0.0,
+      "quality_score": 0.87,
+      "cost_per_operation": 0.0,
+      "concurrent_operations": 1,
+      "metadata": {
+        "total_operations": 5,
+        "total_errors": 0
+      }
+    }
+  ]
+}

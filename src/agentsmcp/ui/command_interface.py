@@ -32,10 +32,8 @@ from ..orchestration.orchestration_manager import OrchestrationManager
 from ..conversation import ConversationManager
 # Import settings UI after initial setup to avoid circular imports
 try:
-    from .settings_ui import SettingsCommand
     from .modern_settings_ui import run_modern_settings_dialog
 except ImportError:
-    SettingsCommand = None
     run_modern_settings_dialog = None
 
 logger = logging.getLogger(__name__)
@@ -246,7 +244,7 @@ class CommandInterface:
             self.register_command(cmd)
         
         # Register settings command if available
-        if SettingsCommand:
+        if run_modern_settings_dialog:
             settings_cmd = CommandDefinition(
                 name="settings",
                 description="Configure LLM provider, model and generation settings",

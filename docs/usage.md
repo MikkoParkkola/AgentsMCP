@@ -42,3 +42,34 @@ Agents include `mcp_call` when MCP servers are configured. Parameters:
 - `params`: JSON object of tool params
 
 If no MCP client is installed, `mcp_call` returns a helpful message and continues.
+## Discovery
+
+Enable discovery in your config (agentsmcp.yaml):
+
+```
+discovery_enabled: true
+discovery_allowlist: []   # optional: restrict to specific agent_ids or names
+discovery_token: null     # optional shared secret (not enforced yet)
+```
+
+List discovered agents:
+
+```
+agentsmcp discovery list
+
+# Attempt handshake/ping with discovered agents (HTTP transports)
+agentsmcp discovery handshake
+```
+
+## Web UI + SSE
+
+- Start the server: `agentsmcp server start`
+- Open `http://localhost:8000/ui` for a minimal dashboard
+- Subscribe to live events via `/events`
+- Check `/stats` (JSON) and `/metrics` (JSON) for UI data
+
+Disable the built-in UI by adding to your config:
+
+```
+ui_enabled: false
+```

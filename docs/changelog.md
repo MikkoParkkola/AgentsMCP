@@ -3,6 +3,25 @@
 This file records notable changes to the project. Keep entries in reverse chronological order.
 
 ## [Unreleased]
+- Provider config validation (K1): add `validate_provider_config` returning non-raising results.
+- API key persistence (K2): new `/apikey [provider]` command with masked input; keys saved to YAML providers map.
+- Validation wiring (K3): `/provider` and `/models` show friendly, non-blocking validation banners.
+- Chat CLI model selection (C2): `/models` supports interactive filter-and-select to set the session model.
+- Provider selection UX (C3): `/provider` without args shows an interactive list to pick a provider.
+- Context management (X1–X2): add simple token estimation + trimming helper and `/context <percent|off>` in chat to include recent conversation.
+- SSE events (WUI1): `/events` streams job lifecycle events.
+- Web UI scaffold (WUI3): `/ui` serves a minimal dashboard with live events and spawn form.
+- E2E smoke (P2): GitHub Action `.github/workflows/e2e.yml` with `scripts/e2e_smoke.py`.
+- Delegation spec (D1): `docs/delegation.md` drafted.
+- Agent discovery spec (AD1): `docs/interfaces/agent-discovery.md` authored.
+- Discovery announcer + client (AD2–AD3): registry-based announcer, `agentsmcp discovery list` command.
+- Handshake capabilities endpoint (AD4): `/capabilities` returns basic info.
+- Discovery config flags (AD5): `discovery_enabled`, `discovery_allowlist`, `discovery_token` in config.
+- Coordination endpoints (AD4): `/coord/ping` and `/coord/handshake` with allowlist/token checks; `agentsmcp discovery handshake` command.
+- Web UI additions (WUI4–WUI5): `/metrics` endpoint and simple canvas chart; jobs list + cancel control.
+- Web UI enable/disable (WUI6): new `ui_enabled` config flag to mount `/ui`.
+- Streaming adapters (S2): added optional OpenAI native streaming function (not wired by default).
+- Add provider model discovery facade and adapters (OpenAI, OpenRouter, Ollama); expose discover_models() on BaseAgent; add /models command in chat CLI to list models.
 - Document roadmap and backlog and add default MCP client configuration.
 - Run Danger CI non-interactively to avoid npx install prompts.
 - Correct CI lint command and supply token for Danger to avoid spurious failures.
