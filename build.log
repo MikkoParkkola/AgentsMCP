@@ -1,0 +1,36 @@
+[agentsmcp] Building standalone binary via PyInstaller (P1)
+99 INFO: PyInstaller: 6.15.0, contrib hooks: 2025.8
+100 INFO: Python: 3.10.9
+107 INFO: Platform: macOS-15.6-arm64-arm-64bit
+107 INFO: Python environment: /Users/mikko/.pyenv/versions/3.10.9
+108 INFO: wrote /Users/mikko/github/AgentsMCP/agentsmcp.spec
+401 INFO: JWT secret auto-generated for local development session.
+403 ERROR: {"component": "agentsmcp.discovery.agent_service.AgentRegistry", "exc_info": "TypeError(\"AgentRegistry.__init__() missing 1 required positional argument: 'ttl_seconds'\")", "event": "Failed to instantiate AgentRegistry", "timestamp": "2025-08-25T15:52:48.439503Z"}
+403 WARNING: {"event": "Using mock component for AgentRegistry", "timestamp": "2025-08-25T15:52:48.439565Z"}
+422 ERROR: {"component": "agentsmcp.discovery.matching_engine.DiscoveryEngine", "exc_info": "TypeError(\"DiscoveryEngine.__init__() missing 1 required positional argument: 'registry'\")", "event": "Failed to instantiate DiscoveryEngine", "timestamp": "2025-08-25T15:52:48.457810Z"}
+422 WARNING: {"event": "Using mock component for DiscoveryEngine", "timestamp": "2025-08-25T15:52:48.457900Z"}
+423 ERROR: {"component": "agentsmcp.discovery.coordination.CoordinationNode", "exc_info": "TypeError(\"CoordinationNode.__init__() missing 1 required positional argument: 'service_name'\")", "event": "Failed to instantiate CoordinationNode", "timestamp": "2025-08-25T15:52:48.459349Z"}
+423 WARNING: {"event": "Using mock component for CoordinationNode", "timestamp": "2025-08-25T15:52:48.459392Z"}
+424 ERROR: {"component": "agentsmcp.discovery.raft_cluster.RaftCluster", "exc_info": "TypeError(\"RaftCluster.__init__() missing 3 required positional arguments: 'node_id', 'bind_address', and 'peers'\")", "event": "Failed to instantiate RaftCluster", "timestamp": "2025-08-25T15:52:48.460040Z"}
+424 WARNING: {"event": "Using mock component for RaftCluster", "timestamp": "2025-08-25T15:52:48.460078Z"}
+428 INFO: {"provider": "InMemoryProvider", "event": "memory_subsystem_initialized", "timestamp": "2025-08-25T15:52:48.464491Z"}
+429 INFO: {"directory": "./static", "event": "static_files_mounted", "timestamp": "2025-08-25T15:52:48.465181Z"}
+1394 INFO: Module search paths (PYTHONPATH):
+['/Users/mikko/.pyenv/versions/3.10.9/lib/python310.zip',
+ '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10',
+ '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/lib-dynload',
+ '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages',
+ '/Users/mikko/github/AgentsMCP/src',
+ '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/setuptools/_vendor',
+ '/Users/mikko/github/AgentsMCP/src',
+ '/Users/mikko/github/AgentsMCP/src',
+ '/Users/mikko/github/AgentsMCP/src']
+1700 INFO: Appending 'datas' from .spec
+1702 INFO: checking Analysis
+1919 INFO: checking PYZ
+2037 INFO: EXE target arch: arm64
+2037 INFO: Code signing identity: None
+2130 INFO: checking PKG
+2130 INFO: Building PKG because PKG-00.toc is non existent
+2130 INFO: Building PKG (CArchive) agentsmcp.pkg
+Terminated: 15

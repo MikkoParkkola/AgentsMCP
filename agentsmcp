@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""
+AgentsMCP executable wrapper
+This wrapper runs the AgentsMCP CLI with all latest fixes included.
+"""
+import sys
+import os
+from pathlib import Path
+
+# Add src directory to Python path to ensure we use the latest code
+repo_root = Path(__file__).parent
+src_dir = repo_root / "src"
+sys.path.insert(0, str(src_dir))
+
+# Import and run the CLI
+from agentsmcp.cli import main
+
+if __name__ == "__main__":
+    main()
