@@ -29,6 +29,14 @@ import logging
 from .theme_manager import ThemeManager
 from .ui_components import UIComponents
 from ..orchestration.orchestration_manager import OrchestrationManager
+from ..conversation import ConversationManager
+# Import settings UI after initial setup to avoid circular imports
+try:
+    from .settings_ui import SettingsCommand
+    from .modern_settings_ui import run_modern_settings_dialog
+except ImportError:
+    SettingsCommand = None
+    run_modern_settings_dialog = None
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +101,10 @@ class CommandInterface:
         # Completion and suggestions
         self.completer = None
         self.last_suggestions: List[str] = []
+        
+        # Conversational interface
+        self.conversation_manager = ConversationManager(self, self.theme_manager)
+        self.conversational_mode = True  # Enable conversational mode by default
         
         # Initialize commands and readline
         self._register_built_in_commands()
@@ -232,6 +244,29 @@ class CommandInterface:
         # Register commands
         for cmd in commands:
             self.register_command(cmd)
+        
+        # Register settings command if available
+        if SettingsCommand:
+            settings_cmd = CommandDefinition(
+                name="settings",
+                description="Configure LLM provider, model and generation settings",
+                handler=self._cmd_settings,
+                category="interface",
+                examples=["settings"],
+                parameters=[]
+            )
+            self.register_command(settings_cmd)
+            
+            # Register generate-config command
+            generate_config_cmd = CommandDefinition(
+                name="generate-config",
+                description="Generate MCP client configuration with auto-discovered paths",
+                handler=self._cmd_generate_config,
+                category="interface", 
+                examples=["generate-config"],
+                parameters=[]
+            )
+            self.register_command(generate_config_cmd)
     
     def register_command(self, command: CommandDefinition):
         """Register a new command"""
@@ -334,16 +369,16 @@ class CommandInterface:
         try:
             while self.is_running:
                 try:
-                    # Get command input
-                    prompt = self._generate_prompt()
+                    # Get command input with conversational prompt
+                    prompt = self._generate_conversational_prompt()
                     command_line = input(prompt).strip()
                     
                     if not command_line:
                         continue
                     
-                    # Process command
+                    # Process command (conversational or direct)
                     start_time = datetime.now()
-                    success, result = await self._process_command(command_line)
+                    success, result = await self._process_input(command_line)
                     execution_time = (datetime.now() - start_time).total_seconds()
                     
                     # Add to history
@@ -376,26 +411,58 @@ class CommandInterface:
         
         logger.info("👋 Command interface session ended")
     
+    def _create_web_interface_info(self) -> str:
+        """Create web interface info card"""
+        web_url = "http://localhost:8000"
+        api_url = f"{web_url}/docs"
+        health_url = f"{web_url}/health"
+        jobs_url = f"{web_url}/jobs"
+        
+        web_content = f"""🌐 Web API: {web_url}
+📋 API Docs: {api_url}
+💚 Health Check: {health_url}
+🔄 Jobs API: {jobs_url}
+
+Access the REST API for programmatic agent spawning,
+job monitoring, and system health checks."""
+        
+        return self.ui.box(
+            web_content,
+            title="🚀 Web API Available",
+            style='rounded',
+            width=min(self.ui.terminal_width - 4, 90)
+        )
+
     async def _show_welcome(self):
         """Show welcome message and system status"""
-        # Create welcome card
+        # Create welcome card with web API info integrated
         title = "🎼 AgentsMCP Revolutionary CLI"
         
         welcome_content = [
             "Welcome to the future of AI agent orchestration!",
             "",
-            self.ui.status_indicator("info", "Type 'help' for available commands"),
-            self.ui.status_indicator("info", "Type 'dashboard' for real-time monitoring"),  
-            self.ui.status_indicator("info", "Type 'execute \"your task\"' to run orchestration"),
+            self.ui.status_indicator("info", "Chat naturally: 'show me the system status'"),
+            self.ui.status_indicator("info", "Use commands: 'help', 'dashboard', 'settings'"),
+            self.ui.status_indicator("info", "Execute tasks: 'create a web API for users'"),
+            "",
+            "🌐 Web API: http://localhost:8000",
+            "📋 API Docs: http://localhost:8000/docs",
+            "💚 Health: http://localhost:8000/health",
             "",
             f"Theme: {self.theme_manager.get_current_theme().name}",
-            f"Mode: {self.config.prompt_style.title()}",
+            f"LLM: ollama-turbo (conversational mode enabled)",
         ]
         
         welcome_text = '\n'.join(welcome_content)
         welcome_card = self.ui.card(title, welcome_text, status="success")
         
         print(welcome_card)
+        print()  # Extra spacing
+        
+        # Show daily wisdom and keep it persistent
+        daily_wisdom = self._get_daily_wisdom()
+        wisdom_card = self.ui.card("✨ Daily Wisdom", daily_wisdom, status="info")
+        print(wisdom_card)
         print()  # Extra spacing
         
         # Show quick status if orchestration manager is initialized
@@ -419,6 +486,157 @@ class CommandInterface:
         text_styled = self.theme_manager.colorize(prompt_text, 'secondary')
         
         return f"{symbol_styled} {text_styled} ▶ "
+    
+    def _generate_conversational_prompt(self) -> str:
+        """Generate conversational prompt with Claude Code-style box"""
+        if self.config.prompt_style == "agentsmcp":
+            # Enhanced prompt with better visual styling
+            prompt_symbol = "🎼"
+            prompt_text = "agentsmcp"
+            
+            # Create a boxed prompt similar to Claude Code
+            box_chars = {
+                'top_left': '┌',
+                'top_right': '┐',
+                'bottom_left': '└',
+                'bottom_right': '┘',
+                'horizontal': '─',
+                'vertical': '│'
+            }
+            
+            # Styled components
+            symbol_styled = self.theme_manager.colorize(prompt_symbol, 'primary')
+            text_styled = self.theme_manager.colorize(prompt_text, 'secondary')
+            box_styled = self.theme_manager.colorize('│', 'accent')
+            
+            # Create a compact prompt box
+            prompt_line = f"{box_styled} {symbol_styled} {text_styled} ▶ "
+            return prompt_line
+        else:
+            return self._generate_prompt()
+    
+    def _show_prompt_context(self) -> str:
+        """Show context above the prompt (optional enhancement for future)"""
+        context_items = []
+        
+        # Add conversation context if available
+        if hasattr(self.conversation_manager, 'get_conversation_context'):
+            context = self.conversation_manager.get_conversation_context()
+            if context.get('conversation_length', 0) > 0:
+                context_items.append(f"💭 {context['conversation_length']} messages")
+        
+        # Add system status
+        if hasattr(self.orchestration_manager, 'is_running'):
+            status = "🟢 Ready" if self.orchestration_manager.is_running else "🔵 Standby"
+            context_items.append(status)
+        
+        if context_items:
+            context_bar = " | ".join(context_items)
+            return self.theme_manager.colorize(f"[{context_bar}]", 'text_muted')
+        
+        return ""
+    
+    def _get_daily_wisdom(self) -> str:
+        """Get daily wisdom message that persists until user prompt"""
+        wisdoms = [
+            "Great orchestration begins with understanding each agent's strengths.",
+            "The symphony of AI agents creates harmony through purposeful collaboration.",
+            "Every complex task can be decomposed into elegant, manageable orchestrations.",
+            "Trust in your agents, but verify through comprehensive monitoring.",
+            "The future belongs to those who can orchestrate intelligence at scale.",
+            "Patience and precision in agent management yields extraordinary results.",
+            "Innovation happens when diverse AI specialists work in perfect harmony."
+        ]
+        
+        # Use date-based selection for consistent daily wisdom
+        import hashlib
+        from datetime import date
+        
+        today = date.today().isoformat()
+        hash_input = f"{today}-agentsmcp-wisdom"
+        hash_value = hashlib.md5(hash_input.encode()).hexdigest()
+        wisdom_index = int(hash_value, 16) % len(wisdoms)
+        
+        return wisdoms[wisdom_index]
+    
+    async def _process_input(self, user_input: str) -> Tuple[bool, Any]:
+        """Process user input through conversational or command interface"""
+        try:
+            # First check if it's a direct command
+            if self._is_direct_command(user_input):
+                return await self._process_command(user_input)
+            
+            # Otherwise, process through conversational interface
+            if self.conversational_mode:
+                response = await self.conversation_manager.process_input(user_input)
+                print()
+                print(self.theme_manager.colorize("🤖 AgentsMCP:", 'primary'))
+                print(response)
+                print()
+                return True, response
+            else:
+                # Fallback to direct command processing
+                return await self._process_command(user_input)
+                
+        except Exception as e:
+            error_msg = f"Input processing error: {e}"
+            print(self.theme_manager.colorize(f"❌ {error_msg}", 'error'))
+            return False, error_msg
+    
+    def _is_direct_command(self, user_input: str) -> bool:
+        """Check if input is a direct command (not conversational)"""
+        try:
+            parts = user_input.split()
+            if not parts:
+                return False
+            
+            command_name = parts[0]
+            
+            # Resolve aliases
+            if command_name in self.aliases:
+                command_name = self.aliases[command_name]
+            
+            # Only treat as direct command if:
+            # 1. It's a single command word (no extra text that makes it conversational)
+            # 2. OR it's a command with valid parameters (starts with --)
+            # 3. OR it's a command with simple value parameters (like "theme dark")
+            if command_name in self.commands:
+                # If it's just the command word alone, treat as direct
+                if len(parts) == 1:
+                    return True
+                
+                # If additional parts look like command parameters (start with --), treat as direct
+                if len(parts) > 1 and any(part.startswith('--') for part in parts[1:]):
+                    return True
+                
+                # If it's a command word but with conversational language, treat as conversational
+                # Examples: "help me", "status please", "show status"
+                conversational_indicators = [
+                    'me', 'please', 'show', 'tell', 'can', 'you', 'what', 'how', 'why', 'when', 'where'
+                ]
+                if any(indicator in parts[1:] for indicator in conversational_indicators):
+                    return False
+                
+                # Special case: allow simple parameter commands like "theme dark", "execute task"
+                # If it's 2-3 parts and no conversational indicators, treat as direct command
+                if len(parts) <= 3:
+                    return True
+                
+                # If additional text is longer, treat as conversational
+                return False
+            
+            return False
+            
+        except:
+            return False
+    
+    async def handle_command(self, command: str) -> str:
+        """Handle command execution from conversational interface"""
+        try:
+            success, result = await self._process_command(command)
+            return str(result) if result else "Command executed successfully"
+        except Exception as e:
+            return f"Command execution failed: {e}"
     
     async def _process_command(self, command_line: str) -> Tuple[bool, Any]:
         """Process a command line input"""
@@ -657,7 +875,13 @@ class CommandInterface:
             print(self.theme_manager.colorize("Press Ctrl+C to exit dashboard", 'text_muted'))
             print()
             
-            await dashboard.start_dashboard()
+            try:
+                await dashboard.start_dashboard()
+            except KeyboardInterrupt:
+                # User pressed Ctrl+C to exit dashboard
+                print()  # Add newline for clean exit
+                print(self.theme_manager.colorize("🛑 Dashboard stopped by user", 'info'))
+                return "Dashboard session stopped by user"
             
             return "Dashboard session completed"
             
@@ -941,12 +1165,9 @@ class CommandInterface:
                 
                 if visible_commands:
                     section_content = []
-                    for cmd_name in visible_commands[:5]:  # Show first 5 commands
+                    for cmd_name in visible_commands:  # Show ALL commands, no truncation
                         cmd = self.commands[cmd_name]
-                        section_content.append(f"  {cmd_name}: {cmd.description}")
-                    
-                    if len(visible_commands) > 5:
-                        section_content.append(f"  ... and {len(visible_commands) - 5} more")
+                        section_content.append(f"    {cmd_name}: {cmd.description}")
                     
                     help_sections.append(f"\n{cat_name.title()}:\n" + '\n'.join(section_content))
             
@@ -1011,6 +1232,70 @@ class CommandInterface:
         self.ui.clear_screen()
         return "Screen cleared"
     
+    async def _cmd_settings(self) -> str:
+        """Handle settings command"""
+        if not run_modern_settings_dialog:
+            print(self.theme_manager.colorize("❌ Settings UI not available", 'error'))
+            return "Settings UI not available"
+        
+        try:
+            print(self.ui.clear_screen())
+            success = run_modern_settings_dialog(self.theme_manager, self.ui)
+            print(self.ui.clear_screen())
+            
+            if success:
+                print(self.theme_manager.colorize("✅ Settings updated successfully", 'success'))
+                return "Settings updated"
+            else:
+                print(self.theme_manager.colorize("⚠️ Settings configuration cancelled", 'warning'))
+                return "Settings cancelled"
+        except Exception as e:
+            error_msg = f"Settings command failed: {e}"
+            print(self.theme_manager.colorize(f"❌ {error_msg}", 'error'))
+            return error_msg
+    
+    async def _cmd_generate_config(self) -> str:
+        """Handle generate-config command"""
+        try:
+            print(self.theme_manager.colorize("🔧 Generating MCP client configuration...", 'info'))
+            
+            # Generate configuration using orchestration manager
+            config_text = self.orchestration_manager.generate_client_config()
+            
+            # Display the configuration in a nice box
+            config_card = self.ui.card(
+                "🚀 MCP Client Configuration", 
+                "Configuration generated successfully! Copy the text below:",
+                "success"
+            )
+            print(config_card)
+            print()
+            
+            # Print the configuration with a border
+            print(self.theme_manager.colorize("=" * 80, 'accent'))
+            print(config_text)
+            print(self.theme_manager.colorize("=" * 80, 'accent'))
+            print()
+            
+            # Show helpful next steps
+            next_steps = """Next Steps:
+1. Copy the configuration above
+2. Save it to your MCP client config file:
+   - Claude Desktop: ~/.config/Claude/claude_desktop_config.json
+   - Claude Code CLI: ~/.config/claude-code/config.json
+3. Set required environment variables (see comments above)
+4. Restart your MCP client"""
+            
+            steps_card = self.ui.card("📋 Next Steps", next_steps, "info")
+            print(steps_card)
+            
+            return "MCP configuration generated successfully"
+            
+        except Exception as e:
+            error_msg = f"Generate config failed: {e}"
+            print(self.theme_manager.colorize(f"❌ {error_msg}", 'error'))
+            return error_msg
+
     async def _cmd_exit(self) -> str:
         """Handle exit command"""
         print(self.theme_manager.colorize("👋 Goodbye! Thanks for using AgentsMCP!", 'success'))
