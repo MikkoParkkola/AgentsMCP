@@ -18,6 +18,9 @@ from ..providers_validate import validate_provider_config, ValidationResult
 from ..config_write import persist_provider_api_key
 from ..settings import AppSettings
 from ..stream import generate_stream_from_text, openai_stream_text
+from ..conversation.conversation import ConversationManager
+from ..conversation.command_interface_impl import CommandInterfaceImpl
+from ..ui.theme_manager import ThemeManager
 import os
 
 console = Console()
@@ -122,23 +125,33 @@ def chat(
         )
 
     async def _ask_once(prompt: str) -> str:
-        # Spawn ephemeral job using current settings
-        final_prompt = prompt
-        if context_percent > 0 and history:
-            # Apply simple trimming of prior messages into the prompt preamble
-            from ..context import trim_history
-
-            budget = int(2000 * (context_percent / 100.0))
-            trimmed = trim_history(history, budget)
-            if trimmed:
-                pre = []
-                for role, text in trimmed[-8:]:  # cap to last few items to be safe
-                    pre.append(f"{role}: {text}")
-                pre.append(f"user: {prompt}")
-                final_prompt = "\n".join(pre)
-        job_id = await mgr.spawn_agent(agent_type, final_prompt, timeout=ac.timeout)
-        status = await mgr.wait_for_completion(job_id)
-        return status.output or status.error or "(no output)"
+        # Use conversational interface instead of agent system
+        try:
+            # Initialize conversational interface with real command interface
+            theme_manager = ThemeManager()
+            command_interface = CommandInterfaceImpl(mgr, cfg)
+            conversation_manager = ConversationManager(command_interface, theme_manager)
+            
+            # Process user input through conversational interface
+            response = await conversation_manager.process_input(prompt)
+            return response
+            
+        except Exception as e:
+            # Fallback to agent system if conversational interface fails
+            final_prompt = prompt
+            if context_percent > 0 and history:
+                from ..context import trim_history
+                budget = int(2000 * (context_percent / 100.0))
+                trimmed = trim_history(history, budget)
+                if trimmed:
+                    pre = []
+                    for role, text in trimmed[-8:]:
+                        pre.append(f"{role}: {text}")
+                    pre.append(f"user: {prompt}")
+                    final_prompt = "\n".join(pre)
+            job_id = await mgr.spawn_agent(agent_type, final_prompt, timeout=ac.timeout)
+            status = await mgr.wait_for_completion(job_id)
+            return status.output or status.error or f"(conversational error: {e})"
 
     async def _ask_once_stream(prompt: str) -> str:
         """Render response incrementally.
@@ -238,6 +251,7 @@ def chat(
     _help()
 
     history: list[tuple[str, str]] = []  # (role, text)
+    stream_enabled = False  # Initialize streaming mode - can be toggled with /stream command
 
     while True:
         try:
