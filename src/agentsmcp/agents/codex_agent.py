@@ -81,3 +81,10 @@ class CodexAgent(BaseAgent):
     async def _simulate(self, task: str) -> str:
         model = self.get_model()
         return f"Codex Simulation: {task} (model {model})"
+
+    async def cleanup(self):
+        """Ensure session resources are cleared for CodexAgent."""
+        # Clear any session identifiers/state to satisfy cleanup semantics in tests
+        if hasattr(self, "session_id"):
+            self.session_id = None  # type: ignore[assignment]
+        await super().cleanup()

@@ -16,6 +16,7 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import json
 import uuid
+from pathlib import Path
 
 from .seamless_coordinator import SeamlessCoordinator
 from .emotional_orchestrator import EmotionalOrchestrator
@@ -38,7 +39,7 @@ class OrchestrationManager:
         self.quality_threshold = quality_threshold
         
         # Initialize orchestration components
-        self.seamless_coordinator = SeamlessCoordinator(max_agents=max_agents)
+        self.seamless_coordinator = SeamlessCoordinator()
         self.emotional_orchestrator = EmotionalOrchestrator()
         self.symphony_mode = SymphonyMode(max_agents=max_agents, quality_threshold=quality_threshold)
         self.predictive_spawner = PredictiveSpawner(max_agents=max_agents)
@@ -58,6 +59,12 @@ class OrchestrationManager:
             "agent_satisfaction": 0.0,
             "human_satisfaction": 0.0
         }
+        
+        # Settings persistence
+        self.config_dir = Path.home() / ".agentsmcp"
+        self.settings_file = self.config_dir / "config.json"
+        self.user_settings = {}
+        self.reload_user_settings()
         
     async def initialize(self, mode: str = "hybrid") -> Dict[str, Any]:
         """
@@ -656,3 +663,158 @@ class OrchestrationManager:
             "total_tasks_completed": self.performance_metrics["total_tasks_completed"],
             "component_shutdowns": shutdown_results
         }
+    
+    def save_user_settings(self, settings: Dict[str, Any]) -> None:
+        """Save user settings to configuration file."""
+        try:
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Merge with existing settings
+            current_settings = self.user_settings.copy()
+            current_settings.update(settings)
+            
+            # Write to file
+            with open(self.settings_file, 'w') as f:
+                json.dump(current_settings, f, indent=2)
+            
+            # Update in-memory settings
+            self.user_settings = current_settings
+            
+            logger.info(f"Settings saved successfully to {self.settings_file}")
+            
+        except Exception as e:
+            logger.error(f"Failed to save settings: {e}")
+            raise
+    
+    def reload_user_settings(self) -> Dict[str, Any]:
+        """Reload user settings from configuration file."""
+        try:
+            if self.settings_file.exists():
+                with open(self.settings_file, 'r') as f:
+                    self.user_settings = json.load(f)
+                logger.info(f"Settings loaded from {self.settings_file}")
+            else:
+                # Default settings
+                self.user_settings = {
+                    "provider": "ollama-turbo",
+                    "model": "gpt-oss:120b", 
+                    "temperature": 0.7,
+                    "max_tokens": 1024
+                }
+                logger.info("Using default settings")
+                
+            return self.user_settings
+            
+        except Exception as e:
+            logger.error(f"Failed to reload settings: {e}")
+            # Fall back to defaults
+            self.user_settings = {
+                "provider": "ollama-turbo",
+                "model": "gpt-oss:120b",
+                "temperature": 0.7, 
+                "max_tokens": 1024
+            }
+            return self.user_settings
+    
+    def generate_client_config(self) -> str:
+        """Generate MCP client configuration with auto-discovered paths."""
+        import subprocess
+        import shutil
+        
+        # Auto-discover system paths
+        node_path = shutil.which("node") or "/usr/local/bin/node"
+        python_path = shutil.which("python3") or shutil.which("python") or "/usr/bin/python3"
+        
+        # Get current user settings
+        settings = self.user_settings
+        
+        # Base configuration template
+        config = {
+            "mcpServers": {
+                "codex": {
+                    "command": "npx",
+                    "args": ["-y", "@anthropic/mcp-codex"],
+                    "env": {
+                        "NODE_PATH": node_path,
+                        "CODEX_MODEL": settings.get("model", "gpt-oss:120b"),
+                        "CODEX_PROVIDER": settings.get("provider", "ollama-turbo"),
+                        "CODEX_TEMPERATURE": str(settings.get("temperature", 0.7)),
+                        "CODEX_MAX_TOKENS": str(settings.get("max_tokens", 1024))
+                    }
+                },
+                "claude": {
+                    "command": python_path,
+                    "args": ["-m", "mcp_claude"],
+                    "env": {
+                        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}",
+                        "CLAUDE_MODEL": "claude-3-5-sonnet-20241022",
+                        "CLAUDE_MAX_TOKENS": str(settings.get("max_tokens", 1024))
+                    }
+                },
+                "ollama": {
+                    "command": "npx",
+                    "args": ["-y", "@anthropic/mcp-ollama"],
+                    "env": {
+                        "OLLAMA_HOST": "http://localhost:11434",
+                        "OLLAMA_MODEL": "gpt-oss:20b"
+                    }
+                },
+                "ollama-turbo": {
+                    "command": "npx", 
+                    "args": ["-y", "@anthropic/mcp-ollama-turbo"],
+                    "env": {
+                        "OLLAMA_TURBO_HOST": "https://ollama-turbo.anthropic.com",
+                        "OLLAMA_TURBO_MODEL": "gpt-oss:120b",
+                        "OLLAMA_TURBO_API_KEY": "${OLLAMA_TURBO_API_KEY}"
+                    }
+                },
+                "github": {
+                    "command": "npx",
+                    "args": ["-y", "@anthropic/mcp-github"],
+                    "env": {
+                        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+                    }
+                },
+                "filesystem": {
+                    "command": "npx",
+                    "args": ["-y", "@anthropic/mcp-filesystem"],
+                    "env": {
+                        "FILESYSTEM_ROOT": str(Path.cwd())
+                    }
+                },
+                "git": {
+                    "command": "npx",
+                    "args": ["-y", "@anthropic/mcp-git"],
+                    "env": {
+                        "GIT_WORKING_DIR": str(Path.cwd())
+                    }
+                }
+            }
+        }
+        
+        # Format as pretty-printed JSON
+        config_json = json.dumps(config, indent=2)
+        
+        # Add helpful header comments
+        header = f"""# MCP Client Configuration
+# Generated by AgentsMCP on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+# Current settings: {settings.get('provider')} / {settings.get('model')}
+#
+# Save this to one of:
+# - ~/.config/Claude/claude_desktop_config.json  (Claude Desktop)
+# - ~/.config/claude-code/config.json           (Claude Code CLI) 
+# - Your MCP client's configuration file
+#
+# Required environment variables:
+# - ANTHROPIC_API_KEY: Your Anthropic API key for Claude
+# - GITHUB_TOKEN: Your GitHub personal access token
+# - OLLAMA_TURBO_API_KEY: Your Ollama Turbo API key (if using)
+#
+# Auto-discovered paths:
+# - Node.js: {node_path}
+# - Python: {python_path}
+# - Working Directory: {Path.cwd()}
+
+"""
+        
+        return header + config_json

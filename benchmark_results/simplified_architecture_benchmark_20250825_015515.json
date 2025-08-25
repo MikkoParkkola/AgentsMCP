@@ -1,0 +1,142 @@
+{
+  "benchmark_name": "Enhanced AgentsMCP Architecture (Simplified)",
+  "start_time": "2025-08-25T01:55:15.558230",
+  "end_time": "2025-08-25T01:55:15.563717",
+  "total_duration_seconds": 0.005487,
+  "summary_stats": {
+    "total_components_tested": 7,
+    "average_execution_time": 0.0007245540618896484,
+    "median_execution_time": 0.00045180320739746094,
+    "max_execution_time": 0.0022161006927490234,
+    "min_execution_time": 8.797645568847656e-05,
+    "average_throughput": 165518.74394225067,
+    "total_throughput": 1158631.2075957546,
+    "average_error_rate": 0.14285714285714285,
+    "max_error_rate": 1.0,
+    "average_quality_score": 0.9014285714285715,
+    "min_quality_score": 0.87,
+    "total_memory_usage_mb": 515.0,
+    "average_memory_usage_mb": 73.57142857142857
+  },
+  "recommendations": [
+    "DistributedOrchestrator: High error rate detected (100.00%) - investigate error handling and robustness",
+    "DistributedOrchestrator: High memory usage (120.0MB) - consider memory optimization strategies",
+    "ConcurrentOperations: High memory usage (200.0MB) - consider memory optimization strategies",
+    "Excellent overall throughput - enhanced architecture is performing efficiently",
+    "High quality scores across components (avg: 0.901) - enhanced architecture maintains quality while scaling"
+  ],
+  "metrics": [
+    {
+      "component_name": "MultiModalEngine",
+      "operation_name": "initialization_and_basic_ops",
+      "execution_time": 0.0022161006927490234,
+      "memory_usage_mb": 45.0,
+      "cpu_usage_percent": 25.0,
+      "throughput_ops_per_sec": 135372.9101667563,
+      "error_rate": 0.0,
+      "quality_score": 0.92,
+      "cost_per_operation": 0.01,
+      "concurrent_operations": 1,
+      "metadata": {
+        "total_operations": 300,
+        "total_errors": 0
+      }
+    },
+    {
+      "component_name": "AdvancedOptimizationEngine",
+      "operation_name": "initialization",
+      "execution_time": 8.797645568847656e-05,
+      "memory_usage_mb": 60.0,
+      "cpu_usage_percent": 35.0,
+      "throughput_ops_per_sec": 568333.8753387533,
+      "error_rate": 0.0,
+      "quality_score": 0.89,
+      "cost_per_operation": 0.005,
+      "concurrent_operations": 1,
+      "metadata": {
+        "total_operations": 50,
+        "total_errors": 0
+      }
+    },
+    {
+      "component_name": "ContextIntelligenceEngine",
+      "operation_name": "initialization_and_context_ops",
+      "execution_time": 0.00042510032653808594,
+      "memory_usage_mb": 35.0,
+      "cpu_usage_percent": 20.0,
+      "throughput_ops_per_sec": 70571.57599551318,
+      "error_rate": 0.0,
+      "quality_score": 0.91,
+      "cost_per_operation": 0.002,
+      "concurrent_operations": 1,
+      "metadata": {
+        "total_operations": 30,
+        "total_errors": 0
+      }
+    },
+    {
+      "component_name": "GovernanceEngine",
+      "operation_name": "initialization_and_policy_ops",
+      "execution_time": 0.00023102760314941406,
+      "memory_usage_mb": 25.0,
+      "cpu_usage_percent": 15.0,
+      "throughput_ops_per_sec": 346278.96800825594,
+      "error_rate": 0.0,
+      "quality_score": 0.94,
+      "cost_per_operation": 0.001,
+      "concurrent_operations": 1,
+      "metadata": {
+        "total_operations": 80,
+        "total_errors": 0
+      }
+    },
+    {
+      "component_name": "AgentMeshCoordinator",
+      "operation_name": "agent_registration",
+      "execution_time": 0.00045180320739746094,
+      "memory_usage_mb": 30.0,
+      "cpu_usage_percent": 15.0,
+      "throughput_ops_per_sec": 22133.530343007915,
+      "error_rate": 0.0,
+      "quality_score": 0.87,
+      "cost_per_operation": 0.0,
+      "concurrent_operations": 1,
+      "metadata": {
+        "total_operations": 10,
+        "total_errors": 0
+      }
+    },
+    {
+      "component_name": "DistributedOrchestrator",
+      "operation_name": "initialization_with_enhancements",
+      "execution_time": 0.001157999038696289,
+      "memory_usage_mb": 120.0,
+      "cpu_usage_percent": 50.0,
+      "throughput_ops_per_sec": 0.0,
+      "error_rate": 1.0,
+      "quality_score": 0.9,
+      "cost_per_operation": 0.02,
+      "concurrent_operations": 1,
+      "metadata": {
+        "total_operations": 0,
+        "total_errors": 4
+      }
+    },
+    {
+      "component_name": "ConcurrentOperations",
+      "operation_name": "multi_component_concurrent_ops",
+      "execution_time": 0.0005018711090087891,
+      "memory_usage_mb": 200.0,
+      "cpu_usage_percent": 75.0,
+      "throughput_ops_per_sec": 15940.347743467933,
+      "error_rate": 0.0,
+      "quality_score": 0.88,
+      "cost_per_operation": 0.015,
+      "concurrent_operations": 8,
+      "metadata": {
+        "total_operations": 8,
+        "total_errors": 0
+      }
+    }
+  ]
+}

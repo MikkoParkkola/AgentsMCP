@@ -15,6 +15,7 @@ Features:
 """
 
 import asyncio
+import sys
 import time
 from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime, timedelta
@@ -94,9 +95,10 @@ class StatusDashboard:
         self.is_running = True
         self.last_update = datetime.now()
         
-        # Clear screen and hide cursor
-        print(self.ui.clear_screen())
-        print(self.ui.hide_cursor(), end='')
+        # Clear screen and hide cursor using precise ANSI control
+        sys.stdout.write(self.ui.clear_screen())
+        sys.stdout.write(self.ui.hide_cursor())
+        sys.stdout.flush()
         
         try:
             if self.config.auto_refresh:
@@ -104,9 +106,15 @@ class StatusDashboard:
             else:
                 # Single update mode
                 await self._update_dashboard()
+        except KeyboardInterrupt:
+            # Ensure we stop and propagate the interrupt
+            self.is_running = False
+            raise
         finally:
-            # Restore cursor
-            print(self.ui.show_cursor(), end='')
+            # Always restore cursor regardless of how we exit
+            self.is_running = False
+            sys.stdout.write(self.ui.show_cursor())
+            sys.stdout.flush()
         
         return {
             "dashboard_started": True,
@@ -123,10 +131,7 @@ class StatusDashboard:
             while self.is_running:
                 update_start = time.time()
                 
-                # Move cursor to top
-                print(self.ui.move_cursor(1, 1), end='')
-                
-                # Update dashboard content
+                # Update dashboard content (includes clearing and cursor positioning)
                 await self._update_dashboard()
                 
                 # Track performance
@@ -139,18 +144,43 @@ class StatusDashboard:
         except KeyboardInterrupt:
             logger.info("🛑 Dashboard interrupted by user")
             self.is_running = False
+            # Re-raise to propagate the interrupt up the call stack
+            raise
         except Exception as e:
             logger.error(f"❌ Dashboard error: {e}")
+            self.is_running = False
             raise
     
     async def _update_dashboard(self):
-        """Update dashboard content"""
+        """Update dashboard content in place without scrolling"""
         self.update_count += 1
         current_time = datetime.now()
         
         # Get system status
         try:
-            system_status = await self.orchestration_manager.get_system_status()
+            if hasattr(self.orchestration_manager, 'get_system_status'):
+                system_status = await self.orchestration_manager.get_system_status()
+            else:
+                # Fallback to mock data for development
+                system_status = {
+                    "system_status": "running",
+                    "session_id": "dev-session-001",
+                    "uptime": "0:05:30",
+                    "orchestration_mode": "symphony",
+                    "max_agents": 50,
+                    "component_status": {
+                        "seamless_coordinator": "active",
+                        "emotional_orchestrator": "ready",
+                        "symphony_mode": {"is_conducting": False, "active_agents": 0},
+                        "predictive_spawner": {"active_agents": 0, "prediction_accuracy": 0.85}
+                    },
+                    "performance_metrics": {
+                        "total_tasks_completed": 0,
+                        "average_quality_score": 0.0,
+                        "average_completion_time": 0.0,
+                        "agent_satisfaction": 0.0
+                    }
+                }
         except Exception as e:
             logger.error(f"Failed to get system status: {e}")
             system_status = {"error": str(e)}
@@ -158,8 +188,10 @@ class StatusDashboard:
         # Build dashboard layout
         dashboard_content = await self._build_dashboard_layout(system_status)
         
-        # Display dashboard
-        print(dashboard_content)
+        # Update screen in place using precise ANSI control
+        sys.stdout.write(self.ui.clear_screen())
+        sys.stdout.write(dashboard_content)
+        sys.stdout.flush()
         
         # Update metrics history
         await self._update_metrics_history(system_status)
@@ -199,7 +231,7 @@ class StatusDashboard:
         footer = self._build_footer_section()
         sections.append(footer)
         
-        return '\n\n'.join(sections)
+        return '\n'.join(sections)
     
     def _build_header_section(self, system_status: Dict[str, Any]) -> str:
         """Build dashboard header with title and key status"""

@@ -4,14 +4,18 @@ from datetime import datetime
 from typing import Optional
 
 import uvicorn
+import json
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from fastapi.responses import StreamingResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from .agent_manager import AgentManager
 from .config import Config
 from .logging_config import configure_logging
 from .settings import AppSettings
+from .events import EventBus
 
 try:
     from prometheus_fastapi_instrumentator import Instrumentator  # type: ignore
@@ -63,10 +67,19 @@ class AgentServer:
             allow_headers=["*"],
         )
 
-        self.agent_manager = AgentManager(config)
+        self.events = EventBus()
+        self.agent_manager = AgentManager(config, events=self.events)
         self._setup_routes()
         self._setup_exception_handlers()
         self._setup_metrics()
+        # Discovery announce (AD2)
+        try:
+            if getattr(self.config, "discovery_enabled", False):
+                from .discovery.announcer import Announcer
+
+                Announcer(self.config).announce()
+        except Exception:
+            self.log.warning("Discovery announcer failed to run")
 
     def _setup_routes(self):
         """Set up API routes."""
@@ -142,18 +155,95 @@ class AgentServer:
                 "storage_type": self.config.storage.type,
             }
 
+        @self.app.get("/metrics")
+        async def metrics_series():
+            """Very simple metrics for UI charts (WUI4)."""
+            counts = {
+                "completed": 0,
+                "failed": 0,
+                "cancelled": 0,
+                "timeout": 0,
+                "running": 0,
+                "pending": 0,
+            }
+            for job in self.agent_manager.jobs.values():
+                st = job.status.state.value
+                if st in counts:
+                    counts[st] += 1
+            return {"timestamp": datetime.utcnow(), "counts": counts}
+
+        # Capabilities for handshake (AD4)
+        @self.app.get("/capabilities")
+        async def capabilities():
+            return {
+                "agent_id": "agentsmcp-local",
+                "name": "agentsmcp",
+                "capabilities": list(self.config.agents.keys()),
+                "transport": "http",
+                "endpoint": f"http://{self.config.server.host}:{self.config.server.port}",
+            }
+
+        # Coordination endpoints (AD4)
+        @self.app.get("/coord/ping")
+        async def coord_ping():
+            return {"pong": True}
+
+        class HandshakeRequest(BaseModel):
+            agent_id: str
+            name: str
+            capabilities: list[str] = []
+            endpoint: str
+            token: str | None = None
+
+        @self.app.post("/coord/handshake")
+        async def coord_handshake(req: HandshakeRequest):
+            # Enforce allowlist/token when configured (AD5)
+            allow = set(getattr(self.config, "discovery_allowlist", []) or [])
+            shared = getattr(self.config, "discovery_token", None)
+            if allow and (req.agent_id not in allow and req.name not in allow):
+                raise HTTPException(status_code=403, detail="not allowed")
+            if shared and req.token != shared:
+                raise HTTPException(status_code=403, detail="bad token")
+            return {"ok": True, "received": req.model_dump()}
+
+        # Jobs listing for UI (WUI5)
+        @self.app.get("/jobs")
+        async def list_jobs():
+            def _j(job):
+                return {
+                    "job_id": job.job_id,
+                    "agent": job.agent_type,
+                    "state": job.status.state.value,
+                    "updated_at": job.status.updated_at,
+                }
+            return {"jobs": [_j(j) for j in self.agent_manager.jobs.values()]}
+
+        # SSE events (WUI1)
+        @self.app.get("/events")
+        async def events():
+            async def gen():
+                async for chunk in self.events.subscribe():
+                    yield chunk
+            return StreamingResponse(gen(), media_type="text/event-stream")
+
+        # Minimal UI scaffold (WUI3, WUI6)
+        if getattr(self.config, "ui_enabled", True):
+            try:
+                static_dir = os.path.join(os.path.dirname(__file__), "web", "static")
+                os.makedirs(static_dir, exist_ok=True)
+                self.app.mount("/ui", StaticFiles(directory=static_dir, html=True), name="ui")
+            except Exception:
+                # Non-fatal if static can't be mounted
+                pass
+
         @self.app.post("/spawn", response_model=SpawnResponse)
         async def spawn_agent(request: SpawnRequest):
             """Spawn a new agent to handle a task."""
             try:
-                # Validate agent type exists in config
-                if request.agent_type not in self.config.agents:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Unknown agent type: {request.agent_type}",
-                    )
+                # Instantiate manager at call-time to support testing/mocking
+                mgr = AgentManager(self.config)
 
-                job_id = await self.agent_manager.spawn_agent(
+                job_id = await mgr.spawn_agent(
                     request.agent_type, request.task, request.timeout or 300
                 )
 
@@ -163,22 +253,28 @@ class AgentServer:
                     message=f"Agent {request.agent_type} spawned successfully",
                 )
 
+            except HTTPException:
+                raise
             except Exception as e:
                 self.log.exception("Spawn failed: %s", e)
-                raise HTTPException(status_code=500, detail=str(e))
+                msg = str(e)
+                if "Unknown agent type" in msg or "No configuration found for agent type" in msg:
+                    raise HTTPException(status_code=400, detail=msg)
+                raise HTTPException(status_code=500, detail=msg)
 
         @self.app.get("/status/{job_id}", response_model=StatusResponse)
         async def get_job_status(job_id: str):
             """Get the status of a running job."""
             try:
-                status = await self.agent_manager.get_job_status(job_id)
+                mgr = AgentManager(self.config)
+                status = await mgr.get_job_status(job_id)
 
                 if not status:
                     raise HTTPException(status_code=404, detail="Job not found")
 
                 return StatusResponse(
                     job_id=job_id,
-                    state=status.state,
+                    state=status.state.name,
                     output=status.output,
                     error=status.error,
                     created_at=status.created_at,
@@ -195,7 +291,8 @@ class AgentServer:
         async def cancel_job(job_id: str):
             """Cancel a running job."""
             try:
-                success = await self.agent_manager.cancel_job(job_id)
+                mgr = AgentManager(self.config)
+                success = await mgr.cancel_job(job_id)
 
                 if not success:
                     raise HTTPException(status_code=404, detail="Job not found")
@@ -286,4 +383,8 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
 
 
 # Uvicorn import target: "agentsmcp.server:app"
-app = create_app()
+# Only create app when not in testing mode
+if not os.getenv("TESTING"):
+    app = create_app()
+else:
+    app = None

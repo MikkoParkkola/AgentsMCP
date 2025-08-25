@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Build a single-file agentsmcp binary using PyInstaller.
-# Produces platform-native binary (arm64 when run on Apple Silicon runners).
-
-PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-ENTRYPOINT="src/agentsmcp/cli.py"
-NAME="agentsmcp"
-
-echo "[build] Project root: $PROJECT_ROOT"
-cd "$PROJECT_ROOT"
-
+echo "[agentsmcp] Building standalone binary via PyInstaller (P1)"
 if ! command -v pyinstaller >/dev/null 2>&1; then
-  echo "[build] Installing PyInstaller..."
-  python -m pip install --upgrade pip
-  python -m pip install pyinstaller
+  echo "PyInstaller not found. Install with: pip install pyinstaller" >&2
+  exit 1
 fi
 
-echo "[build] Building $NAME binary..."
-pyinstaller -F -n "$NAME" -p src "$ENTRYPOINT"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+ROOT_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
+cd "$ROOT_DIR"
 
-echo "[build] Built binary at: $(pwd)/dist/$NAME"
+OUTDIR="dist/agentsmcp"
+pyinstaller -F -n agentsmcp --paths src --hidden-import=agentsmcp.cli -i none \
+  --collect-all agentsmcp \
+  -p src \
+  src/agentsmcp/cli.py
+
+echo "Binary output (if successful): dist/agentsmcp"
+ls -la dist || true
+

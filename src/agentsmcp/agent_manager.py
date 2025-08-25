@@ -11,6 +11,7 @@ from .agents.codex_agent import CodexAgent
 from .agents.ollama_agent import OllamaAgent
 from .config import Config
 from .models import JobState, JobStatus
+from .events import EventBus
 from .storage.base import BaseStorage
 from .storage.memory import MemoryStorage
 
@@ -29,11 +30,12 @@ class AgentJob:
 class AgentManager:
     """Manages agent lifecycle and job execution."""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, events: EventBus | None = None):
         self.config = config
         self.log = logging.getLogger(__name__)
         self.jobs: Dict[str, AgentJob] = {}
         self.storage = self._create_storage()
+        self.events = events
 
         # Agent type mapping
         self.agent_classes = {
@@ -109,6 +111,12 @@ class AgentManager:
             task_handle = asyncio.create_task(self._run_agent_task(job))
             job.task_handle = task_handle
             self.log.info("Spawned job %s with agent %s", job_id, agent_type)
+            if self.events:
+                await self.events.publish({
+                    "type": "job.spawned",
+                    "job_id": job_id,
+                    "agent_type": agent_type,
+                })
 
             return job_id
 
@@ -127,6 +135,11 @@ class AgentManager:
             job.status.updated_at = datetime.utcnow()
             await self.storage.store_job_status(job.status)
             self.log.info("Job %s started", job.job_id)
+            if self.events:
+                await self.events.publish({
+                    "type": "job.started",
+                    "job_id": job.job_id,
+                })
 
             # Run the task with timeout
             result = await asyncio.wait_for(
@@ -138,24 +151,44 @@ class AgentManager:
             job.status.output = result
             job.status.updated_at = datetime.utcnow()
             self.log.info("Job %s completed", job.job_id)
+            if self.events:
+                await self.events.publish({
+                    "type": "job.completed",
+                    "job_id": job.job_id,
+                })
 
         except asyncio.TimeoutError:
             job.status.state = JobState.TIMEOUT
             job.status.error = f"Task timed out after {job.timeout} seconds"
             job.status.updated_at = datetime.utcnow()
             self.log.warning("Job %s timed out", job.job_id)
+            if self.events:
+                await self.events.publish({
+                    "type": "job.timeout",
+                    "job_id": job.job_id,
+                })
 
         except asyncio.CancelledError:
             job.status.state = JobState.CANCELLED
             job.status.error = "Task was cancelled"
             job.status.updated_at = datetime.utcnow()
             self.log.info("Job %s cancelled", job.job_id)
+            if self.events:
+                await self.events.publish({
+                    "type": "job.cancelled",
+                    "job_id": job.job_id,
+                })
 
         except Exception as e:
             job.status.state = JobState.FAILED
             job.status.error = str(e)
             job.status.updated_at = datetime.utcnow()
             self.log.exception("Job %s failed: %s", job.job_id, e)
+            if self.events:
+                await self.events.publish({
+                    "type": "job.failed",
+                    "job_id": job.job_id,
+                })
 
         finally:
             # Store final status
@@ -193,6 +226,11 @@ class AgentManager:
 
         await self.storage.store_job_status(job.status)
         self.log.info("Job %s cancelled by user", job_id)
+        if self.events:
+            await self.events.publish({
+                "type": "job.cancelled",
+                "job_id": job_id,
+            })
         return True
 
     async def wait_for_completion(

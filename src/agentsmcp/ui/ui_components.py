@@ -17,6 +17,7 @@ import os
 import sys
 import time
 import threading
+import re
 from typing import Dict, List, Any, Optional, Tuple, Union, Callable
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -75,13 +76,17 @@ class UIComponents:
         # Animation state
         self._animations = {}
         self._animation_lock = threading.Lock()
+        
+        # ANSI escape sequence pattern for stripping colors from length calculations
+        self._ansi_pattern = re.compile(r'\x1b\[[0-9;]*m')
     
     def _get_terminal_width(self) -> int:
-        """Get terminal width with fallback"""
+        """Get terminal width with fallback and dynamic detection"""
         try:
-            return os.get_terminal_size().columns
+            width = os.get_terminal_size().columns
+            return max(80, width)  # Ensure minimum width for better UX
         except (OSError, ValueError):
-            return 80  # Fallback width
+            return 120  # Modern terminal fallback
     
     def _get_terminal_height(self) -> int:
         """Get terminal height with fallback"""
@@ -89,6 +94,14 @@ class UIComponents:
             return os.get_terminal_size().lines
         except (OSError, ValueError):
             return 24  # Fallback height
+    
+    def _strip_ansi(self, text: str) -> str:
+        """Strip ANSI escape sequences for accurate length calculation"""
+        return self._ansi_pattern.sub('', text)
+    
+    def _visual_length(self, text: str) -> int:
+        """Get visual length of text, ignoring ANSI color codes"""
+        return len(self._strip_ansi(text))
     
     def heading(self, text: str, level: int = 1, centered: bool = False, 
                underline: bool = True) -> str:
@@ -140,7 +153,7 @@ class UIComponents:
     def box(self, content: str, title: str = "", style: str = 'light', 
            padding: int = 1, width: Optional[int] = None) -> str:
         """
-        Create beautiful boxes around content
+        Create beautiful boxes around content with proper alignment
         
         Args:
             content: Content to box
@@ -153,32 +166,52 @@ class UIComponents:
             Boxed content string
         """
         box_style = self.box_styles.get(style, self.box_styles['light'])
-        theme = self.theme_manager.get_current_theme()
         
-        # Split content into lines
+        # Split content into lines and strip ANSI codes for width calculation
         content_lines = content.split('\n')
         
-        # Calculate dimensions
-        content_width = max(len(line) for line in content_lines) if content_lines else 0
-        title_width = len(title) if title else 0
+        # Calculate dimensions based on visual length (no ANSI codes)
+        content_width = max(self._visual_length(line) for line in content_lines) if content_lines else 0
+        title_width = self._visual_length(title) if title else 0
         
+        # Set width - use smaller default and cap at reasonable size
         if width is None:
-            width = max(content_width + 2 * padding, title_width + 4)
+            # Use content width + padding, or title width + some margin
+            inner_width = max(content_width, title_width + 4) 
+            width = min(inner_width + 2 * padding, self.terminal_width - 8)
         
-        # Build box
+        # Ensure minimum width
+        width = max(width, 20)
+        inner_width = width - 2 * padding
+        
+        # Build box lines
         lines = []
         
         # Top border with title
         if title:
-            title_padding = (width - len(title) - 2) // 2
-            top_line = (box_style.top_left + 
-                       box_style.horizontal * title_padding +
-                       f" {title} " +
-                       box_style.horizontal * (width - title_padding - len(title) - 2) +
-                       box_style.top_right)
+            title_len = self._visual_length(title)
+            available_space = width - 4  # Space for " title "
+            if title_len <= available_space:
+                title_padding_left = (width - title_len - 2) // 2
+                title_padding_right = width - title_len - 2 - title_padding_left
+                
+                top_line = (box_style.top_left + 
+                           box_style.horizontal * title_padding_left +
+                           f" {title} " +
+                           box_style.horizontal * title_padding_right +
+                           box_style.top_right)
+            else:
+                # Title too long - truncate
+                truncated_title = title[:available_space-3] + "..."
+                title_padding = (width - len(truncated_title) - 2) // 2
+                top_line = (box_style.top_left + 
+                           box_style.horizontal * title_padding +
+                           f" {truncated_title} " +
+                           box_style.horizontal * (width - title_padding - len(truncated_title) - 2) +
+                           box_style.top_right)
         else:
             top_line = (box_style.top_left + 
-                       box_style.horizontal * width +
+                       box_style.horizontal * (width - 2) +
                        box_style.top_right)
         
         lines.append(self.theme_manager.colorize(top_line, 'border'))
@@ -186,34 +219,49 @@ class UIComponents:
         # Padding lines (top)
         for _ in range(padding):
             padding_line = (box_style.vertical + 
-                           " " * width + 
+                           " " * (width - 2) + 
                            box_style.vertical)
             lines.append(self.theme_manager.colorize(padding_line, 'border'))
         
         # Content lines
         for line in content_lines:
-            content_line = (box_style.vertical + 
-                           " " * padding +
-                           line.ljust(width - 2 * padding) +
-                           " " * padding +
-                           box_style.vertical)
-            # Mix content and border colors
-            border_color = self.theme_manager.get_color('border')
-            formatted_line = (border_color + box_style.vertical +
-                            theme.body_style + " " * padding + line.ljust(width - 2 * padding) + " " * padding +
-                            border_color + box_style.vertical)
-            lines.append(formatted_line)
+            # Calculate actual content space needed
+            line_visual_len = self._visual_length(line)
+            
+            if line_visual_len <= inner_width:
+                # Line fits - pad to full width
+                spaces_needed = inner_width - line_visual_len
+                content_padded = line + " " * spaces_needed
+            else:
+                # Line too long - truncate
+                # Find truncation point by counting visual characters
+                truncated = ""
+                for char in line:
+                    if self._visual_length(truncated + char + "...") <= inner_width:
+                        truncated += char
+                    else:
+                        break
+                content_padded = truncated + "..." + " " * (inner_width - self._visual_length(truncated + "..."))
+            
+            # Build the full line with proper borders
+            border_left = self.theme_manager.colorize(box_style.vertical, 'border')
+            border_right = self.theme_manager.colorize(box_style.vertical, 'border')
+            padding_left = " " * padding
+            padding_right = " " * padding
+            
+            full_line = border_left + padding_left + content_padded + padding_right + border_right
+            lines.append(full_line)
         
         # Padding lines (bottom)
         for _ in range(padding):
             padding_line = (box_style.vertical + 
-                           " " * width + 
+                           " " * (width - 2) + 
                            box_style.vertical)
             lines.append(self.theme_manager.colorize(padding_line, 'border'))
         
         # Bottom border
         bottom_line = (box_style.bottom_left + 
-                      box_style.horizontal * width +
+                      box_style.horizontal * (width - 2) +
                       box_style.bottom_right)
         lines.append(self.theme_manager.colorize(bottom_line, 'border'))
         
@@ -407,12 +455,10 @@ class UIComponents:
             Formatted card string
         """
         if width is None:
-            width = min(60, self.terminal_width - 4)
-        
-        theme = self.theme_manager.get_current_theme()
+            width = min(self.terminal_width - 4, 100)  # Use most of terminal width
         
         # Build card header
-        header_parts = [self.theme_manager.style_text(title, 'heading_style')]
+        header_parts = [title]
         
         if status:
             status_indicator = self.status_indicator(status)
@@ -420,8 +466,12 @@ class UIComponents:
         
         header = " ".join(header_parts)
         
-        # Build card content
-        card_content = f"{header}\n{theme.palette.separator}{'─' * (width - 2)}\n{content}"
+        # Calculate separator width based on actual content width
+        separator_width = max(self._visual_length(header), self._visual_length(content.split('\n')[0] if content else ""))
+        separator_width = min(separator_width, width - 6)  # Account for box padding
+        
+        # Build card content - no extra separator, let box handle formatting
+        card_content = f"{header}\n{'─' * separator_width}\n{content}"
         
         return self.box(card_content, style='rounded', padding=2, width=width)
     
@@ -672,7 +722,7 @@ class UIComponents:
     
     def clear_screen(self):
         """Clear the terminal screen"""
-        os.system('cls' if os.name == 'nt' else 'clear')
+        return "\033[2J\033[H"
     
     def move_cursor(self, x: int, y: int) -> str:
         """Generate ANSI code to move cursor"""

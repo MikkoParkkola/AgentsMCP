@@ -1,11 +1,20 @@
 import os
 import tempfile
+import re
+import logging
+import secrets
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
+from pydantic_settings import BaseSettings
+
+
+def generate_local_jwt_secret() -> str:
+    """Generate a secure random JWT secret for local development."""
+    return secrets.token_hex(32)
 
 
 class TransportType(str, Enum):
@@ -171,7 +180,7 @@ class RAGConfig(BaseModel):
         return v
 
 
-class Config(BaseModel):
+class Config(BaseSettings):
     """Main configuration for AgentsMCP."""
 
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -224,6 +233,66 @@ class Config(BaseModel):
 
     # Optional MCP servers (disabled by default)
     mcp: List[MCPServerConfig] = Field(default_factory=list)
+
+    # Discovery & coordination flags (AD5)
+    discovery_enabled: bool = Field(default=False, description="Enable local discovery announcer/registry")
+    discovery_allowlist: List[str] = Field(default_factory=list, description="Allowed agent IDs or names for coordination")
+    discovery_token: Optional[str] = Field(default=None, description="Optional shared secret for discovery entries")
+    discovery_registry_endpoint: Optional[str] = Field(default=None, description="Remote registry HTTP API endpoint")
+    discovery_registry_token: Optional[str] = Field(default=None, description="Authentication token for remote registry")
+    
+    # Security configuration (AD5)
+    security_enabled: bool = Field(default=True, description="Enable security features (signatures, TLS validation)")
+    private_key_path: Optional[str] = Field(default=None, description="Path to PEM-encoded private key file")
+    public_key_path: Optional[str] = Field(default=None, description="Path to PEM-encoded public key file")
+    key_rotation_interval_hours: int = Field(default=24, description="Key rotation interval in hours")
+    tls_cert_path: Optional[str] = Field(default=None, description="Path to TLS certificate file")
+    tls_key_path: Optional[str] = Field(default=None, description="Path to TLS private key file")
+    require_tls: bool = Field(default=False, description="Require TLS for all connections")
+    jwt_secret: str = Field(
+        default_factory=generate_local_jwt_secret,
+        description="JWT signing secret - auto-generated for local dev, set JWT_SECRET for production"
+    )
+    jwt_issuer: str = Field(default="agents-mcp", description="JWT issuer name")
+    jwt_expiry_minutes: int = Field(default=60, description="JWT token expiry in minutes")
+    trust_store_path: Optional[str] = Field(default=None, description="Path to trusted public keys directory")
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        """Enforce a strong JWT secret, auto-generating for local development."""
+        DEFAULT_PLACEHOLDER = "change-me-in-production"
+        
+        # If explicitly set to placeholder, reject it
+        if v == DEFAULT_PLACEHOLDER:
+            raise ValueError(
+                "JWT_SECRET cannot be the default 'change-me-in-production'. "
+                "Provide a production-ready secret via the JWT_SECRET environment variable."
+            )
+        
+        # Validate minimum length
+        if len(v) < 32:
+            raise ValueError(
+                f"JWT_SECRET is too short ({len(v)} chars). "
+                "Use at least a 32-character random string."
+            )
+        
+        # Check for whitespace
+        if re.search(r"\s", v):
+            raise ValueError("JWT_SECRET must not contain whitespace characters.")
+        
+        # Log appropriate message
+        logger = logging.getLogger(__name__)
+        env_jwt = os.getenv("JWT_SECRET")
+        if env_jwt:
+            logger.info("JWT secret loaded from JWT_SECRET environment variable.")
+        else:
+            logger.info("JWT secret auto-generated for local development session.")
+        
+        return v
+
+    # Web UI (WUI6): enable/disable minimal built-in dashboard
+    ui_enabled: bool = Field(default=True, description="Mount /ui static dashboard when true")
 
     @classmethod
     def from_file(cls, path: Path) -> "Config":
@@ -304,8 +373,6 @@ class Config(BaseModel):
             )
 
     def get_agent_config(self, agent_type: str) -> Optional[AgentConfig]:
-from __future__ import annotations
-
         """Get configuration for a specific agent type."""
         return self.agents.get(agent_type)
 

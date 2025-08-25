@@ -10,6 +10,9 @@ from agentsmcp.server import AgentServer
 @pytest.fixture
 def config():
     """Return a default config."""
+    import os
+    # Set JWT_SECRET for testing
+    os.environ["JWT_SECRET"] = "test-secret-key-for-testing-needs-32chars-plus"
     cfg = Config()
     cfg.agents['test'] = AgentConfig(type="test", model="test-model")
     return cfg

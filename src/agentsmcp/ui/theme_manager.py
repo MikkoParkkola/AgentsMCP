@@ -148,6 +148,14 @@ class ThemeManager:
         # Auto-detect theme on startup
         self.auto_detect_theme()
     
+    def initialize(self):
+        """Initialize the theme manager - compatibility method for orchestration manager"""
+        # Theme manager is already initialized in __init__
+        # This method exists for compatibility with code expecting an initialize() method
+        if not self.current_theme:
+            self.auto_detect_theme()
+        return self.current_theme
+    
     def _initialize_themes(self):
         """Initialize built-in dark and light themes"""
         # Dark theme - inspired by Claude Code's elegant dark mode
