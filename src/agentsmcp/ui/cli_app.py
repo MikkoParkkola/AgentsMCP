@@ -174,6 +174,8 @@ class CLIApp:
                 await self._run_dashboard_mode()
             elif self.current_mode == "stats":
                 await self._run_statistics_mode()
+            elif self.current_mode == "tui":
+                await self._run_tui_shell()
             else:
                 await self._run_interactive_mode()  # Default fallback
                 
@@ -252,6 +254,16 @@ class CLIApp:
         # Start dashboard
         await self.status_dashboard.start_dashboard()
     
+    async def _run_tui_shell(self):
+        """Run a minimal Rich-based TUI shell (scaffold)."""
+        print(self.ui.clear_screen())
+        try:
+            from .tui_shell import TUIShell
+            shell = TUIShell(theme_manager=self.theme_manager)
+            await shell.run()
+        except Exception as e:
+            await self._show_error(f"TUI shell not available: {e}")
+
     async def _run_statistics_mode(self):
         """Run the statistics display"""
         print(self.ui.clear_screen())

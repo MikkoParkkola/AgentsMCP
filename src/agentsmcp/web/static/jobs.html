@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Jobs</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 1.5rem; }
+      pre { background:#f7f7f7; border:1px solid #ddd; padding:8px; border-radius:8px; max-height:60vh; overflow:auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Jobs</h1>
+    <div>
+      <button id="refresh">Refresh</button>
+      <a href="/ui/">Back</a>
+    </div>
+    <pre id="data">Loading…</pre>
+    <script>
+      async function load(){
+        const r = await fetch('/jobs');
+        const j = await r.json();
+        document.getElementById('data').textContent = JSON.stringify(j, null, 2);
+      }
+      document.getElementById('refresh').addEventListener('click', load);
+      load();
+    </script>
+  </body>
+</html>

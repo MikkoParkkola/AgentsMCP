@@ -3,6 +3,7 @@
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
+import asyncio
 
 
 class BaseTool(ABC):
@@ -19,6 +20,15 @@ class BaseTool(ABC):
     def execute(self, *args, **kwargs) -> str:
         """Execute the tool with given parameters."""
         pass
+
+    async def aexecute(self, *args, **kwargs) -> str:
+        """Async variant of execute.
+
+        Default implementation runs the synchronous execute in a thread to avoid
+        blocking the event loop. Tools can override for true async behavior.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: self.execute(*args, **kwargs))
 
     def to_openai_function(self) -> Dict[str, Any]:
         """Convert tool to OpenAI function format."""

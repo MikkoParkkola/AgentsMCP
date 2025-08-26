@@ -6,6 +6,8 @@ import click
 
 from ..config import Config, MCPServerConfig
 from ..settings import AppSettings
+from ..mcp.manager import MCPServer as _M, get_global_manager as _get
+import json
 
 
 def _load_config(config_path: Optional[str]) -> Config:
@@ -117,6 +119,93 @@ def mcp_remove(name: str, config_path: Optional[str]) -> None:
         raise click.ClickException(f"MCP server not found: {name}")
     path = _save_config(cfg, config_path)
     click.echo(f"Removed MCP server '{name}' from {path}")
+
+
+@mcp.command("warmup")
+@click.option("--timeout", default=20, help="Per-server timeout (seconds)")
+def mcp_warmup(timeout: int) -> None:
+    """Pre-fetch common MCP server packages via npx to reduce first-use latency.
+
+    This is optional and safe to run repeatedly. Network access required.
+    """
+    import shutil
+    import subprocess
+
+    servers = [
+        ("@anthropic/mcp-github", ["npx", "-y", "@anthropic/mcp-github", "--help"]),
+        ("@anthropic/mcp-filesystem", ["npx", "-y", "@anthropic/mcp-filesystem", "--help"]),
+        ("@anthropic/mcp-git", ["npx", "-y", "@anthropic/mcp-git", "--help"]),
+        ("@anthropic/mcp-ollama", ["npx", "-y", "@anthropic/mcp-ollama", "--help"]),
+        ("@anthropic/mcp-ollama-turbo", ["npx", "-y", "@anthropic/mcp-ollama-turbo", "--help"]),
+    ]
+
+    if not shutil.which("npx"):
+        click.echo("npx not found; skipping MCP warmup.")
+        return
+
+    ok = 0
+    for name, cmd in servers:
+        try:
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=timeout)
+            ok += 1
+        except Exception:
+            click.echo(f"Skipped {name} (timeout or error)")
+    click.echo(f"MCP warmup completed: {ok}/{len(servers)} cached")
+
+
+@mcp.command("status")
+@click.option("--config", "config_path", default=None, help="Path to YAML config")
+def mcp_status(config_path: Optional[str]) -> None:
+    """Show MCP manager status as JSON."""
+    cfg = _load_config(config_path)
+    servers = []
+    for s in (cfg.mcp or []):
+        servers.append(_M(name=s.name, command=s.command, transport=s.transport, url=s.url, env=s.env or {}, cwd=s.cwd, enabled=s.enabled))
+    mgr = _get(
+        servers,
+        allow_stdio=bool(getattr(cfg, "mcp_stdio_enabled", True)),
+        allow_ws=bool(getattr(cfg, "mcp_ws_enabled", False)),
+        allow_sse=bool(getattr(cfg, "mcp_sse_enabled", False)),
+    )
+    import asyncio as _asyncio
+    async def _run():
+        st = await mgr.get_status()
+        import json as _json
+        click.echo(_json.dumps(st, indent=2, sort_keys=True))
+    _asyncio.run(_run())
+
+
+@mcp.command("set-flags")
+@click.option("--stdio", type=click.Choice(["on", "off"]))
+@click.option("--ws", type=click.Choice(["on", "off"]))
+@click.option("--sse", type=click.Choice(["on", "off"]))
+@click.option("--config", "config_path", type=click.Path(exists=True, dir_okay=False, readable=True), required=True)
+def mcp_set_flags(stdio: Optional[str], ws: Optional[str], sse: Optional[str], config_path: str) -> None:
+    """Update MCP transport flags (stdio/ws/sse) in configuration.
+
+    When no flags are provided, prints current values without persisting.
+    """
+    cfg = _load_config(config_path)
+    changed = False
+    if stdio is not None:
+        cfg.mcp_stdio_enabled = (stdio == "on")  # type: ignore[attr-defined]
+        changed = True
+    if ws is not None:
+        cfg.mcp_ws_enabled = (ws == "on")  # type: ignore[attr-defined]
+        changed = True
+    if sse is not None:
+        cfg.mcp_sse_enabled = (sse == "on")  # type: ignore[attr-defined]
+        changed = True
+
+    if changed:
+        _save_config(cfg, config_path)
+
+    flags = {
+        "stdio": bool(getattr(cfg, "mcp_stdio_enabled", True)),
+        "ws": bool(getattr(cfg, "mcp_ws_enabled", False)),
+        "sse": bool(getattr(cfg, "mcp_sse_enabled", False)),
+    }
+    click.echo(json.dumps(flags))
 
 
 @mcp.command("serve")

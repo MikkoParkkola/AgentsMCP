@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>AgentsMCP Settings</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 1.5rem; }
+      .row { display:flex; gap:1rem; }
+      .col { flex:1; border:1px solid #ddd; padding:1rem; border-radius:8px; }
+      label { display:block; font-weight:600; margin-top:0.5rem; }
+      input { width:100%; padding:6px; }
+      .banner { padding:8px 12px; border-radius:6px; margin-bottom: 10px; display:none; }
+      .banner.ok { background:#e6ffe6; color:#063; border:1px solid #c7f3c7; }
+      .banner.err { background:#ffe6e6; color:#933; border:1px solid #f2c1c1; }
+    </style>
+  </head>
+  <body>
+    <h1>Settings</h1>
+    <div id="banner" class="banner"></div>
+    <div class="row">
+      <div class="col">
+        <h3>Providers</h3>
+        <div id="providers"></div>
+      </div>
+      <div class="col">
+        <h3>Agents</h3>
+        <div id="agents"></div>
+      </div>
+    </div>
+    <div style="margin-top:1rem;">
+      <button id="save">Save Settings</button>
+      <a href="/ui/">Back to Dashboard</a>
+    </div>
+
+    <script>
+      const banner = document.getElementById('banner');
+      function show(msg, ok=true){
+        banner.className = 'banner ' + (ok ? 'ok' : 'err');
+        banner.textContent = msg; banner.style.display='block';
+      }
+
+      async function load(){
+        const r = await fetch('/settings');
+        const j = await r.json();
+        // Providers
+        const p = document.getElementById('providers');
+        p.innerHTML = '';
+        for (const name of Object.keys(j.providers||{})){
+          const item = j.providers[name];
+          const div = document.createElement('div');
+          div.innerHTML = `
+            <fieldset style="margin-bottom:10px;">
+              <legend><b>${name}</b></legend>
+              <label>API Base</label>
+              <input data-p="${name}" data-k="api_base" value="${item.api_base||''}" />
+              <label>API Key</label>
+              <input data-p="${name}" data-k="api_key" placeholder="${item.has_key?'(set)':''}" />
+            </fieldset>
+          `;
+          p.appendChild(div);
+        }
+        // Agents
+        const a = document.getElementById('agents');
+        a.innerHTML = '';
+        for (const name of Object.keys(j.agents||{})){
+          const item = j.agents[name];
+          const div = document.createElement('div');
+          div.innerHTML = `
+            <fieldset style="margin-bottom:10px;">
+              <legend><b>${name}</b></legend>
+              <label>Model</label>
+              <input data-a="${name}" data-k="model" value="${item.model||''}" />
+              <small>Provider: ${item.provider}</small>
+            </fieldset>
+          `;
+          a.appendChild(div);
+        }
+      }
+
+      document.getElementById('save').addEventListener('click', async ()=>{
+        try {
+          const body = { providers:{}, agents:{} };
+          document.querySelectorAll('[data-p]').forEach(inp => {
+            const name = inp.getAttribute('data-p');
+            const key = inp.getAttribute('data-k');
+            body.providers[name] = body.providers[name]||{};
+            body.providers[name][key] = inp.value;
+          });
+          document.querySelectorAll('[data-a]').forEach(inp => {
+            const name = inp.getAttribute('data-a');
+            const key = inp.getAttribute('data-k');
+            body.agents[name] = body.agents[name]||{};
+            body.agents[name][key] = inp.value;
+          });
+          const r = await fetch('/settings', {
+            method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+          });
+          if (!r.ok) throw new Error(await r.text());
+          show('Saved.');
+        } catch (e) {
+          show('Save failed: ' + e, false);
+        }
+      });
+
+      load().catch(e=>show('Load failed: '+e, false));
+    </script>
+  </body>
+</html>

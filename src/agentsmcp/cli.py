@@ -24,24 +24,7 @@ from agentsmcp.commands.mcp import mcp as mcp_group
 # Chat functionality moved to enhanced interactive mode
 from agentsmcp.commands.discovery import discovery as discovery_group
 
-# Revolutionary UI Integration
-from agentsmcp.ui.cli_app import CLIApp, CLIConfig
-from agentsmcp.ui.statistics_display import StatisticsDisplay
-from agentsmcp.ui.theme_manager import ThemeManager
-
-# Cost Intelligence Integration
-try:
-    from agentsmcp.cost.tracker import CostTracker
-    from agentsmcp.cost.optimizer import ModelOptimizer
-    from agentsmcp.cost.budget import BudgetManager
-    COST_AVAILABLE = True
-except ImportError:
-    COST_AVAILABLE = False
-
-from agentsmcp.paths import ensure_dirs, pid_file_path
-
-# Ensure user data directories exist early
-ensure_dirs()
+from agentsmcp.paths import pid_file_path, ensure_dirs
 
 PID_FILE = pid_file_path()
 
@@ -81,40 +64,15 @@ def main(
     spinner = _Spinner("Initializing AgentsMCP")
     spinner.start()
     try:
+        # Create user data directories on demand (avoid import-time side effects)
+        try:
+            ensure_dirs()
+        except Exception:
+            pass
         config = _load_config(config_path)
         configure_logging(log_level or "INFO", log_format or "text")
-        # First-run warmup: ensure MCP servers are pulled/cached (non-fatal)
-        try:
-            warm = _Spinner("Warming up MCP servers")
-            warm.start()
-            _warmup_mcp_servers()
-        finally:
-            warm.stop("MCP ready")
     finally:
         spinner.stop("Initialized")
-
-def _warmup_mcp_servers() -> None:
-    """Non-blocking, best-effort warmup for common MCP servers.
-
-    Prefetches npx MCP server packages to reduce first-use latency.
-    Safe to run repeatedly; failures are ignored.
-    """
-    import shutil
-    import subprocess
-    servers = [
-        ("@anthropic/mcp-github", ["npx", "-y", "@anthropic/mcp-github", "--help"]),
-        ("@anthropic/mcp-filesystem", ["npx", "-y", "@anthropic/mcp-filesystem", "--help"]),
-        ("@anthropic/mcp-git", ["npx", "-y", "@anthropic/mcp-git", "--help"]),
-        ("@anthropic/mcp-ollama", ["npx", "-y", "@anthropic/mcp-ollama", "--help"]),
-        ("@anthropic/mcp-ollama-turbo", ["npx", "-y", "@anthropic/mcp-ollama-turbo", "--help"]),
-    ]
-    if not shutil.which("npx"):
-        return
-    for _, cmd in servers:
-        try:
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
-        except Exception:
-            continue
 
 
 # Add revolutionary UI commands
@@ -137,20 +95,23 @@ def _warmup_mcp_servers() -> None:
     type=click.Choice(["openai", "anthropic", "ollama", "ollama-turbo", "openrouter", "codex"]),
 )
 @click.option("--streaming/--no-streaming", default=True, help="Enable/disable streaming mode")
-@click.option("--no-webui", is_flag=True, help="Do not start the web UI server alongside the interactive CLI")
+@click.option("--webui/--no-webui", default=False, help="Start the web UI server alongside the interactive CLI")
+@click.option("--ui", "ui_mode", default="interactive", type=click.Choice(["interactive", "dashboard", "tui", "stats"]))
 def interactive(theme: str, no_welcome: bool, refresh_interval: float, orchestrator_model: str,
                agent_type: str, model_override: Optional[str], provider_override: Optional[str], streaming: bool,
-               no_webui: bool) -> None:
+               webui: bool, ui_mode: str) -> None:
     """Launch enhanced interactive CLI with AI chat, agent orchestration, and task delegation."""
     
     async def run_interactive():
         from agentsmcp.settings import AppSettings
         import subprocess
+        # Lazy-load UI modules to keep import-time fast
+        from agentsmcp.ui.cli_app import CLIApp, CLIConfig
         
         # Optionally start the web UI server in the background
         web_proc = None
         env = AppSettings()
-        if not no_webui:
+        if webui:
             try:
                 cmd = [
                     "python",
@@ -167,18 +128,33 @@ def interactive(theme: str, no_welcome: bool, refresh_interval: float, orchestra
                 boot = _Spinner("Starting Web UI")
                 boot.start()
                 web_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                # Give it a moment to bind; keep it snappy (<= 1s)
-                time.sleep(0.6)
-                boot.stop()
-                click.echo("✓ Web UI started")
-                click.echo(f"🌐 Web UI: http://{env.server_host}:{env.server_port}/ui (disable with --no-webui)")
+                # Actively probe readiness with short backoff up to ~5s
+                import urllib.request
+                ready = False
+                delay = 0.2
+                for _ in range(10):
+                    try:
+                        with urllib.request.urlopen(f"http://{env.server_host}:{env.server_port}/health/live", timeout=1.0) as resp:
+                            if resp.status == 200:
+                                ready = True
+                                break
+                    except Exception:
+                        pass
+                    time.sleep(delay)
+                    delay = min(1.5, delay * 1.7)
+                boot.stop("Web UI ready" if ready else None)
+                if ready:
+                    click.echo("✓ Web UI started")
+                    click.echo(f"🌐 Web UI: http://{env.server_host}:{env.server_port}/ui (disable with --no-webui)")
+                else:
+                    click.echo("⚠️  Web UI may not be ready yet; try again shortly")
             except Exception as e:
                 click.echo(f"⚠️  Failed to start web UI automatically: {e}")
         cli_config = CLIConfig(
             theme_mode=theme,
             show_welcome=not no_welcome,
             refresh_interval=refresh_interval,
-            interface_mode="interactive",
+            interface_mode=ui_mode,
             orchestrator_model=orchestrator_model,
             agent_type=agent_type,
             model_override=model_override,
@@ -211,12 +187,14 @@ def dashboard(theme: str, refresh_interval: float, orchestrator_model: str) -> N
     """Launch real-time dashboard with cost monitoring and agent orchestration."""
     
     async def run_dashboard():
+        # Lazy-load UI modules
+        from agentsmcp.ui.cli_app import CLIApp, CLIConfig
         cli_config = CLIConfig(
             theme_mode=theme,
             refresh_interval=refresh_interval,
             interface_mode="dashboard"
         )
-        
+
         app = CLIApp(cli_config)
         try:
             result = await app.start()
@@ -240,8 +218,13 @@ def dashboard(theme: str, refresh_interval: float, orchestrator_model: str) -> N
 def costs(breakdown: bool, daily: bool, monthly: bool, format: str) -> None:
     """Display current costs and budget status with beautiful formatting."""
     
-    if not COST_AVAILABLE:
-        click.echo("❌ Cost tracking not available. Install cost dependencies.")
+    # Lazy import cost modules to avoid penalizing CLI startup
+    try:
+        from agentsmcp.ui.theme_manager import ThemeManager
+        from agentsmcp.ui.statistics_display import StatisticsDisplay
+        from agentsmcp.cost.tracker import CostTracker
+    except Exception:
+        click.echo("❌ Cost tracking not available. Install cost extras.")
         sys.exit(1)
     
     async def show_costs():
@@ -300,27 +283,41 @@ def costs(breakdown: bool, daily: bool, monthly: bool, format: str) -> None:
 @click.argument("amount", type=float, required=False)
 @click.option("--check", is_flag=True, help="Check current budget status")
 @click.option("--remaining", is_flag=True, help="Show remaining budget")
-def budget(amount: Optional[float], check: bool, remaining: bool) -> None:
+@click.option("--json", "as_json", is_flag=True, help="Output JSON envelope")
+def budget(amount: Optional[float], check: bool, remaining: bool, as_json: bool) -> None:
     """Manage monthly budget and get cost alerts."""
     
-    if not COST_AVAILABLE:
-        click.echo("❌ Budget management not available. Install cost dependencies.")
+    # Lazy import cost modules
+    try:
+        from agentsmcp.cost.tracker import CostTracker
+        from agentsmcp.cost.budget import BudgetManager
+    except Exception:
+        click.echo("❌ Budget management not available. Install cost extras.")
         sys.exit(1)
-    
+
     tracker = CostTracker()
     
     if amount is not None:
         # Set new budget
         budget_manager = BudgetManager(tracker, amount)
-        click.echo(f"💰 Monthly budget set to ${amount:.2f}")
-        
-        # Show immediate status
-        if budget_manager.check_budget():
-            remaining_budget = budget_manager.remaining_budget()
-            click.echo(f"✅ Within budget! ${remaining_budget:.2f} remaining")
+        if as_json:
+            res = {
+                "ok": True,
+                "budget": amount,
+                "within": budget_manager.check_budget(),
+                "remaining": budget_manager.remaining_budget(),
+                "spent": tracker.total_cost,
+            }
+            import json as _json
+            click.echo(_json.dumps(res))
         else:
-            overspend = tracker.total_cost - amount
-            click.echo(f"⚠️  Over budget by ${overspend:.2f}!")
+            click.echo(f"💰 Monthly budget set to ${amount:.2f}")
+            if budget_manager.check_budget():
+                remaining_budget = budget_manager.remaining_budget()
+                click.echo(f"✅ Within budget! ${remaining_budget:.2f} remaining")
+            else:
+                overspend = tracker.total_cost - amount
+                click.echo(f"⚠️  Over budget by ${overspend:.2f}!")
         return
     
     # Default behavior - assume $100 budget for demo
@@ -330,23 +327,38 @@ def budget(amount: Optional[float], check: bool, remaining: bool) -> None:
         total_cost = tracker.total_cost
         budget_ok = budget_manager.check_budget()
         remaining_amt = budget_manager.remaining_budget()
-        
-        if budget_ok:
-            click.echo(f"✅ Budget Status: GOOD")
-            click.echo(f"💵 Spent: ${total_cost:.4f} / $100.00")
-            click.echo(f"💰 Remaining: ${remaining_amt:.4f}")
+        if as_json:
+            res = {
+                "ok": True,
+                "within": budget_ok,
+                "remaining": remaining_amt,
+                "spent": total_cost,
+                "budget": 100.0,
+            }
+            import json as _json
+            click.echo(_json.dumps(res))
         else:
-            overspend = total_cost - 100.0
-            click.echo(f"⚠️  Budget Status: OVER")
-            click.echo(f"💸 Overspent by: ${overspend:.4f}")
+            if budget_ok:
+                click.echo(f"✅ Budget Status: GOOD")
+                click.echo(f"💵 Spent: ${total_cost:.4f} / $100.00")
+                click.echo(f"💰 Remaining: ${remaining_amt:.4f}")
+            else:
+                overspend = total_cost - 100.0
+                click.echo(f"⚠️  Budget Status: OVER")
+                click.echo(f"💸 Overspent by: ${overspend:.4f}")
     else:
-        click.echo("Usage: agentsmcp budget <amount> or agentsmcp budget --check")
+        if as_json:
+            import json as _json
+            click.echo(_json.dumps({"ok": False, "error": {"code": "usage", "message": "budget <amount> or --check"}}))
+        else:
+            click.echo("Usage: agentsmcp budget <amount> or agentsmcp budget --check")
 
 
 @main.command("models")
 @click.option("--detailed", is_flag=True, help="Show detailed model specifications")
 @click.option("--recommend", help="Get model recommendation for use case")
-def models(detailed: bool, recommend: Optional[str]) -> None:
+@click.option("--format", "fmt", default="table", type=click.Choice(["table", "json"]))
+def models(detailed: bool, recommend: Optional[str], fmt: str) -> None:
     """Show available orchestrator models and recommendations."""
     
     # Import here to avoid circular imports
@@ -364,7 +376,12 @@ def models(detailed: bool, recommend: Optional[str]) -> None:
         return
     
     available_models = DistributedOrchestrator.get_available_models()
-    
+
+    if fmt == "json":
+        import json as _json
+        click.echo(_json.dumps(available_models))
+        return
+
     click.echo("🤖 Available Orchestrator Models:")
     click.echo("=" * 60)
     
@@ -409,11 +426,14 @@ def models(detailed: bool, recommend: Optional[str]) -> None:
 @click.option("--dry-run", is_flag=True, help="Show optimization recommendations without applying")
 def optimize(mode: str, task_type: Optional[str], dry_run: bool) -> None:
     """Optimize model selection for cost-effectiveness."""
-    
-    if not COST_AVAILABLE:
-        click.echo("❌ Model optimization not available. Install cost dependencies.")
+    # Lazy import optimizer/cost modules
+    try:
+        from agentsmcp.cost.tracker import CostTracker
+        from agentsmcp.cost.optimizer import ModelOptimizer
+    except Exception:
+        click.echo("❌ Model optimization not available. Install cost extras.")
         sys.exit(1)
-    
+
     tracker = CostTracker()
     optimizer = ModelOptimizer(tracker)
     
@@ -456,17 +476,23 @@ def server() -> None:
 @click.option("--port", default=None, type=int)
 @click.option("--background", is_flag=True, help="Run server in background")
 @click.option("--config", "config_path", default=None)
+@click.option("--enable-mcp-api", is_flag=True, help="Enable MCP REST API endpoints (/mcp)")
 def server_start(
     host: Optional[str],
     port: Optional[int],
     background: bool,
     config_path: Optional[str],
+    enable_mcp_api: bool,
 ) -> None:
     env = AppSettings()
     if host:
         env.server_host = host  # type: ignore[attr-defined]
     if port:
         env.server_port = port  # type: ignore[attr-defined]
+
+    # Optional: enable /mcp via env toggle handled in AppSettings
+    if enable_mcp_api:
+        os.environ["AGENTSMCP_MCP_API_ENABLED"] = "true"
 
     if background:
         # Launch uvicorn as a subprocess using the factory
@@ -486,7 +512,7 @@ def server_start(
         proc = subprocess.Popen(cmd)
         PID_FILE.write_text(str(proc.pid))
         click.echo(f"🚀 Server started in background (pid={proc.pid})")
-        click.echo(f"🌐 Web dashboard: http://{host or env.server_host}:{port or env.server_port}/ui")
+        click.echo(f"🌐 Web dashboard (if enabled): http://{host or env.server_host}:{port or env.server_port}/ui")
     else:
         # Run blocking in current process
         if config_path:
@@ -494,7 +520,7 @@ def server_start(
         import uvicorn
 
         click.echo(f"🚀 Starting AgentsMCP server...")
-        click.echo(f"🌐 Web dashboard will be available at: http://{host or env.server_host}:{port or env.server_port}/ui")
+        click.echo(f"🌐 Web dashboard (if enabled): http://{host or env.server_host}:{port or env.server_port}/ui")
         
         uvicorn.run(
             "agentsmcp.server:create_app",
