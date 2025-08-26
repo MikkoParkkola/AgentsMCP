@@ -68,6 +68,13 @@ Template:
 - **Message:** Document roadmap and backlog and provide MCP client configuration for tool access.
 - **Follow-up:** Product docs updated and default configuration file added.
 
+## 2025-08-26 11:05 UTC
+- **From:** automated agent
+- **To:** contributors
+- **Type:** instruction
+- **Message:** Completed UI/UX review across CLI flags, interactive CLI, and Web UI. Logged phased plan and parity requirements.
+- **Follow-up:** Implement Phase A: structured TUI scaffold, Web UI readiness + error banners, SSE with backoff, and feature parity for Jobs/Agents/Models/Providers/MCP/Discovery/Costs/Settings.
+
 ## 2025-08-26 10:15 UTC
 - **From:** automated agent
 - **To:** contributors
