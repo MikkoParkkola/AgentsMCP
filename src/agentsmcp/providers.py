@@ -242,6 +242,58 @@ def ollama_list_models(config: ProviderConfig) -> List[Model]:
     return models
 
 
+def ollama_turbo_list_models(config: ProviderConfig) -> List[Model]:
+    """List models from cloud Ollama Turbo service using /api/tags.
+
+    - Requires API key for cloud access via OLLAMA_TURBO_API_KEY env var
+    - Uses https://ollama.com as default base URL
+    - Same API spec as local Ollama but with authentication
+    """
+    base = (config.api_base.rstrip("/")) if config.api_base else "https://ollama.com"
+    url = f"{base}/api/tags"
+    headers = {"Accept": "application/json", **_bearer_headers(config.api_key)}
+
+    if not config.api_key:
+        raise ProviderAuthError("Missing Ollama Turbo API key (set OLLAMA_TURBO_API_KEY)")
+
+    try:
+        logger.debug("ollama_turbo.list_models.request", url=url)
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(url, headers=headers)
+    except (httpx.ConnectError, httpx.ReadTimeout, httpx.NetworkError) as e:  # type: ignore[attr-defined]
+        raise ProviderNetworkError(f"Ollama Turbo network error: {e}") from e
+    except Exception as e:  # pragma: no cover - unexpected
+        raise ProviderError(f"Ollama Turbo request failed: {e}") from e
+
+    if resp.status_code in (401, 403):
+        raise ProviderAuthError(f"Ollama Turbo auth error: HTTP {resp.status_code}")
+    if resp.status_code >= 500:
+        raise ProviderNetworkError(f"Ollama Turbo server error: HTTP {resp.status_code}")
+    if resp.status_code >= 400:
+        raise ProviderProtocolError(
+            f"Ollama Turbo protocol error: HTTP {resp.status_code} body={resp.text[:200]}"
+        )
+
+    try:
+        data = resp.json()
+        items = data.get("models", [])
+        if not isinstance(items, list):
+            raise ValueError("Response 'models' is not a list")
+    except Exception as e:
+        raise ProviderProtocolError(f"Ollama Turbo response parse error: {e}") from e
+
+    models = []
+    for m in items:
+        # Prefer the human-facing tag name; fall back to internal model string
+        mid = m.get("name") or m.get("model")
+        if not mid:
+            continue
+        models.append(
+            Model(id=str(mid), provider=ProviderType.OLLAMA_TURBO, name=str(mid))
+        )
+    return models
+
+
 # =========================
 # Facade (B5)
 # =========================
@@ -257,6 +309,8 @@ def list_models(provider: ProviderType, config: ProviderConfig) -> List[Model]:
             return openrouter_list_models(config)
         if provider == ProviderType.OLLAMA:
             return ollama_list_models(config)
+        if provider == ProviderType.OLLAMA_TURBO:
+            return ollama_turbo_list_models(config)
         raise ProviderProtocolError(f"Unsupported provider: {provider}")
     except ProviderError:
         # Re-raise known provider errors as-is (already mapped & informative)
@@ -280,6 +334,7 @@ __all__ = [
     "openai_list_models",
     "openrouter_list_models",
     "ollama_list_models",
+    "ollama_turbo_list_models",
     "list_models",
 ]
 

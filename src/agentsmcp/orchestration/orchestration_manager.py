@@ -791,6 +791,32 @@ class OrchestrationManager:
                 }
             }
         }
+
+        # If Claude Code CLI is installed, add it as an MCP server option
+        try:
+            claude_code_bin = shutil.which("claude-code")
+            if claude_code_bin:
+                config["mcpServers"]["claude-code-cli"] = {
+                    "command": claude_code_bin,
+                    "args": ["mcp-server"],
+                    "env": {
+                        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"
+                    }
+                }
+        except Exception:
+            pass
+
+        # If a Codex CLI is installed, add it as an MCP server option
+        try:
+            codex_bin = shutil.which("codex") or shutil.which("codex-cli")
+            if codex_bin:
+                config["mcpServers"]["codex-cli"] = {
+                    "command": codex_bin,
+                    "args": ["mcp-server"],
+                    "env": {}
+                }
+        except Exception:
+            pass
         
         # Format as pretty-printed JSON
         config_json = json.dumps(config, indent=2)

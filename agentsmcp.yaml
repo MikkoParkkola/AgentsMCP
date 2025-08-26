@@ -11,25 +11,116 @@ rag:
   chunk_overlap: 50
   max_results: 10
   similarity_threshold: 0.7
+# Multiple provider configurations
+# Supported providers:
+# - openai: OpenAI GPT models (requires OPENAI_API_KEY)
+# - openrouter: Multi-model API gateway (requires OPENROUTER_API_KEY)
+# - ollama: Local Ollama daemon (default: gpt-oss:20b, no auth required, localhost:11434)
+# - ollama-turbo: Cloud Ollama service (default: gpt-oss:120b, requires OLLAMA_TURBO_API_KEY)
+# - custom: Custom OpenAI-compatible API (requires CUSTOM_API_KEY)
+providers:
+  openai:
+    name: openai
+    api_key: null  # Set via OPENAI_API_KEY env var
+    api_base: null
+  openrouter:
+    name: openrouter
+    api_key: null  # Set via OPENROUTER_API_KEY env var
+    api_base: "https://openrouter.ai/api/v1"
+  ollama:
+    name: ollama
+    api_key: null
+    api_base: "http://localhost:11434"
+  ollama-turbo:
+    name: ollama-turbo
+    api_key: null  # Set via OLLAMA_TURBO_API_KEY env var
+    api_base: "https://ollama.com"
+  custom:
+    name: custom
+    api_key: null  # Set via CUSTOM_API_KEY env var
+    api_base: null
+
 agents:
+  # OpenAI-based agents
   codex:
     type: codex
+    provider: openai
     model: gpt-4
+    model_priority: ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"]
     system_prompt: "You are a code generation and analysis expert."
     tools: [filesystem, git, bash]
-    mcp: [git-mcp]
+    mcp: [git-mcp, agentsmcp-self]
+    max_tokens: 4000
+    temperature: 0.1
+    
   claude:
     type: claude
-    model: claude-3-sonnet
+    provider: openrouter
+    model: "anthropic/claude-3.5-sonnet"
+    model_priority: ["anthropic/claude-3.5-sonnet", "anthropic/claude-3-sonnet", "anthropic/claude-3-haiku"]
     system_prompt: "You are a helpful AI assistant with deep reasoning capabilities."
-    tools: [filesystem, web_search]
-    mcp: []
-  ollama:
+    tools: [filesystem, web_search, git, bash]
+    mcp: [git-mcp, agentsmcp-self]
+    max_tokens: 8000
+    temperature: 0.2
+    
+  # Local Ollama agents (using gpt-oss:20b as default)
+  ollama-general:
     type: ollama
-    model: llama2
-    system_prompt: "You are a cost-effective AI assistant for general tasks."
-    tools: [filesystem]
-    mcp: []
+    provider: ollama
+    model: gpt-oss:20b
+    model_priority: ["gpt-oss:20b", "llama3.2:3b", "llama3.1:8b"]
+    system_prompt: "You are a cost-effective local AI assistant for general tasks."
+    tools: [filesystem, git, bash]
+    mcp: [git-mcp, agentsmcp-self]
+    max_tokens: 2000
+    temperature: 0.3
+    
+  ollama-coding:
+    type: coding-specialist
+    provider: ollama
+    model: gpt-oss:20b
+    model_priority: ["gpt-oss:20b", "deepseek-coder:6.7b", "codellama:7b"]
+    system_prompt: "You are a specialized coding assistant focused on writing, debugging, and explaining code using local models."
+    tools: [filesystem, git, bash]
+    mcp: [git-mcp, agentsmcp-self]
+    max_tokens: 4000
+    temperature: 0.1
+    
+  # Cloud Ollama agents (ollama-turbo) - using gpt-oss:120b as default for superior performance
+  ollama-turbo-general:
+    type: ollama-turbo
+    provider: ollama-turbo
+    model: gpt-oss:120b
+    model_priority: ["gpt-oss:120b", "gpt-oss:20b"]
+    system_prompt: "You are a powerful cloud-based AI assistant using Ollama Turbo's gpt-oss:120b model for comprehensive task handling."
+    tools: [filesystem, git, bash, web_search]
+    mcp: [git-mcp, agentsmcp-self]
+    max_tokens: 4000
+    temperature: 0.2
+    
+  ollama-turbo-coding:
+    type: coding-specialist
+    provider: ollama-turbo
+    model: gpt-oss:120b
+    model_priority: ["gpt-oss:120b", "gpt-oss:20b"]
+    system_prompt: "You are a specialized coding assistant using Ollama Turbo's powerful gpt-oss:120b model for advanced code generation, debugging, and analysis."
+    tools: [filesystem, git, bash]
+    mcp: [git-mcp, agentsmcp-self]
+    max_tokens: 6000
+    temperature: 0.1
+    
+  # Custom provider agent
+  custom-agent:
+    type: custom
+    provider: custom
+    model: custom-model-1
+    api_key_env: CUSTOM_API_KEY
+    system_prompt: "You are a specialized agent for custom tasks."
+    tools: [filesystem, git]
+    mcp: [git-mcp]
+    max_tokens: 2000
+    temperature: 0.5
 
 # Optional MCP servers - toggle enabled: true/false
 mcp:
@@ -39,22 +130,129 @@ mcp:
     command: ["npx", "-y", "@modelcontextprotocol/server-git"]
     env: {}
     cwd: null
+  
+  # Self-referential AgentsMCP server for recursive agent creation
+  - name: agentsmcp-self
+    enabled: true
+    transport: http
+    command: []
+    url: "http://localhost:8000"
+    env: {}
+    cwd: null
+    description: "AgentsMCP server for creating specialized sub-agents recursively"
 
-# Built-in tools
+  # Local Claude Code CLI MCP server (if installed)
+  - name: claude-code-cli
+    enabled: true
+    transport: stdio
+    command: ["claude-code", "mcp-server"]
+    env: { ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}" }
+    cwd: null
+    description: "Claude Code CLI MCP server for complex coding tasks"
+
+  # Local Codex CLI MCP server (if installed)
+  - name: codex-cli
+    enabled: true
+    transport: stdio
+    command: ["codex", "mcp-server"]
+    env: {}
+    cwd: null
+    description: "Codex CLI MCP server for complex coding tasks"
+
+# Built-in tools with enhanced filesystem capabilities
 tools:
   - name: filesystem
     type: filesystem
+    enabled: true
     config:
       allowed_paths:
         - /tmp
         - .
+        - ./workspace
+        - ./projects
+        - ./sandbox
+      max_file_size_mb: 50
+      allowed_extensions:
+        - .py
+        - .js
+        - .ts
+        - .jsx
+        - .tsx
+        - .json
+        - .yaml
+        - .yml
+        - .md
+        - .txt
+        - .html
+        - .css
+        - .sql
+        - .sh
+        - .toml
+        - .xml
+        - .csv
+      operations:
+        - read
+        - write
+        - create
+        - delete
+        - list
+        - copy
+        - move
+        - mkdir
+        - rmdir
+        
   - name: git
     type: git
-    config: {}
+    enabled: true
+    config:
+      timeout: 120
+      allowed_operations:
+        - status
+        - add
+        - commit
+        - push
+        - pull
+        - checkout
+        - branch
+        - merge
+        - rebase
+        - diff
+        - log
+        - clone
+        - init
+        
   - name: bash
     type: bash
+    enabled: true
     config:
       timeout: 60
+      allowed_commands:
+        - ls
+        - cat
+        - grep
+        - find
+        - mkdir
+        - rmdir
+        - cp
+        - mv
+        - rm
+        - chmod
+        - chown
+        - pwd
+        - cd
+        - echo
+        - python
+        - python3
+        - node
+        - npm
+        - pip
+        - pip3
+        - curl
+        - wget
+        
   - name: web_search
     type: web_search
-    config: {}
+    enabled: true
+    config:
+      timeout: 30
+      max_results: 10

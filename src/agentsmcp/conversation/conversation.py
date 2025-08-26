@@ -112,7 +112,8 @@ class ConversationManager:
             ],
             "analyze_repository": [
                 r"analyze.*repository", r"analyze.*project", r"investigate.*project",
-                r"scan.*project", r"examine.*project", r"repository.*analysis"
+                r"scan.*project", r"examine.*project", r"repository.*analysis",
+                r"analyze.*repo", r"analyze.*current.*repo", r"analyze.*the.*current.*repo"
             ],
             "exit": [
                 r"exit", r"quit", r"bye", r"goodbye",

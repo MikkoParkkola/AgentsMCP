@@ -7,7 +7,7 @@ from .analysis_tools import (
     text_analysis_tool,
 )
 from .base_tools import BaseTool, tool_registry
-from .file_tools import FileOperationTool, read_file_tool, write_file_tool
+from .file_tools import FileOperationTool, read_file_tool, write_file_tool, list_directory_tool
 from .web_tools import (
     HttpRequestTool,
     WebSearchTool,
@@ -22,6 +22,7 @@ __all__ = [
     "FileOperationTool",
     "read_file_tool",
     "write_file_tool",
+    "list_directory_tool",
     "TextAnalysisTool",
     "CodeAnalysisTool",
     "text_analysis_tool",

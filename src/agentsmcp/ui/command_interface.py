@@ -28,8 +28,17 @@ import logging
 
 from .theme_manager import ThemeManager
 from .ui_components import UIComponents
+from ..agent_manager import AgentManager
+from ..config import Config, ProviderType, ProviderConfig
+from ..providers import list_models as providers_list_models, ProviderError
+from ..providers_validate import validate_provider_config, ValidationResult
+from ..config_write import persist_provider_api_key
+from ..stream import generate_stream_from_text, openai_stream_text
+from rich.prompt import Prompt, Confirm
+from rich.table import Table as RichTable
+from rich.panel import Panel
 from ..orchestration.orchestration_manager import OrchestrationManager
-from ..conversation import ConversationManager
+from ..conversation.conversation import ConversationManager
 # Import settings UI after initial setup to avoid circular imports
 try:
     from .modern_settings_ui import run_modern_settings_dialog
@@ -79,11 +88,22 @@ class CommandInterface:
     
     def __init__(self, orchestration_manager: OrchestrationManager,
                  theme_manager: Optional[ThemeManager] = None,
-                 config: Optional[InterfaceConfig] = None):
+                 config: Optional[InterfaceConfig] = None,
+                 agent_manager: Optional[AgentManager] = None,
+                 app_config: Optional[Config] = None):
         self.orchestration_manager = orchestration_manager
         self.theme_manager = theme_manager or ThemeManager()
         self.ui = UIComponents(self.theme_manager)
         self.config = config or InterfaceConfig()
+        
+        # Agent orchestration and configuration
+        self.agent_manager = agent_manager
+        self.app_config = app_config
+        # Default to cloud ollama-turbo coding agent (gpt-oss:120b)
+        self.current_agent = "ollama-turbo-coding"
+        self.session_history: List[Tuple[str, str]] = []  # (role, text) pairs
+        self.context_percent = 0  # Context trimming percentage
+        self.stream_enabled = True  # Enable streaming by default
         
         # Command registry
         self.commands: Dict[str, CommandDefinition] = {}
@@ -101,7 +121,11 @@ class CommandInterface:
         self.last_suggestions: List[str] = []
         
         # Conversational interface
-        self.conversation_manager = ConversationManager(self, self.theme_manager)
+        self.conversation_manager = ConversationManager(
+            command_interface=self, 
+            theme_manager=self.theme_manager,
+            agent_manager=getattr(self, 'agent_manager', None)
+        )
         self.conversational_mode = True  # Enable conversational mode by default
         
         # Initialize commands and readline
@@ -254,17 +278,151 @@ class CommandInterface:
                 parameters=[]
             )
             self.register_command(settings_cmd)
-            
-            # Register generate-config command
-            generate_config_cmd = CommandDefinition(
-                name="generate-config",
-                description="Generate MCP client configuration with auto-discovered paths",
-                handler=self._cmd_generate_config,
-                category="interface", 
-                examples=["generate-config"],
-                parameters=[]
-            )
-            self.register_command(generate_config_cmd)
+
+        # Always register keys command so users can check state even without the full settings UI
+        keys_cmd = CommandDefinition(
+            name="keys",
+            description="Show API key status for supported providers (config first, then env)",
+            handler=self._cmd_keys,
+            category="interface",
+            examples=["keys"],
+            parameters=[]
+        )
+        self.register_command(keys_cmd)
+
+        # Export-keys helper (prints ready-to-copy export lines)
+        export_keys_cmd = CommandDefinition(
+            name="export-keys",
+            description="Print export commands for API keys (placeholders by default; use --include-values to print actual keys)",
+            handler=self._cmd_export_keys,
+            category="interface",
+            examples=["export-keys", "export-keys --include-values"],
+            parameters=[{"name": "include_values", "type": "bool", "default": False}]
+        )
+        self.register_command(export_keys_cmd)
+
+        # Provider order insight
+        provider_order_cmd = CommandDefinition(
+            name="provider-order",
+            description="Show the provider fallback order and which will be skipped due to missing keys",
+            handler=self._cmd_provider_order,
+            category="interface",
+            examples=["provider-order"],
+            parameters=[]
+        )
+        self.register_command(provider_order_cmd)
+        # Register generate-config command
+        generate_config_cmd = CommandDefinition(
+            name="generate-config",
+            description="Generate MCP client configuration with auto-discovered paths",
+            handler=self._cmd_generate_config,
+            category="interface", 
+            examples=["generate-config"],
+            parameters=[]
+        )
+        self.register_command(generate_config_cmd)
+
+        # Session management commands
+        session_commands = [
+                CommandDefinition(
+                    name="analyze",
+                    description="Analyze the current repository for structure and issues",
+                    handler=self._cmd_analyze,
+                    category="session",
+                    examples=["analyze"],
+                    parameters=[]
+                ),
+                CommandDefinition(
+                    name="provider-use",
+                    description="Set the primary provider for this session and persist to user settings",
+                    handler=self._cmd_provider_use,
+                    category="session",
+                    examples=["provider-use openai", "provider-use ollama-turbo"],
+                    parameters=[{"name": "provider", "type": "str", "help": "Provider name"}]
+                ),
+                CommandDefinition(
+                    name="agent",
+                    description="Switch AI agent (codex/claude/ollama)",
+                    handler=self._cmd_agent_switch,
+                    category="session",
+                    examples=["agent codex", "agent claude", "agent ollama"],
+                    parameters=[
+                        {"name": "agent_type", "type": "str", "choices": ["codex", "claude", "ollama"], 
+                         "help": "Agent type to switch to"}
+                    ]
+                ),
+                CommandDefinition(
+                    name="model",
+                    description="Set model for current session",
+                    handler=self._cmd_model,
+                    category="session",
+                    examples=["model gpt-4", "model claude-3-5-sonnet"],
+                    parameters=[
+                        {"name": "model_name", "type": "str", "help": "Model name"}
+                    ]
+                ),
+                CommandDefinition(
+                    name="provider",
+                    description="Set provider for current session",
+                    handler=self._cmd_provider,
+                    category="session",
+                    examples=["provider openai", "provider anthropic"],
+                    parameters=[
+                        {"name": "provider_name", "type": "str", "choices": ["openai", "anthropic", "ollama", "openrouter"], 
+                         "help": "Provider name"}
+                    ]
+                ),
+                CommandDefinition(
+                    name="stream",
+                    description="Toggle streaming mode",
+                    handler=self._cmd_stream,
+                    category="session",
+                    examples=["stream on", "stream off"],
+                    parameters=[
+                        {"name": "mode", "type": "str", "choices": ["on", "off"], 
+                         "default": "on", "help": "Streaming mode"}
+                    ]
+                ),
+                CommandDefinition(
+                    name="context",
+                    description="Set context trimming percentage",
+                    handler=self._cmd_context,
+                    category="session",
+                    examples=["context 50", "context off"],
+                    parameters=[
+                        {"name": "percentage", "type": "str", "help": "Context percentage (0-100 or 'off')"}
+                    ]
+                ),
+                CommandDefinition(
+                    name="new",
+                    description="Start new conversation session",
+                    handler=self._cmd_new_session,
+                    category="session",
+                    examples=["new"],
+                    parameters=[]
+                ),
+                CommandDefinition(
+                    name="save",
+                    description="Save current session configuration",
+                    handler=self._cmd_save_config,
+                    category="session",
+                    examples=["save"],
+                    parameters=[]
+                ),
+                CommandDefinition(
+                    name="models",
+                    description="List and select available models",
+                    handler=self._cmd_models,
+                    category="session",
+                    examples=["models", "models openai"],
+                    parameters=[
+                        {"name": "provider", "type": "str", "help": "Provider to list models for"}
+                    ]
+                ),
+        ]
+
+        for cmd in session_commands:
+            self.register_command(cmd)
     
     def register_command(self, command: CommandDefinition):
         """Register a new command"""
@@ -367,9 +525,14 @@ class CommandInterface:
         try:
             while self.is_running:
                 try:
-                    # Get command input with conversational prompt
+                    # Get command input with conversational prompt and autocomplete
                     prompt = self._generate_conversational_prompt()
-                    command_line = input(prompt).strip()
+                    command_line = self._get_input_with_autocomplete(prompt).strip()
+                    
+                    # Show tab completion hint if user starts typing "/"
+                    if command_line == "/":
+                        print(self.theme_manager.colorize("💡 Press TAB to see all available commands", 'info'))
+                        continue
                     
                     if not command_line:
                         continue
@@ -432,20 +595,15 @@ job monitoring, and system health checks."""
         )
 
     async def _show_welcome(self):
-        """Show welcome message and system status"""
-        # Create welcome card with web API info integrated
+        """Show a simplified welcome message and system status"""
+        # Create a简洁 welcome message
         title = "🎼 AgentsMCP Revolutionary CLI"
         
         welcome_content = [
             "Welcome to the future of AI agent orchestration!",
             "",
-            self.ui.status_indicator("info", "Chat naturally: 'show me the system status'"),
-            self.ui.status_indicator("info", "Use commands: 'help', 'dashboard', 'settings'"),
-            self.ui.status_indicator("info", "Execute tasks: 'create a web API for users'"),
-            "",
-            "🌐 Web API: http://localhost:8000",
-            "📋 API Docs: http://localhost:8000/docs",
-            "💚 Health: http://localhost:8000/health",
+            "Commands start with '/' (e.g., /help, /agents, /create)",
+            "Everything else is treated as conversation with AI agents.",
             "",
             f"Theme: {self.theme_manager.get_current_theme().name}",
             f"LLM: ollama-turbo (conversational mode enabled)",
@@ -462,12 +620,6 @@ job monitoring, and system health checks."""
         wisdom_card = self.ui.card("✨ Daily Wisdom", daily_wisdom, status="info")
         print(wisdom_card)
         print()  # Extra spacing
-        
-        # Show quick status if orchestration manager is initialized
-        if hasattr(self.orchestration_manager, 'is_running') and self.orchestration_manager.is_running:
-            status_summary = await self._get_quick_status()
-            print(status_summary)
-            print()
     
     def _generate_prompt(self) -> str:
         """Generate command prompt with styling"""
@@ -486,32 +638,63 @@ job monitoring, and system health checks."""
         return f"{symbol_styled} {text_styled} ▶ "
     
     def _generate_conversational_prompt(self) -> str:
-        """Generate conversational prompt with Claude Code-style box"""
+        """Generate a clean, standard CLI prompt"""
         if self.config.prompt_style == "agentsmcp":
-            # Enhanced prompt with better visual styling
+            # Simple, clean prompt
             prompt_symbol = "🎼"
             prompt_text = "agentsmcp"
-            
-            # Create a boxed prompt similar to Claude Code
-            box_chars = {
-                'top_left': '┌',
-                'top_right': '┐',
-                'bottom_left': '└',
-                'bottom_right': '┘',
-                'horizontal': '─',
-                'vertical': '│'
-            }
             
             # Styled components
             symbol_styled = self.theme_manager.colorize(prompt_symbol, 'primary')
             text_styled = self.theme_manager.colorize(prompt_text, 'secondary')
-            box_styled = self.theme_manager.colorize('│', 'accent')
             
-            # Create a compact prompt box
-            prompt_line = f"{box_styled} {symbol_styled} {text_styled} ▶ "
-            return prompt_line
+            # Simple prompt without box styling
+            return f"{symbol_styled} {text_styled} ▶ "
         else:
             return self._generate_prompt()
+
+    def _get_input_with_autocomplete(self, prompt: str) -> str:
+        """Get input with command autocomplete support"""
+        try:
+            import readline
+            
+            # Set up command completion
+            def complete_command(text, state):
+                """Tab completion function for commands"""
+                # Only complete if text starts with '/'
+                if not text.startswith('/'):
+                    return None
+                
+                # Remove '/' for matching
+                command_text = text[1:].lower()
+                
+                # Get all command names
+                command_names = sorted([f"/{cmd}" for cmd in self.commands.keys()])
+                
+                # Filter commands that start with the text
+                if command_text == "":
+                    # If just "/", show all commands
+                    matches = command_names
+                else:
+                    matches = [cmd for cmd in command_names if cmd[1:].lower().startswith(command_text)]
+                
+                if state < len(matches):
+                    return matches[state]
+                return None
+            
+            # Set up readline
+            readline.set_completer(complete_command)
+            readline.parse_and_bind("tab: complete")
+            
+            # Get input
+            return input(prompt)
+            
+        except ImportError:
+            # Fallback to regular input if readline not available
+            return input(prompt)
+        except Exception:
+            # Fallback on any error
+            return input(prompt)
     
     def _show_prompt_context(self) -> str:
         """Show context above the prompt (optional enhancement for future)"""
@@ -568,8 +751,11 @@ job monitoring, and system health checks."""
             if self.conversational_mode:
                 response = await self.conversation_manager.process_input(user_input)
                 print()
-                print(self.theme_manager.colorize("🤖 AgentsMCP:", 'primary'))
+                # Add clear visual separation for conversational responses
+                print(self.theme_manager.colorize("🤖 AgentsMCP Response:", 'primary'))
+                print("-" * 50)
                 print(response)
+                print("-" * 50)
                 print()
                 return True, response
             else:
@@ -582,9 +768,18 @@ job monitoring, and system health checks."""
             return False, error_msg
     
     def _is_direct_command(self, user_input: str) -> bool:
-        """Check if input is a direct command (not conversational)"""
+        """Check if input is a direct command (starts with /)"""
         try:
-            parts = user_input.split()
+            # Commands must start with / to be treated as direct commands
+            if not user_input.startswith('/'):
+                return False
+            
+            # Remove the / prefix for command processing
+            command_without_prefix = user_input[1:].strip()
+            if not command_without_prefix:
+                return False
+            
+            parts = command_without_prefix.split()
             if not parts:
                 return False
             
@@ -594,36 +789,8 @@ job monitoring, and system health checks."""
             if command_name in self.aliases:
                 command_name = self.aliases[command_name]
             
-            # Only treat as direct command if:
-            # 1. It's a single command word (no extra text that makes it conversational)
-            # 2. OR it's a command with valid parameters (starts with --)
-            # 3. OR it's a command with simple value parameters (like "theme dark")
-            if command_name in self.commands:
-                # If it's just the command word alone, treat as direct
-                if len(parts) == 1:
-                    return True
-                
-                # If additional parts look like command parameters (start with --), treat as direct
-                if len(parts) > 1 and any(part.startswith('--') for part in parts[1:]):
-                    return True
-                
-                # If it's a command word but with conversational language, treat as conversational
-                # Examples: "help me", "status please", "show status"
-                conversational_indicators = [
-                    'me', 'please', 'show', 'tell', 'can', 'you', 'what', 'how', 'why', 'when', 'where'
-                ]
-                if any(indicator in parts[1:] for indicator in conversational_indicators):
-                    return False
-                
-                # Special case: allow simple parameter commands like "theme dark", "execute task"
-                # If it's 2-3 parts and no conversational indicators, treat as direct command
-                if len(parts) <= 3:
-                    return True
-                
-                # If additional text is longer, treat as conversational
-                return False
-            
-            return False
+            # Check if this is a known command
+            return command_name in self.commands
             
         except:
             return False
@@ -639,6 +806,10 @@ job monitoring, and system health checks."""
     async def _process_command(self, command_line: str) -> Tuple[bool, Any]:
         """Process a command line input"""
         try:
+            # Remove / prefix if present (already validated in _is_direct_command)
+            if command_line.startswith('/'):
+                command_line = command_line[1:].strip()
+            
             # Parse command
             parts = shlex.split(command_line)
             if not parts:
@@ -684,6 +855,7 @@ job monitoring, and system health checks."""
                                 args: List[str]) -> Dict[str, Any]:
         """Parse command line arguments into parameters"""
         params = {}
+        assigned_params = set()  # Track which params have been explicitly set
         i = 0
         
         # Set default values
@@ -712,23 +884,29 @@ job monitoring, and system health checks."""
                 # Get parameter value
                 if param_def.get('type') == 'bool':
                     params[param_name] = True
+                    assigned_params.add(param_name)
                 else:
                     if i + 1 >= len(args):
                         raise ValueError(f"Parameter --{param_name} requires a value")
                     
                     value = args[i + 1]
                     params[param_name] = self._convert_parameter_value(value, param_def)
+                    assigned_params.add(param_name)
                     i += 1
                 
             else:
                 # Positional parameter
-                # Find first required parameter without a value
+                # Find first parameter that hasn't been explicitly assigned
+                assigned = False
                 for param in command.parameters:
-                    if param.get('required') and param['name'] not in params:
+                    if param['name'] not in assigned_params:
                         params[param['name']] = self._convert_parameter_value(arg, param)
+                        assigned_params.add(param['name'])
+                        assigned = True
                         break
-                else:
-                    # No more required parameters, treat as positional
+                
+                if not assigned:
+                    # No more parameters to assign, treat as extra positional args
                     if 'args' not in params:
                         params['args'] = []
                     params['args'].append(arg)
@@ -861,30 +1039,25 @@ job monitoring, and system health checks."""
         try:
             from .status_dashboard import StatusDashboard, DashboardConfig
             
+            # For interactive testing, disable auto_refresh to prevent infinite loops
             config = DashboardConfig(
                 refresh_interval=refresh,
                 compact_mode=compact,
-                auto_refresh=True
+                auto_refresh=False  # Fix: Disable auto-refresh to prevent timeouts
             )
             
             dashboard = StatusDashboard(self.orchestration_manager, self.theme_manager, config)
             
-            print(self.theme_manager.colorize("🚀 Launching interactive dashboard...", 'info'))
-            print(self.theme_manager.colorize("Press Ctrl+C to exit dashboard", 'text_muted'))
+            print(self.theme_manager.colorize("📊 Displaying dashboard snapshot...", 'info'))
             print()
             
-            try:
-                await dashboard.start_dashboard()
-            except KeyboardInterrupt:
-                # User pressed Ctrl+C to exit dashboard
-                print()  # Add newline for clean exit
-                print(self.theme_manager.colorize("🛑 Dashboard stopped by user", 'info'))
-                return "Dashboard session stopped by user"
+            # Show a single dashboard snapshot instead of entering infinite loop
+            await dashboard._update_dashboard()
             
-            return "Dashboard session completed"
+            return "Dashboard snapshot displayed successfully"
             
         except Exception as e:
-            error_msg = f"Failed to start dashboard: {e}"
+            error_msg = f"Failed to display dashboard: {e}"
             print(self.theme_manager.colorize(f"❌ {error_msg}", 'error'))
             return error_msg
     
@@ -1076,7 +1249,7 @@ job monitoring, and system health checks."""
             status_icon = "✅" if item.success else "❌"
             history_data.append([
                 str(i),
-                item.command[:40] + "..." if len(item.command) > 40 else item.command,
+                item.command,
                 item.timestamp.strftime("%H:%M:%S"),
                 f"{item.execution_time:.2f}s",
                 status_icon
@@ -1152,7 +1325,7 @@ job monitoring, and system health checks."""
             print(cat_card)
             
         else:
-            # Show general help
+            # Show simplified general help
             help_sections = []
             
             for cat_name, cmd_names in self.categories.items():
@@ -1163,9 +1336,10 @@ job monitoring, and system health checks."""
                 
                 if visible_commands:
                     section_content = []
-                    for cmd_name in visible_commands:  # Show ALL commands, no truncation
+                    # Show all commands in each category
+                    for cmd_name in visible_commands:
                         cmd = self.commands[cmd_name]
-                        section_content.append(f"    {cmd_name}: {cmd.description}")
+                        section_content.append(f"  {cmd_name:<15} - {cmd.description}")
                     
                     help_sections.append(f"\n{cat_name.title()}:\n" + '\n'.join(section_content))
             
@@ -1229,28 +1403,249 @@ job monitoring, and system health checks."""
         """Handle clear command"""
         self.ui.clear_screen()
         return "Screen cleared"
+
+    async def _cmd_analyze(self) -> str:
+        """Analyze the current repository (direct execution)."""
+        try:
+            if hasattr(self, 'conversation_manager') and hasattr(self.conversation_manager, '_analyze_repository_directly'):
+                result = self.conversation_manager._analyze_repository_directly()
+                return self.ui.box(result, title="📦 Repository Analysis", style='light')
+            else:
+                return "❌ Analyze not available in this mode"
+        except Exception as e:
+            return f"❌ Analyze failed: {e}"
+
+    async def _cmd_provider_use(self, provider: str = None) -> str:
+        """Set primary provider for session and persist to user settings."""
+        valid = ["ollama-turbo", "openai", "openrouter", "anthropic", "ollama", "codex"]
+        if not provider or provider.lower() not in valid:
+            current_provider = "unknown"
+            try:
+                if hasattr(self, 'conversation_manager') and hasattr(self.conversation_manager, 'llm_client'):
+                    current_provider = getattr(self.conversation_manager.llm_client, 'provider', 'unknown')
+            except Exception:
+                pass
+            body = (
+                f"Usage: /provider-use <provider>\n"
+                f"Valid: {', '.join(valid)}\n"
+                f"Current: {current_provider}"
+            )
+            return self.ui.box(body, title="Provider Use", style='info')
+        prov = provider.lower()
+        try:
+            # Update runtime LLM client
+            if hasattr(self, 'conversation_manager') and hasattr(self.conversation_manager, 'llm_client'):
+                self.conversation_manager.llm_client.provider = prov
+                logger.info(f"Updated LLM client provider to: {prov}")
+            
+            # Persist to user settings via orchestration manager  
+            if hasattr(self, 'orchestration_manager'):
+                if hasattr(self.orchestration_manager, 'save_user_settings'):
+                    self.orchestration_manager.save_user_settings({"provider": prov})
+                    logger.info(f"Persisted provider setting: {prov}")
+                elif hasattr(self.orchestration_manager, 'user_settings'):
+                    # Fallback: update in-memory settings
+                    if not self.orchestration_manager.user_settings:
+                        self.orchestration_manager.user_settings = {}
+                    self.orchestration_manager.user_settings["provider"] = prov
+                    logger.info(f"Updated in-memory provider setting: {prov}")
+            
+            return self.ui.box(f"✅ Primary provider set to: {prov}", title="Provider Updated", style='success')
+        except Exception as e:
+            logger.error(f"Failed to set provider {prov}: {e}")
+            return self.ui.box(f"❌ Failed to set provider: {e}", title="Error", style='error')
     
     async def _cmd_settings(self) -> str:
-        """Handle settings command"""
+        """Handle settings command with async-safe execution"""
         if not run_modern_settings_dialog:
             print(self.theme_manager.colorize("❌ Settings UI not available", 'error'))
             return "Settings UI not available"
         
         try:
             print(self.ui.clear_screen())
-            success = run_modern_settings_dialog(self.theme_manager, self.ui)
+            
+            # Use ThreadPoolExecutor to avoid asyncio.run() conflicts
+            import concurrent.futures
+            import asyncio
+            
+            def run_settings_sync():
+                """Synchronous wrapper for settings dialog"""
+                return run_modern_settings_dialog(self.theme_manager, self.ui)
+            
+            # Check if we're in an async context
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an async context, use ThreadPoolExecutor
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(run_settings_sync)
+                    success = future.result(timeout=300)  # 5 minute timeout
+            except RuntimeError:
+                # No running loop, safe to call directly
+                success = run_modern_settings_dialog(self.theme_manager, self.ui)
+            
             print(self.ui.clear_screen())
             
             if success:
                 print(self.theme_manager.colorize("✅ Settings updated successfully", 'success'))
-                return "Settings updated"
+                return "Settings updated successfully"
             else:
-                print(self.theme_manager.colorize("⚠️ Settings configuration cancelled", 'warning'))
-                return "Settings cancelled"
+                # Don't show "cancelled" message as it's confusing for users just exploring
+                print(self.theme_manager.colorize("ℹ️ Settings menu closed", 'info'))
+                return "Settings menu accessed"
         except Exception as e:
             error_msg = f"Settings command failed: {e}"
             print(self.theme_manager.colorize(f"❌ {error_msg}", 'error'))
+            logger.error(f"Settings command error: {e}")
             return error_msg
+
+    async def _cmd_keys(self) -> str:
+        """Display API key status across providers.
+
+        Logic: prefer user config (~/.agentsmcp/config.json), fallback to env var.
+        Nothing is printed in clear; only masked status + source.
+        """
+        import os
+        try:
+            cfg = {}
+            if hasattr(self, 'orchestration_manager') and self.orchestration_manager:
+                cfg = getattr(self.orchestration_manager, 'user_settings', {}) or {}
+            api_keys = (cfg or {}).get('api_keys', {})
+        except Exception as e:
+            logger.warning(f"Could not load user settings: {e}")
+            api_keys = {}
+
+        def mask(val: str) -> str:
+            if not val:
+                return 'Not set'
+            tail = val[-4:] if len(val) >= 4 else val
+            return f"••••••••{tail}"
+
+        def status(provider_key: str, env_var: str) -> str:
+            # Config (provider-specific) first, then env
+            conf_val = api_keys.get(provider_key, '')
+            env_val = os.getenv(env_var, '')
+            if conf_val:
+                return f"Config: {mask(conf_val)}"
+            if env_val:
+                return f"Env({env_var}): {mask(env_val)}"
+            return "Missing"
+
+        rows = [
+            ["Ollama Turbo", status("ollama-turbo", "OLLAMA_API_KEY")],
+            ["OpenAI", status("openai", "OPENAI_API_KEY")],
+            ["OpenRouter", status("openrouter", "OPENROUTER_API_KEY")],
+            ["Anthropic", status("anthropic", "ANTHROPIC_API_KEY")],
+            ["GitHub (MCP)", ("Env(GITHUB_TOKEN): " + mask(os.getenv('GITHUB_TOKEN',''))) if os.getenv('GITHUB_TOKEN') else "Missing"],
+        ]
+
+        # Build a simple table-like content
+        header = f"Provider{' ' * 18}Status\n" + ("-" * 60)
+        lines = []
+        for name, stat in rows:
+            pad = max(0, 24 - len(name))
+            lines.append(f"{name}{' ' * pad}{stat}")
+        content = header + "\n" + "\n".join(lines) + "\n\nUse /settings to set config API key, or export env vars."
+        return self.ui.box(content, title="🔑 API Keys", style='light')
+
+    async def _cmd_export_keys(self, include_values: bool = False) -> str:
+        """Print ready-to-copy export commands for providers.
+
+        - By default prints placeholders (safer). Pass --include-values to output actual values.
+        """
+        import os
+        cfg = getattr(self.orchestration_manager, 'user_settings', {}) if hasattr(self, 'orchestration_manager') else {}
+        api_keys = (cfg or {}).get('api_keys', {})
+        lines = ["# Copy and paste into your shell"]
+
+        def emit(provider_key: str, env_var: str, label: str):
+            conf_val = api_keys.get(provider_key, '')
+            env_val = os.getenv(env_var, '')
+            use_val = conf_val or env_val
+            if include_values and use_val:
+                val = use_val.replace("'", "'\\''")
+                lines.append(f"export {env_var}='{val}'  # {label}")
+            else:
+                src = "config" if conf_val else ("env" if env_val else "missing")
+                placeholder = "<paste-your-key>" if not include_values else "<unavailable>"
+                comment = f"# {label} ({src})"
+                lines.append(f"export {env_var}='{placeholder}'  {comment}")
+
+        emit("ollama-turbo", "OLLAMA_API_KEY", "Ollama Turbo")
+        emit("openai", "OPENAI_API_KEY", "OpenAI")
+        emit("openrouter", "OPENROUTER_API_KEY", "OpenRouter")
+        emit("anthropic", "ANTHROPIC_API_KEY", "Anthropic (Claude)")
+        # GitHub MCP doesn't live in config; env only
+        if include_values and os.getenv('GITHUB_TOKEN'):
+            v = os.getenv('GITHUB_TOKEN').replace("'", "'\\''")
+            lines.append(f"export GITHUB_TOKEN='{v}'  # GitHub MCP")
+        else:
+            lines.append("export GITHUB_TOKEN='<paste-your-token>'  # GitHub MCP (env)")
+
+        script = "\n".join(lines)
+        return self.ui.box(script, title="🧰 Export Keys", style='light')
+
+    async def _cmd_provider_order(self) -> str:
+        """Display the current provider fallback order and status.
+
+        Order: primary -> openai -> openrouter -> anthropic -> ollama -> codex
+        Providers without keys are skipped (except local ollama).
+        """
+        import os
+        # Determine primary provider
+        primary = None
+        if hasattr(self, 'conversation_manager') and hasattr(self.conversation_manager, 'llm_client'):
+            primary = getattr(self.conversation_manager.llm_client, 'provider', None)
+        if not primary and hasattr(self, 'orchestration_manager'):
+            primary = (getattr(self.orchestration_manager, 'user_settings', {}) or {}).get('provider')
+        primary = (primary or 'ollama-turbo').lower()
+
+        order = []
+        for p in [primary, 'openai', 'openrouter', 'anthropic', 'ollama', 'codex']:
+            if p not in order:
+                order.append(p)
+
+        cfg = getattr(self.orchestration_manager, 'user_settings', {}) if hasattr(self, 'orchestration_manager') else {}
+        api_keys = (cfg or {}).get('api_keys', {})
+        env_map = {
+            'ollama-turbo': 'OLLAMA_API_KEY',
+            'openai': 'OPENAI_API_KEY',
+            'openrouter': 'OPENROUTER_API_KEY',
+            'anthropic': 'ANTHROPIC_API_KEY',
+        }
+
+        lines = []
+        header = f"Primary: {primary}\n" + ("-" * 60)
+        for i, p in enumerate(order, 1):
+            if p == 'ollama':
+                status = 'will try (local, no key required, timeout ~120s)'
+            else:
+                conf = api_keys.get(p, '')
+                envv = env_map.get(p)
+                envp = os.getenv(envv, '') if envv else ''
+                if conf:
+                    status = f"will try (config)"
+                elif envp:
+                    status = f"will try (env {envv})"
+                else:
+                    status = 'skipped (no key)'
+            lines.append(f"{i}. {p:12} {status}")
+
+        # Show timeouts if available
+        timeouts = {}
+        try:
+            settings = getattr(self.orchestration_manager, 'user_settings', {}) if hasattr(self, 'orchestration_manager') else {}
+            timeouts = (settings or {}).get('timeouts', {})
+        except Exception:
+            pass
+        if timeouts:
+            lines.append("")
+            lines.append("Timeouts (seconds):")
+            for k, v in timeouts.items():
+                lines.append(f"  - {k}: {v}")
+        lines.append("")
+        lines.append("Note: Local Ollama may be slow on first run; timeout is set high by default (~120s). Adjust via ~/.agentsmcp/config.json → timeouts.local_ollama.")
+        content = header + "\n" + "\n".join(lines)
+        return self.ui.box(content, title="🧭 Provider Fallback Order", style='light')
     
     async def _cmd_generate_config(self) -> str:
         """Handle generate-config command"""
@@ -1293,6 +1688,233 @@ job monitoring, and system health checks."""
             error_msg = f"Generate config failed: {e}"
             print(self.theme_manager.colorize(f"❌ {error_msg}", 'error'))
             return error_msg
+
+    # Session management command handlers
+    async def _cmd_agent_switch(self, agent_type: str = None) -> str:
+        """Switch to a different AI agent"""
+        if agent_type is None or not agent_type.strip():
+            # Show current and available agents with usage hint
+            available = list(self.app_config.agents.keys()) if self.app_config else []
+            body = (
+                f"Current agent: {self.current_agent}\n"
+                f"Available: {', '.join(available) if available else 'n/a'}\n\n"
+                f"Usage: /agent <agent_type>"
+            )
+            return self.ui.box(body, title="Agent", style='info')
+        if not self.agent_manager:
+            return "❌ Agent manager not available. Enable agent orchestration to switch agents."
+        
+        self.current_agent = agent_type
+        
+        return self.ui.box(
+            f"🤖 Agent switched to: {agent_type.upper()}\n"
+            f"   Ready for orchestration and task delegation",
+            title="Agent Switch",
+            style='success'
+        )
+    
+    async def _cmd_model(self, model_name: str = None) -> str:
+        """Set model for current session"""
+        try:
+            if model_name is None or not model_name.strip():
+                # Show current model and prioritized defaults with usage
+                if not self.app_config:
+                    return self.ui.box("❌ No configuration available", title="Error", style='error')
+                agent_cfg = self.app_config.agents.get(self.current_agent)
+                current = agent_cfg.model if agent_cfg else 'n/a'
+                priority = ", ".join(agent_cfg.model_priority) if agent_cfg and agent_cfg.model_priority else 'n/a'
+                body = (
+                    f"Current agent: {self.current_agent}\n"
+                    f"Current model: {current}\n"
+                    f"Priority: {priority}\n\n"
+                    f"Usage: /model <model_name>"
+                )
+                return self.ui.box(body, title="Model Info", style='info')
+            
+            if not self.app_config or not self.app_config.agents:
+                return self.ui.box("❌ No agent configuration available", title="Error", style='error')
+            
+            agent_config = self.app_config.agents.get(self.current_agent)
+            if not agent_config:
+                return self.ui.box(f"❌ Agent '{self.current_agent}' not found in configuration", title="Error", style='error')
+            
+            # Update the agent configuration
+            agent_config.model = model_name
+            
+            # Also update the LLM client if available
+            if hasattr(self, 'conversation_manager') and hasattr(self.conversation_manager, 'llm_client'):
+                self.conversation_manager.llm_client.model = model_name
+                logger.info(f"Updated LLM client model to: {model_name}")
+            
+            return self.ui.box(
+                f"✅ Model set to: {model_name}\n"
+                f"   Agent: {self.current_agent}",
+                title="Model Updated",
+                style='success'
+            )
+        except Exception as e:
+            logger.error(f"Failed to set model {model_name}: {e}")
+            return self.ui.box(f"❌ Failed to set model: {e}", title="Error", style='error')
+    
+    async def _cmd_provider(self, provider_name: str = None) -> str:
+        """Set provider for current session"""
+        if not provider_name:
+            # Show interactive provider selection
+            return await self._interactive_provider_selection()
+        
+        if not self.app_config or not self.app_config.agents:
+            return "❌ No agent configuration available"
+        
+        try:
+            provider_type = ProviderType(provider_name)
+            agent_config = self.app_config.agents.get(self.current_agent)
+            if agent_config:
+                agent_config.provider = provider_type
+            
+            # Validate provider configuration
+            if hasattr(self.app_config, 'providers') and provider_name in self.app_config.providers:
+                base_cfg = self.app_config.providers[provider_name]
+                vcfg = ProviderConfig(
+                    name=provider_type,
+                    api_key=getattr(base_cfg, 'api_key', None),
+                    api_base=getattr(base_cfg, 'api_base', None)
+                )
+                vres = validate_provider_config(provider_type, vcfg)
+                validation_msg = f"\n   Validation: {vres.reason}" if not vres.ok else ""
+            else:
+                validation_msg = "\n   ⚠️  Provider not fully configured"
+            
+            return self.ui.box(
+                f"🔌 Provider set to: {provider_name}\n"
+                f"   Agent: {self.current_agent}{validation_msg}",
+                title="Provider Updated",
+                style='info'
+            )
+        except ValueError:
+            return f"❌ Invalid provider: {provider_name}. Use: openai, anthropic, ollama, openrouter"
+    
+    async def _cmd_stream(self, mode: str = "on") -> str:
+        """Toggle streaming mode"""
+        if mode in ("on", "true", "1"):
+            self.stream_enabled = True
+            status = "enabled"
+        elif mode in ("off", "false", "0"):
+            self.stream_enabled = False  
+            status = "disabled"
+        else:
+            # Toggle current state
+            self.stream_enabled = not self.stream_enabled
+            status = "enabled" if self.stream_enabled else "disabled"
+        
+        return f"🌊 Streaming {status}"
+    
+    async def _cmd_context(self, percentage: str) -> str:
+        """Set context trimming percentage"""
+        if percentage.lower() in ("off", "0"):
+            self.context_percent = 0
+            return "🧠 Context trimming disabled"
+        
+        try:
+            p = int(percentage)
+            if 0 <= p <= 100:
+                self.context_percent = p
+                return f"🧠 Context set to last ~{p}% of budget"
+            else:
+                return "❌ Context percentage must be 0-100 or 'off'"
+        except ValueError:
+            return "❌ Invalid percentage. Use a number 0-100 or 'off'"
+    
+    async def _cmd_new_session(self) -> str:
+        """Start a new conversation session"""
+        self.session_history.clear()
+        return self.ui.box(
+            "🆕 New session started\n"
+            "   Conversation history cleared",
+            title="New Session",
+            style='success'
+        )
+    
+    async def _cmd_save_config(self) -> str:
+        """Save current session configuration"""
+        if not self.app_config:
+            return "❌ No configuration to save"
+        
+        try:
+            from pathlib import Path
+            config_path = Path("agentsmcp.yaml")
+            self.app_config.save_to_file(config_path)
+            return f"💾 Configuration saved to {config_path}"
+        except Exception as e:
+            return f"❌ Failed to save configuration: {e}"
+    
+    async def _cmd_models(self, provider: str = None) -> str:
+        """List and select available models"""
+        if not self.app_config:
+            return "❌ No configuration available"
+        
+        # Determine provider
+        if not provider:
+            agent_config = self.app_config.agents.get(self.current_agent)
+            if agent_config:
+                provider = agent_config.provider.value if hasattr(agent_config.provider, 'value') else str(agent_config.provider)
+            else:
+                provider = "openai"
+        
+        try:
+            provider_type = ProviderType(provider)
+            
+            # Get provider configuration
+            base_cfg = None
+            if hasattr(self.app_config, 'providers') and provider in self.app_config.providers:
+                base_cfg = self.app_config.providers[provider]
+            
+            pconfig = ProviderConfig(
+                name=provider_type,
+                api_key=getattr(base_cfg, 'api_key', None) if base_cfg else None,
+                api_base=getattr(base_cfg, 'api_base', None) if base_cfg else None
+            )
+            
+            # List models
+            models = providers_list_models(provider_type, pconfig)
+            
+            if not models:
+                return f"❌ No models found for provider: {provider}"
+            
+            # Create models table
+            content = [f"Available Models for {provider}:", ""]
+            for i, model in enumerate(models[:10], 1):  # Show first 10
+                content.append(f"{i:2}. {model.id}")
+                if model.name and model.name != model.id:
+                    content[-1] += f" ({model.name})"
+            
+            
+            return self.ui.box(
+                "\n".join(content),
+                title="Models",
+                style='info'
+            )
+            
+        except ProviderError as e:
+            return f"❌ Failed to list models: {e}"
+        except ValueError:
+            return f"❌ Invalid provider: {provider}"
+    
+    async def _interactive_provider_selection(self) -> str:
+        """Interactive provider selection"""
+        providers = ["openai", "anthropic", "ollama", "openrouter"]
+        
+        content = ["Available Providers:", ""]
+        for i, provider in enumerate(providers, 1):
+            configured = ""
+            if hasattr(self.app_config, 'providers') and provider in self.app_config.providers:
+                configured = " ✓"
+            content.append(f"{i}. {provider}{configured}")
+        
+        return self.ui.box(
+            "\n".join(content) + "\n\nUse: provider <name> to select",
+            title="Providers",
+            style='info'
+        )
 
     async def _cmd_exit(self) -> str:
         """Handle exit command"""

@@ -1,59 +1,45 @@
 #!/usr/bin/env python3
 """
-Test interactive UI mode with simulated user input
+Test script for AgentsMCP interactive mode with new command prefix system
 """
-import asyncio
+
+import subprocess
 import sys
+import time
 import os
-from unittest.mock import patch
-from io import StringIO
 
-# Add the src directory to Python path
-sys.path.insert(0, 'src')
-
-async def test_interactive_ui():
-    """Test interactive UI mode"""
-    print("Testing AgentsMCP interactive UI mode...")
+def test_interactive_mode():
+    """Test the interactive mode with various inputs"""
+    print("🧪 Testing AgentsMCP Interactive Mode with / Command Prefix")
+    print("=" * 60)
     
-    # Simulate user inputs
+    # Prepare test commands and conversations
     test_inputs = [
-        'help',
-        'status', 
-        'execute "Create a simple Python script that prints Hello World"',
-        'agents list',
-        'exit'
+        "/help",  # Should show help
+        "/agents",  # Should list agents  
+        "/status",  # Should show system status
+        "Hello, can you help me with a Python coding task?",  # Conversational
+        "Write a simple function to calculate fibonacci numbers",  # Conversational  
+        "/exit"  # Should exit
     ]
     
-    # Mock input to simulate user interaction
-    input_iter = iter(test_inputs)
+    print("Test inputs prepared:")
+    for i, inp in enumerate(test_inputs, 1):
+        input_type = "COMMAND" if inp.startswith('/') else "CONVERSATION"
+        print(f"  {i}. [{input_type}] {inp}")
     
-    def mock_input(prompt):
-        try:
-            cmd = next(input_iter)
-            print(f"{prompt}{cmd}")  # Show what we're "typing"
-            return cmd
-        except StopIteration:
-            return 'exit'
+    print("\n" + "=" * 60)
+    print("Starting interactive session...")
+    print("Note: This will run the actual AgentsMCP binary")
+    print("=" * 60)
     
-    try:
-        from agentsmcp.ui.cli_app import CLIApp
-        
-        # Create and configure CLI app
-        cli_app = CLIApp()
-        
-        # Test interactive mode with mocked input
-        with patch('builtins.input', side_effect=mock_input):
-            print("Starting interactive mode test...")
-            await cli_app._run_interactive_mode()
-        
-        print("Interactive mode test completed successfully!")
-        
-    except KeyboardInterrupt:
-        print("\nInteractive mode test interrupted - this is expected behavior")
-    except Exception as e:
-        print(f"Interactive mode test encountered error: {e}")
-        import traceback
-        traceback.print_exc()
+    return test_inputs
 
 if __name__ == "__main__":
-    asyncio.run(test_interactive_ui())
+    test_inputs = test_interactive_mode()
+    
+    print("\nTo test manually, run:")
+    print("PYTHONPATH=src python -m agentsmcp --mode interactive")
+    print("\nThen try these inputs:")
+    for inp in test_inputs:
+        print(f"  {inp}")

@@ -76,3 +76,19 @@ Template:
 - **Details:** See [docs/generic-best-practices.md](generic-best-practices.md), [docs/ai-agent-best-practices.md](ai-agent-best-practices.md), [docs/product-best-practices.md](product-best-practices.md), [docs/product-status.md](product-status.md), and [docs/product-details.md](product-details.md).
 
 ## [0007] - Fix CI lint and Danger configuration
+## 2025-08-26 — Default Model/Agent Selection
+
+- Decision: Default to cloud `ollama-turbo` with `gpt-oss:120b` for interactive sessions.
+- Rationale: Best implementable balance of capability, speed, and cost for everyday coding tasks per project guidelines.
+- Changes: CLI defaults updated (`ollama-turbo-coding`), provider option extended, documentation updated.
+
+## [0008] - Architecture Review Synthesis and Roadmap
+- **Date Added:** 2025-08-26
+- **Version:** Unreleased
+- **Branch:** main
+- **Submitter:** automated agent
+- **Decision Maker:** project maintainers
+- **Decision Date:** 2025-08-26
+- **Outcome:** Accepted the architecture synthesis focusing on: single AgentManager instance in API, job cleanup fix, EventBus consolidation, queue/worker pool with 429 overload, async provider calls with retry/backoff, tool sandboxing, JWT auth (prod), rate limits, and config consolidation via AppSettings.
+- **Rationale:** Addresses correctness, robustness, and maintainability with minimal disruption and clear phased rollout.
+- **Details:** See [docs/architecture-analysis-synthesis.md](architecture-analysis-synthesis.md).

@@ -22,6 +22,7 @@ from typing import Dict, List, Any, Optional, Tuple, Union, Callable
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import logging
+import unicodedata
 
 from .theme_manager import ThemeManager
 
@@ -79,6 +80,16 @@ class UIComponents:
         
         # ANSI escape sequence pattern for stripping colors from length calculations
         self._ansi_pattern = re.compile(r'\x1b\[[0-9;]*m')
+        # Emoji pattern (basic) to treat as double-width
+        self._emoji_pattern = re.compile(
+            r"[\U0001F600-\U0001F64F]|"  # Emoticons
+            r"[\U0001F300-\U0001F5FF]|"  # Misc Symbols and Pictographs
+            r"[\U0001F680-\U0001F6FF]|"  # Transport & Map
+            r"[\U0001F1E6-\U0001F1FF]|"  # Regional country flags
+            r"[\U00002702-\U000027B0]|"  # Dingbats
+            r"[\U000024C2-\U0001F251]",
+            flags=re.UNICODE
+        )
     
     def _get_terminal_width(self) -> int:
         """Get terminal width with fallback and dynamic detection"""
@@ -98,10 +109,32 @@ class UIComponents:
     def _strip_ansi(self, text: str) -> str:
         """Strip ANSI escape sequences for accurate length calculation"""
         return self._ansi_pattern.sub('', text)
-    
+
+    def _char_display_width(self, ch: str) -> int:
+        """Approximate display width of a single character.
+
+        Uses East Asian Width and a simple emoji heuristic. Most terminals
+        render emoji and fullwidth chars as width 2.
+        """
+        # Control chars, combining marks, zero-width joiners
+        if unicodedata.category(ch) in ("Mn", "Cf"):
+            return 0
+        # Treat emojis as double-width
+        if self._emoji_pattern.match(ch):
+            return 2
+        # East Asian Width
+        eaw = unicodedata.east_asian_width(ch)
+        if eaw in ("W", "F"):
+            return 2
+        return 1
+
     def _visual_length(self, text: str) -> int:
-        """Get visual length of text, ignoring ANSI color codes"""
-        return len(self._strip_ansi(text))
+        """Get visual display width, ignoring ANSI color codes and handling emoji."""
+        clean = self._strip_ansi(text)
+        width = 0
+        for ch in clean:
+            width += self._char_display_width(ch)
+        return width
     
     def heading(self, text: str, level: int = 1, centered: bool = False, 
                underline: bool = True) -> str:
@@ -165,6 +198,8 @@ class UIComponents:
         Returns:
             Boxed content string
         """
+        # Refresh terminal size per render to adapt to dynamic windows
+        self.refresh_terminal_size()
         box_style = self.box_styles.get(style, self.box_styles['light'])
         
         # Split content into lines and strip ANSI codes for width calculation
@@ -174,11 +209,11 @@ class UIComponents:
         content_width = max(self._visual_length(line) for line in content_lines) if content_lines else 0
         title_width = self._visual_length(title) if title else 0
         
-        # Set width - use smaller default and cap at reasonable size
+        # Set width - use content-based sizing with generous margins
         if width is None:
             # Use content width + padding, or title width + some margin
-            inner_width = max(content_width, title_width + 4) 
-            width = min(inner_width + 2 * padding, self.terminal_width - 8)
+            inner_width = max(content_width + 10, title_width + 8)  # More generous margins
+            width = min(inner_width + 2 * padding, self.terminal_width - 4)  # Reduced margin from -8 to -4
         
         # Ensure minimum width
         width = max(width, 20)
@@ -190,25 +225,19 @@ class UIComponents:
         # Top border with title
         if title:
             title_len = self._visual_length(title)
-            available_space = width - 4  # Space for " title "
-            if title_len <= available_space:
-                title_padding_left = (width - title_len - 2) // 2
-                title_padding_right = width - title_len - 2 - title_padding_left
-                
-                top_line = (box_style.top_left + 
-                           box_style.horizontal * title_padding_left +
-                           f" {title} " +
-                           box_style.horizontal * title_padding_right +
-                           box_style.top_right)
-            else:
-                # Title too long - truncate
-                truncated_title = title[:available_space-3] + "..."
-                title_padding = (width - len(truncated_title) - 2) // 2
-                top_line = (box_style.top_left + 
-                           box_style.horizontal * title_padding +
-                           f" {truncated_title} " +
-                           box_style.horizontal * (width - title_padding - len(truncated_title) - 2) +
-                           box_style.top_right)
+            # Expand width if title is longer than current width
+            min_width_needed = title_len + 4  # Space for " title "
+            if min_width_needed > width:
+                width = min_width_needed
+            
+            title_padding_left = (width - title_len - 2) // 2
+            title_padding_right = width - title_len - 2 - title_padding_left
+            
+            top_line = (box_style.top_left + 
+                       box_style.horizontal * title_padding_left +
+                       f" {title} " +
+                       box_style.horizontal * title_padding_right +
+                       box_style.top_right)
         else:
             top_line = (box_style.top_left + 
                        box_style.horizontal * (width - 2) +
@@ -223,25 +252,26 @@ class UIComponents:
                            box_style.vertical)
             lines.append(self.theme_manager.colorize(padding_line, 'border'))
         
-        # Content lines
+        # Content lines - first pass to determine maximum width needed
+        max_content_width = 0
+        for line in content_lines:
+            line_visual_len = self._visual_length(line)
+            max_content_width = max(max_content_width, line_visual_len)
+        
+        # Expand width if content needs more space
+        min_width_for_content = max_content_width + 2 * padding + 2  # padding + borders
+        if min_width_for_content > width:
+            width = min_width_for_content
+            inner_width = width - 2 * padding - 2
+        
+        # Second pass to build lines with adequate width
         for line in content_lines:
             # Calculate actual content space needed
             line_visual_len = self._visual_length(line)
             
-            if line_visual_len <= inner_width:
-                # Line fits - pad to full width
-                spaces_needed = inner_width - line_visual_len
-                content_padded = line + " " * spaces_needed
-            else:
-                # Line too long - truncate
-                # Find truncation point by counting visual characters
-                truncated = ""
-                for char in line:
-                    if self._visual_length(truncated + char + "...") <= inner_width:
-                        truncated += char
-                    else:
-                        break
-                content_padded = truncated + "..." + " " * (inner_width - self._visual_length(truncated + "..."))
+            # Line should fit now - pad to full width
+            spaces_needed = inner_width - line_visual_len
+            content_padded = line + " " * spaces_needed
             
             # Build the full line with proper borders
             border_left = self.theme_manager.colorize(box_style.vertical, 'border')
@@ -455,7 +485,8 @@ class UIComponents:
             Formatted card string
         """
         if width is None:
-            width = min(self.terminal_width - 4, 100)  # Use most of terminal width
+            # Use a more generous width for cards to prevent truncation
+            width = min(self.terminal_width - 4, 120)  # Increased from 100 to 120
         
         # Build card header
         header_parts = [title]

@@ -1,0 +1,277 @@
+# AgentsMCP Configuration Example
+# This file contains ALL available configuration options with placeholders
+# Copy to agentsmcp.yaml or ~/.agentsmcp/agentsmcp.yaml and customize as needed
+
+# Server Configuration
+server:
+  host: "localhost"                    # Server bind address (0.0.0.0 for external access)
+  port: 8000                          # Server port number
+  cors_origins:                       # CORS allowed origins
+    - "*"                             # Allow all origins (use specific URLs in production)
+    - "http://localhost:3000"         # Frontend development server
+    - "https://your-domain.com"       # Production frontend domain
+
+# Transport Configuration  
+transport:
+  type: "http"                        # Options: http, websocket, stdio, sse
+  config:
+    # Additional transport-specific configuration
+    timeout: 30                       # Connection timeout in seconds
+    max_connections: 100              # Maximum concurrent connections
+
+# Storage Configuration
+storage:
+  type: "memory"                      # Options: memory, sqlite, postgresql, redis
+  config:
+    # SQLite configuration (when type: sqlite)
+    database_path: "agentsmcp.db"     # Path to SQLite database file
+    
+    # PostgreSQL configuration (when type: postgresql)
+    # host: "localhost"
+    # port: 5432
+    # database: "agentsmcp"
+    # username: "your_db_user"
+    # password: "your_db_password"
+    
+    # Redis configuration (when type: redis)
+    # host: "localhost" 
+    # port: 6379
+    # db: 0
+    # password: "your_redis_password"
+
+# RAG (Retrieval-Augmented Generation) Configuration
+rag:
+  embedding_model: "sentence-transformers/all-MiniLM-L6-v2"  # Embedding model for RAG
+  chunk_size: 512                     # Document chunk size for processing
+  chunk_overlap: 50                   # Overlap between chunks
+  max_results: 10                     # Maximum retrieval results
+  similarity_threshold: 0.7           # Similarity threshold for relevant results
+
+# Provider Configuration (API credentials and endpoints)
+providers:
+  openai:
+    name: "openai"
+    api_key: "your-openai-api-key"    # OpenAI API key
+    api_base: null                    # Custom API base URL (optional)
+  
+  openrouter:
+    name: "openrouter" 
+    api_key: "your-openrouter-key"    # OpenRouter API key
+    api_base: "https://openrouter.ai/api/v1"  # OpenRouter API endpoint
+  
+  ollama:
+    name: "ollama"
+    api_key: null                     # No API key needed for local Ollama
+    api_base: "http://localhost:11434" # Local Ollama endpoint
+    
+  ollama-turbo:
+    name: "ollama-turbo"
+    api_key: null                     # No API key needed
+    api_base: "http://127.0.0.1:11435" # Ollama Turbo endpoint
+  
+  custom:
+    name: "custom"
+    api_key: "your-custom-api-key"    # Custom provider API key
+    api_base: "https://your-custom-endpoint.com/v1"
+
+# Agent Configuration
+agents:
+  # Codex Agent - General purpose coding assistant
+  codex:
+    type: "codex"
+    model: "gpt-4"                    # Primary model for this agent
+    model_priority:                   # Fallback model priority list
+      - "gpt-4"
+      - "gpt-3.5-turbo"
+    provider: "openai"                # Provider to use (openai, openrouter, ollama, etc.)
+    api_base: null                    # Override API base URL for this agent
+    api_key_env: null                 # Environment variable name for API key
+    max_tokens: 4000                  # Maximum response tokens
+    temperature: 0.7                  # Model creativity/randomness (0.0-2.0)
+    timeout: 300                      # Request timeout in seconds
+    system_prompt: "You are a code generation and analysis expert."
+    tools:                            # Available tools for this agent
+      - "filesystem"
+      - "git" 
+      - "bash"
+    mcp:                              # MCP servers this agent can access
+      - "filesystem_server"
+      - "git_server"
+  
+  # Claude Agent - Large context analysis specialist
+  claude:
+    type: "claude"
+    model: "claude-3-sonnet"
+    model_priority:
+      - "claude-3-sonnet"
+      - "claude-3-haiku"
+    provider: "openai"                # Using OpenAI-compatible endpoint
+    max_tokens: 4000
+    temperature: 0.7
+    timeout: 300
+    system_prompt: "You are a helpful AI assistant with deep reasoning capabilities."
+    tools:
+      - "filesystem"
+      - "web_search"
+    mcp:
+      - "web_search_server"
+  
+  # Ollama Agent - Local/cost-effective assistant
+  ollama:
+    type: "ollama"
+    model: "gpt-oss:120b"            # Local Ollama model
+    model_priority:
+      - "gpt-oss:120b"
+      - "llama2"
+    provider: "ollama-turbo"
+    api_base: "http://127.0.0.1:11435"
+    max_tokens: 1024
+    temperature: 0.7
+    timeout: 300
+    system_prompt: "You are a cost-effective AI assistant for general tasks."
+    tools:
+      - "filesystem"
+    mcp: []
+
+# Tool Configuration
+tools:
+  # Filesystem tool
+  - name: "filesystem"
+    type: "filesystem"
+    enabled: true
+    config:
+      allowed_paths:                  # Paths this tool can access
+        - "/tmp"                      # Temporary directory
+        - "."                         # Current directory
+        - "/Users/your-username/projects"  # Your projects directory
+      max_file_size: 10485760         # Maximum file size (10MB)
+      
+  # Git tool
+  - name: "git"
+    type: "git"
+    enabled: true
+    config:
+      timeout: 60                     # Git operation timeout
+      allowed_remotes:                # Allowed git remotes (optional)
+        - "origin"
+        - "upstream"
+      
+  # Bash/shell tool  
+  - name: "bash"
+    type: "bash"
+    enabled: true
+    config:
+      timeout: 60                     # Command timeout in seconds
+      allowed_commands:               # Whitelist of allowed commands (optional)
+        - "ls"
+        - "cat"
+        - "grep"
+        - "find"
+      denied_commands:                # Blacklist of denied commands
+        - "rm -rf"
+        - "sudo"
+        - "su"
+        
+  # Web search tool
+  - name: "web_search"
+    type: "web_search"
+    enabled: true
+    config:
+      api_key: "your-search-api-key"  # Search provider API key
+      max_results: 10                 # Maximum search results
+      timeout: 30                     # Search timeout
+
+# MCP Server Configuration
+mcp:
+  # Filesystem MCP Server
+  - name: "filesystem_server"
+    enabled: true
+    transport: "stdio"                # stdio, sse, or websocket
+    command:                          # Command to start the server (for stdio)
+      - "python"
+      - "-m"
+      - "mcp_servers.filesystem"
+    url: null                         # URL for sse/websocket transport
+    env:                              # Environment variables
+      MCP_LOG_LEVEL: "INFO"
+    cwd: null                         # Working directory
+    
+  # Git MCP Server
+  - name: "git_server"
+    enabled: true
+    transport: "stdio"
+    command:
+      - "npx"
+      - "@modelcontextprotocol/server-git"
+    env:
+      NODE_ENV: "production"
+      
+  # Web Search MCP Server
+  - name: "web_search_server"
+    enabled: false                    # Disabled by default
+    transport: "sse"
+    url: "https://your-search-server.com/mcp"
+    env:
+      API_KEY: "your-mcp-search-key"
+
+# Discovery & Coordination Configuration (Advanced)
+discovery_enabled: false             # Enable service discovery
+discovery_allowlist: []              # Allowed agent IDs for coordination
+discovery_token: null                # Shared secret for discovery
+discovery_registry_endpoint: null    # Remote registry API endpoint
+discovery_registry_token: null       # Registry authentication token
+
+# Security Configuration
+security_enabled: true               # Enable security features
+private_key_path: null               # Path to PEM private key file
+public_key_path: null                # Path to PEM public key file  
+key_rotation_interval_hours: 24      # Key rotation interval
+tls_cert_path: null                  # TLS certificate file path
+tls_key_path: null                   # TLS private key file path
+require_tls: false                   # Require TLS for connections
+jwt_secret: "auto-generated-secret"  # JWT signing secret (auto-generated)
+jwt_issuer: "agents-mcp"            # JWT issuer identifier
+jwt_expiry_minutes: 60               # JWT token expiry time
+trust_store_path: null               # Trusted public keys directory
+
+# Web UI Configuration
+ui_enabled: true                     # Enable built-in web dashboard
+
+# Environment Variable Mappings (prefix: AGENTS_)
+# These can override the above settings via environment variables:
+#
+# AGENTS_LOG_LEVEL=DEBUG
+# AGENTS_LOG_FORMAT=json
+# AGENTS_SERVER_HOST=0.0.0.0
+# AGENTS_SERVER_PORT=8080
+# AGENTS_CORS_ORIGINS=http://localhost:3000,https://mydomain.com
+# AGENTS_STORAGE_TYPE=sqlite
+# AGENTS_SQLITE_PATH=/path/to/database.db
+# AGENTS_POSTGRES_HOST=localhost
+# AGENTS_POSTGRES_PORT=5432
+# AGENTS_POSTGRES_DATABASE=agentsmcp
+# AGENTS_POSTGRES_USERNAME=dbuser
+# AGENTS_POSTGRES_PASSWORD=dbpass
+# AGENTS_REDIS_HOST=localhost
+# AGENTS_REDIS_PORT=6379
+# AGENTS_RAG_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+# AGENTS_RAG_CHUNK_SIZE=512
+# AGENTS_RAG_CHUNK_OVERLAP=50
+# AGENTS_RAG_MAX_RESULTS=10
+# AGENTS_RAG_SIMILARITY_THRESHOLD=0.7
+# AGENTS_PROMETHEUS_ENABLED=true
+#
+# Additional API Key Environment Variables:
+# OPENAI_API_KEY=your-openai-key
+# OPENROUTER_API_KEY=your-openrouter-key
+# ANTHROPIC_API_KEY=your-anthropic-key
+# OLLAMA_API_KEY=your-ollama-key (if needed)
+
+# Notes:
+# 1. This file uses YAML format - be careful with indentation
+# 2. Remove or comment out sections you don't need
+# 3. Sensitive values like API keys should use environment variables in production
+# 4. The default config location is ~/.agentsmcp/agentsmcp.yaml
+# 5. You can also place this file as agentsmcp.yaml in your project directory
+# 6. Environment variables take precedence over file settings
+# 7. Use AGENTSMCP_CONFIG environment variable to specify custom config file path

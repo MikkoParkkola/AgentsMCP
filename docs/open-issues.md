@@ -29,3 +29,16 @@ Template:
 - **Options:**
   - Provide GitHub usernames of maintainers.
   - Use a GitHub team handle once defined.
+
+## [0008] - Implement Architecture Synthesis Phase 1
+- **Date Added:** 2025-08-26
+- **Version:** Unreleased
+- **Branch:** main
+- **Submitter:** automated agent
+- **Decision Maker:** project maintainers
+- **Needed By:** 2025-09-05
+- **Status:** open
+- **Problem:** Core correctness and lifecycle issues (API uses multiple AgentManager instances; cleanup bug; duplicate EventBus) and lack of base metrics.
+- **Options:**
+  - Implement Phase 1 as proposed: single AgentManager in API, fix cleanup time, consolidate EventBus, add metrics.
+  - Defer EventBus consolidation and only patch API and cleanup bug (faster, less robust).
