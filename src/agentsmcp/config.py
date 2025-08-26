@@ -84,6 +84,7 @@ class ProviderType(str, Enum):
     OPENAI = "openai"
     OPENROUTER = "openrouter"
     OLLAMA = "ollama"
+    OLLAMA_TURBO = "ollama-turbo"
     CUSTOM = "custom"
 
 
@@ -386,4 +387,5 @@ class Config(BaseSettings):
     @staticmethod
     def default_config_path() -> Path:
         """Return the default per-user config path under ~/.agentsmcp."""
-        return Path(os.path.expanduser("~/.agentsmcp/agentsmcp.yaml"))
+        from .paths import default_user_config_path
+        return default_user_config_path()

@@ -60,7 +60,22 @@ class ModernSettingsUI:
         """Load current settings from config file"""
         if self.config_path.exists():
             try:
-                return json.loads(self.config_path.read_text())
+                data = json.loads(self.config_path.read_text())
+                # Migration: move legacy top-level api_key into api_keys[provider]
+                try:
+                    legacy_key = data.get('api_key')
+                    if legacy_key:
+                        provider = data.get('provider') or 'ollama-turbo'
+                        keys = data.get('api_keys') or {}
+                        if provider not in keys:
+                            keys[provider] = legacy_key
+                            data['api_keys'] = keys
+                        # remove legacy field and persist
+                        data.pop('api_key', None)
+                        self._save_settings(data)
+                except Exception:
+                    pass
+                return data
             except (json.JSONDecodeError, OSError):
                 pass
         
@@ -71,7 +86,8 @@ class ModernSettingsUI:
             "host": "http://127.0.0.1:11435",
             "temperature": 0.7,
             "max_tokens": 1024,
-            "api_key": ""
+            # Provider-specific keys map: { provider_name: api_key }
+            "api_keys": {}
         }
 
     def _save_settings(self, settings: Dict[str, Any]) -> bool:
@@ -183,7 +199,7 @@ Use ↑/↓ arrows to navigate, Enter to select, ESC/q to cancel:"""
         parameters = [
             f"Temperature: {current.get('temperature', 0.7)} (0.0-2.0, creativity control)",
             f"Max Tokens: {current.get('max_tokens', 1024)} (1-4096, response length limit)", 
-            f"API Key: {'*' * 8 if current.get('api_key') else 'Not set'} (if required by provider)",
+            f"API Key: {'*' * 8 if (current.get('api_keys', {}).get(current.get('provider',''), '')) else 'Not set'} (for {current.get('provider','provider')})",
             f"Host URL: {current.get('host', 'default')}",
             "Skip parameter configuration"
         ]
@@ -219,6 +235,7 @@ Use ↑/↓ arrows to navigate, Enter to select, ESC/q to cancel:"""
         current = self.current_settings
         provider_info = self.providers.get(current['provider'], {'name': current['provider']})
         
+        has_key = bool(current.get('api_keys', {}).get(current['provider'], ''))
         summary_content = f"""Current Configuration Summary:
 
 🔌 Provider: {provider_info['name']} ({current['provider']})
@@ -226,7 +243,7 @@ Use ↑/↓ arrows to navigate, Enter to select, ESC/q to cancel:"""
 🌐 Host: {current['host']}
 ⚡ Temperature: {current['temperature']}
 📊 Max Tokens: {current['max_tokens']}
-🔑 API Key: {'Configured' if current.get('api_key') else 'Not set'}
+🔑 API Key: {'Configured' if has_key else 'Not set'} (for {current['provider']})
 
 Press Enter to save, ESC or 'c' to cancel."""
         
@@ -240,7 +257,21 @@ Press Enter to save, ESC or 'c' to cancel."""
     def _get_user_input(self, prompt: str) -> str:
         """Get user input with styled prompt (legacy method for text input)"""
         themed_prompt = self.theme_manager.colorize(f"\n{prompt} ", "primary")
-        return input(themed_prompt).strip()
+        try:
+            result = input(themed_prompt).strip()
+            return result
+        except (EOFError, KeyboardInterrupt):
+            # Handle Ctrl+C or EOF gracefully
+            print("\n")
+            return ""
+    
+    def _wait_for_enter(self) -> None:
+        """Wait for user to press Enter with error handling"""
+        try:
+            input("Press Enter to continue...")
+        except (EOFError, KeyboardInterrupt):
+            # Handle Ctrl+C or EOF gracefully
+            print("\n")
     
     def _edit_temperature(self) -> bool:
         """Edit temperature parameter"""
@@ -282,17 +313,29 @@ Press Enter to save, ESC or 'c' to cancel."""
         """Edit API key parameter"""
         print(self.ui.clear_screen())
         key_input = self._get_user_input("Enter API key (leave empty to clear):")
-        self.current_settings['api_key'] = key_input
+        provider = self.current_settings.get('provider', '')
+        keys = self.current_settings.get('api_keys', {})
+        if key_input:
+            keys[provider] = key_input
+        else:
+            if provider in keys:
+                keys.pop(provider)
+        self.current_settings['api_keys'] = keys
         return True
     
     def _edit_host_url(self) -> bool:
         """Edit host URL parameter"""
         print(self.ui.clear_screen())
-        host_input = self._get_user_input("Enter host URL:")
-        if host_input:
-            self.current_settings['host'] = host_input
+        current_host = self.current_settings.get('host', '')
+        host_input = self._get_user_input(f"Enter host URL [current: {current_host}]:")
+        
+        # Allow empty input to keep current value
+        if host_input.strip():
+            self.current_settings['host'] = host_input.strip()
+            print(self.theme_manager.colorize(f"✅ Host URL updated to: {host_input.strip()}", 'success'))
+            self._wait_for_enter()
             return True
-        return False
+        return True  # Return True even if no change (empty input keeps current)
     
     def _confirm_and_save(self) -> bool:
         """Confirmation dialog with arrow key navigation"""
@@ -441,20 +484,20 @@ Press Enter to save, ESC or 'c' to cancel."""
                 
             elif key_code == KeyCode.ENTER:
                 if selected_index == 0:  # Temperature
-                    if self._edit_temperature():
-                        continue  # Stay in parameter config
+                    self._edit_temperature()
+                    continue  # Stay in parameter config
                     
                 elif selected_index == 1:  # Max tokens
-                    if self._edit_max_tokens():
-                        continue  # Stay in parameter config
+                    self._edit_max_tokens()
+                    continue  # Stay in parameter config
                         
                 elif selected_index == 2:  # API Key
                     self._edit_api_key()
                     continue  # Stay in parameter config
                     
                 elif selected_index == 3:  # Host URL
-                    if self._edit_host_url():
-                        continue  # Stay in parameter config
+                    self._edit_host_url()
+                    continue  # Stay in parameter config
                         
                 elif selected_index == 4:  # Skip
                     return True

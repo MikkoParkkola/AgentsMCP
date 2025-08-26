@@ -500,6 +500,10 @@ def _load_integration_component(path: str, name: str) -> Any:
     ``RuntimeError`` – the server must not start without the core services.
     """
     try:
+        import os
+        if os.getenv("AGENTSMCP_DISABLE_DISCOVERY") == "1":
+            log.info("Discovery disabled; using mock component", component=path)
+            return _create_mock_component(name)
         component_cls = import_from_path(path)
         instance = component_cls()
         log.info(f"{name} instantiated", component=path)

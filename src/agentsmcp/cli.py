@@ -8,34 +8,42 @@ import signal
 import subprocess
 import sys
 from pathlib import Path
+import sys
+import threading
+import time
 from typing import Optional
 
 import click
 
-from . import __version__
-from .agent_manager import AgentManager
-from .config import Config
-from .logging_config import configure_logging
-from .settings import AppSettings
-from .commands.mcp import mcp as mcp_group
-from .commands.chat import chat as chat_cmd
-from .commands.discovery import discovery as discovery_group
+from agentsmcp import __version__
+from agentsmcp.agent_manager import AgentManager
+from agentsmcp.config import Config
+from agentsmcp.logging_config import configure_logging
+from agentsmcp.settings import AppSettings
+from agentsmcp.commands.mcp import mcp as mcp_group
+# Chat functionality moved to enhanced interactive mode
+from agentsmcp.commands.discovery import discovery as discovery_group
 
 # Revolutionary UI Integration
-from .ui.cli_app import CLIApp, CLIConfig
-from .ui.statistics_display import StatisticsDisplay
-from .ui.theme_manager import ThemeManager
+from agentsmcp.ui.cli_app import CLIApp, CLIConfig
+from agentsmcp.ui.statistics_display import StatisticsDisplay
+from agentsmcp.ui.theme_manager import ThemeManager
 
 # Cost Intelligence Integration
 try:
-    from .cost.tracker import CostTracker
-    from .cost.optimizer import ModelOptimizer
-    from .cost.budget import BudgetManager
+    from agentsmcp.cost.tracker import CostTracker
+    from agentsmcp.cost.optimizer import ModelOptimizer
+    from agentsmcp.cost.budget import BudgetManager
     COST_AVAILABLE = True
 except ImportError:
     COST_AVAILABLE = False
 
-PID_FILE = Path(os.path.expanduser("~/.agentsmcp/.agentsmcp.pid"))
+from agentsmcp.paths import ensure_dirs, pid_file_path
+
+# Ensure user data directories exist early
+ensure_dirs()
+
+PID_FILE = pid_file_path()
 
 
 def _load_config(config_path: Optional[str]) -> Config:
@@ -45,13 +53,19 @@ def _load_config(config_path: Optional[str]) -> Config:
         base = Config.from_file(Path(config_path))
     else:
         # Prefer per-user config under ~/.agentsmcp
-        user_cfg = Config.default_config_path()
+        from agentsmcp.paths import default_user_config_path
+        user_cfg = default_user_config_path()
         if user_cfg.exists():
             base = Config.from_file(user_cfg)
         elif Path("agentsmcp.yaml").exists():
             base = Config.from_file(Path("agentsmcp.yaml"))
         else:
             base = Config()
+            # First-run: persist defaults to ~/.agentsmcp/agentsmcp.yaml
+            try:
+                base.save_to_file(user_cfg)
+            except Exception:
+                pass
     return env.to_runtime_config(base)
 
 
@@ -64,8 +78,43 @@ def main(
     log_level: Optional[str], log_format: Optional[str], config_path: Optional[str]
 ) -> None:
     """AgentsMCP - Revolutionary Multi-Agent Orchestration with Cost Intelligence."""
-    config = _load_config(config_path)
-    configure_logging(log_level or "INFO", log_format or "text")
+    spinner = _Spinner("Initializing AgentsMCP")
+    spinner.start()
+    try:
+        config = _load_config(config_path)
+        configure_logging(log_level or "INFO", log_format or "text")
+        # First-run warmup: ensure MCP servers are pulled/cached (non-fatal)
+        try:
+            warm = _Spinner("Warming up MCP servers")
+            warm.start()
+            _warmup_mcp_servers()
+        finally:
+            warm.stop("MCP ready")
+    finally:
+        spinner.stop("Initialized")
+
+def _warmup_mcp_servers() -> None:
+    """Non-blocking, best-effort warmup for common MCP servers.
+
+    Prefetches npx MCP server packages to reduce first-use latency.
+    Safe to run repeatedly; failures are ignored.
+    """
+    import shutil
+    import subprocess
+    servers = [
+        ("@anthropic/mcp-github", ["npx", "-y", "@anthropic/mcp-github", "--help"]),
+        ("@anthropic/mcp-filesystem", ["npx", "-y", "@anthropic/mcp-filesystem", "--help"]),
+        ("@anthropic/mcp-git", ["npx", "-y", "@anthropic/mcp-git", "--help"]),
+        ("@anthropic/mcp-ollama", ["npx", "-y", "@anthropic/mcp-ollama", "--help"]),
+        ("@anthropic/mcp-ollama-turbo", ["npx", "-y", "@anthropic/mcp-ollama-turbo", "--help"]),
+    ]
+    if not shutil.which("npx"):
+        return
+    for _, cmd in servers:
+        try:
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20)
+        except Exception:
+            continue
 
 
 # Add revolutionary UI commands
@@ -74,15 +123,67 @@ def main(
 @click.option("--no-welcome", is_flag=True, help="Skip welcome screen")
 @click.option("--refresh-interval", default=2.0, type=float, help="Auto-refresh interval")
 @click.option("--orchestrator-model", default="gpt-5", help="Orchestrator model (default: gpt-5)")
-def interactive(theme: str, no_welcome: bool, refresh_interval: float, orchestrator_model: str) -> None:
-    """Launch revolutionary interactive CLI interface with live cost tracking."""
+@click.option(
+    "--agent",
+    "agent_type",
+    default="ollama-turbo-coding",
+    help="Default AI agent (ollama-turbo-coding/ollama-turbo-general/codex/claude/ollama)",
+)
+@click.option("--model", "model_override", default=None, help="Model override for session")
+@click.option(
+    "--provider",
+    "provider_override",
+    default=None,
+    type=click.Choice(["openai", "anthropic", "ollama", "ollama-turbo", "openrouter", "codex"]),
+)
+@click.option("--streaming/--no-streaming", default=True, help="Enable/disable streaming mode")
+@click.option("--no-webui", is_flag=True, help="Do not start the web UI server alongside the interactive CLI")
+def interactive(theme: str, no_welcome: bool, refresh_interval: float, orchestrator_model: str,
+               agent_type: str, model_override: Optional[str], provider_override: Optional[str], streaming: bool,
+               no_webui: bool) -> None:
+    """Launch enhanced interactive CLI with AI chat, agent orchestration, and task delegation."""
     
     async def run_interactive():
+        from agentsmcp.settings import AppSettings
+        import subprocess
+        
+        # Optionally start the web UI server in the background
+        web_proc = None
+        env = AppSettings()
+        if not no_webui:
+            try:
+                cmd = [
+                    "python",
+                    "-m",
+                    "uvicorn",
+                    "agentsmcp.server:create_app",
+                    "--factory",
+                    "--host",
+                    env.server_host,
+                    "--port",
+                    str(env.server_port),
+                ]
+                # Show a brief spinner while the server comes up
+                boot = _Spinner("Starting Web UI")
+                boot.start()
+                web_proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # Give it a moment to bind; keep it snappy (<= 1s)
+                time.sleep(0.6)
+                boot.stop()
+                click.echo("✓ Web UI started")
+                click.echo(f"🌐 Web UI: http://{env.server_host}:{env.server_port}/ui (disable with --no-webui)")
+            except Exception as e:
+                click.echo(f"⚠️  Failed to start web UI automatically: {e}")
         cli_config = CLIConfig(
             theme_mode=theme,
             show_welcome=not no_welcome,
             refresh_interval=refresh_interval,
-            interface_mode="interactive"
+            interface_mode="interactive",
+            orchestrator_model=orchestrator_model,
+            agent_type=agent_type,
+            model_override=model_override,
+            provider_override=provider_override,
+            streaming=streaming
         )
         
         app = CLIApp(cli_config)
@@ -91,6 +192,13 @@ def interactive(theme: str, no_welcome: bool, refresh_interval: float, orchestra
         except KeyboardInterrupt:
             click.echo("\n👋 Goodbye!")
             sys.exit(0)
+        finally:
+            # Stop background web UI if we started it
+            if web_proc:
+                try:
+                    web_proc.terminate()
+                except Exception:
+                    pass
     
     asyncio.run(run_interactive())
 
@@ -242,7 +350,7 @@ def models(detailed: bool, recommend: Optional[str]) -> None:
     """Show available orchestrator models and recommendations."""
     
     # Import here to avoid circular imports
-    from .distributed.orchestrator import DistributedOrchestrator
+    from agentsmcp.distributed.orchestrator import DistributedOrchestrator
     
     if recommend:
         recommended_model = DistributedOrchestrator.get_model_recommendation(recommend)
@@ -418,7 +526,7 @@ def server_stop() -> None:
 
 # Keep existing command groups
 main.add_command(mcp_group)
-main.add_command(chat_cmd)
+# Chat functionality now integrated in enhanced interactive mode
 main.add_command(discovery_group)
 
 
@@ -430,9 +538,42 @@ async def _run_async_command(func, *args, **kwargs):
     except KeyboardInterrupt:
         click.echo("\n⏹️  Operation cancelled")
         sys.exit(0)
-    except Exception as e:
-        click.echo(f"❌ Error: {e}")
-        sys.exit(1)
+class _Spinner:
+    """Lightweight CLI spinner for startup feedback."""
+
+    FRAMES = ["⠙", "⠸", "⠼", "⠴", "⠦", "⠇", "⠋"]
+
+    def __init__(self, text: str = "Loading"):
+        self.text = text
+        self._running = False
+        self._thread = None
+        self._tty = sys.stderr.isatty()
+
+    def _loop(self):
+        i = 0
+        while self._running:
+            if self._tty:
+                frame = self.FRAMES[i % len(self.FRAMES)]
+                sys.stderr.write(f"\r{frame} {self.text} ")
+                sys.stderr.flush()
+            time.sleep(0.08)
+            i += 1
+        if self._tty:
+            sys.stderr.write("\r")
+            sys.stderr.flush()
+
+    def start(self):
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self, final_message: str | None = None):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=0.5)
+        if final_message and sys.stderr.isatty():
+            sys.stderr.write(f"✓ {final_message}\n")
+            sys.stderr.flush()
 
 
 if __name__ == "__main__":

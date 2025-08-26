@@ -44,6 +44,20 @@ agentsmcp server start
 
 # Spawn an agent
 agentsmcp agent spawn codex "Analyze this code structure"
+
+### macOS Binary
+
+- Binary path: `dist/agentsmcp` (Mach-O arm64)
+- Interactive UI: `./dist/agentsmcp interactive` (defaults to `ollama-turbo-coding` with `gpt-oss:120b`)
+- Web UI server: `uvicorn agentsmcp.server:create_app --factory --host 127.0.0.1 --port 8000` then open http://127.0.0.1:8000/ui
+
+Defaults:
+- Provider: `ollama-turbo`
+- Model: `gpt-oss:120b`
+- MCP tools pre-wired for coding: GitHub, filesystem, git, bash, web search. Additional MCP servers can be added via `agentsmcp mcp add ...`.
+
+Startup guidance loading:
+- On startup, AgentsMCP reads local `AGENTS.md`, `CLAUDE.md`, `QWEN.md`, and `GEMINI.md` (if present) and folds key guidance into the system context for higher-quality outputs.
 ```
 
 ## MCP Integration

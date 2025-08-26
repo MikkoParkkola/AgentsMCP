@@ -150,3 +150,97 @@ def web_server(binary_path, api_endpoint, temp_dir):
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait()
+
+# ----------------------------------------------------------------------
+# Multi-turn Tool Execution Test Fixtures
+# ----------------------------------------------------------------------
+
+@pytest.fixture
+def test_llm_client():
+    """Create a test LLMClient with consistent configuration."""
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+    from agentsmcp.conversation.llm_client import LLMClient
+    
+    client = LLMClient()
+    client.config = {
+        "provider": "ollama-turbo",
+        "model": "gpt-oss:120b",
+        "temperature": 0.1,  # Low temperature for consistent tests
+        "max_tokens": 1024
+    }
+    # Clear any existing conversation history
+    client.conversation_history = []
+    return client
+
+
+@pytest.fixture
+def mock_tool_responses():
+    """Provide realistic mock tool responses."""
+    return {
+        "list_directory": "Contents of .: DIR src, DIR tests, DIR docs, FILE README.md, FILE setup.py, FILE requirements.txt",
+        "read_file": "def main():\n    \"\"\"Main function.\"\"\"\n    print('Hello, World!')\n    return 0\n\nif __name__ == '__main__':\n    main()",
+        "search_files": "Found 5 Python files: src/main.py, src/utils.py, tests/test_main.py, tests/test_utils.py, setup.py"
+    }
+
+
+@pytest.fixture
+def mock_llm_responses():
+    """Provide realistic LLM response structures."""
+    return {
+        "with_tools": {
+            'model': 'gpt-oss:120b',
+            'message': {
+                'role': 'assistant',
+                'content': '',
+                'tool_calls': [{
+                    'function': {
+                        'name': 'list_directory',
+                        'arguments': {'path': '.'}
+                    }
+                }]
+            }
+        },
+        "analysis": {
+            'model': 'gpt-oss:120b',
+            'message': {
+                'role': 'assistant',
+                'content': """Based on the tool execution results, I can provide this analysis:
+
+**Project Structure:**
+- Well-organized with src/, tests/, and docs/ directories
+- Standard Python project layout with setup.py and requirements.txt
+
+**Code Quality Observations:**
+- Main functionality is properly organized in src/ directory
+- Test suite is present in tests/ directory
+- Documentation appears to be available
+
+**Recommendations:**
+1. Ensure all code has proper test coverage
+2. Keep dependencies in requirements.txt up to date  
+3. Consider adding type hints for better code clarity
+
+This appears to be a well-structured Python project following standard conventions.""",
+                'tool_calls': None
+            }
+        },
+        "empty": {
+            'model': 'gpt-oss:120b',
+            'message': {
+                'role': 'assistant',
+                'content': '',
+                'tool_calls': None
+            }
+        }
+    }
+
+
+# Pytest markers for multi-turn test categorization
+def pytest_configure(config):
+    """Configure custom pytest markers."""
+    config.addinivalue_line("markers", "unit: Unit tests for individual components")
+    config.addinivalue_line("markers", "integration: Integration tests with real components") 
+    config.addinivalue_line("markers", "behavioral: Behavioral tests for user scenarios")
+    config.addinivalue_line("markers", "regression: Regression tests to prevent breaking changes")
+    config.addinivalue_line("markers", "multiturn: Multi-turn tool execution tests")
+    config.addinivalue_line("markers", "slow: Tests that take longer to run")

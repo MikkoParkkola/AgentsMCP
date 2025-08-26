@@ -30,8 +30,13 @@ class CLIConfig:
     show_welcome: bool = True
     enable_colors: bool = True
     debug_mode: bool = False
-    log_level: str = "INFO"
+    log_level: str = "WARNING"  # Hide INFO logs in interactive mode
     interface_mode: str = "interactive"  # interactive, dashboard, stats
+    orchestrator_model: str = "gpt-5"
+    agent_type: str = "ollama-turbo-coding"
+    model_override: Optional[str] = None
+    provider_override: Optional[str] = None
+    streaming: bool = True
 
 
 class CLIApp:
@@ -77,6 +82,10 @@ class CLIApp:
     def __init__(self, config: CLIConfig = None):
         self.config = config or CLIConfig()
         
+        # Configure logging for interactive mode
+        from ..logging_config import configure_logging
+        configure_logging(level=self.config.log_level, fmt="text")
+        
         # Initialize core components
         self.theme_manager = ThemeManager()
         self.ui = UIComponents(self.theme_manager)
@@ -95,7 +104,34 @@ class CLIApp:
             theme_manager=self.theme_manager, 
             config=dashboard_config
         )
-        self.command_interface = CommandInterface(self.orchestration_manager, self.theme_manager)
+        # Create agent manager and load configuration for enhanced interactive mode
+        self.agent_manager = None
+        self.app_config = None
+        try:
+            from ..agent_manager import AgentManager
+            from ..config import Config
+            from pathlib import Path
+            
+            # Load configuration if available
+            if Path("agentsmcp.yaml").exists():
+                self.app_config = Config.from_file(Path("agentsmcp.yaml"))
+                self.agent_manager = AgentManager(self.app_config)
+        except Exception as e:
+            # Continue without agent manager if it fails
+            pass
+        
+        self.command_interface = CommandInterface(
+            self.orchestration_manager, 
+            self.theme_manager,
+            agent_manager=self.agent_manager,
+            app_config=self.app_config
+        )
+        
+        # Configure session defaults from CLI config
+        if hasattr(self.command_interface, 'current_agent'):
+            self.command_interface.current_agent = self.config.agent_type
+        if hasattr(self.command_interface, 'stream_enabled'):
+            self.command_interface.stream_enabled = self.config.streaming
         self.statistics_display = StatisticsDisplay(self.theme_manager, {
             'auto_refresh': self.config.auto_refresh,
             'refresh_interval': self.config.refresh_interval
@@ -156,94 +192,43 @@ class CLIApp:
         }
     
     async def _show_welcome(self):
-        """Display beautiful welcome screen"""
+        """Display simplified welcome screen"""
         theme = self.theme_manager.current_theme
         
         # Clear screen and show cursor
         print(self.ui.clear_screen())
         print(self.ui.move_cursor(1, 1))
         
-        # ASCII art header
-        header_art = f"""
-    {theme.palette.primary}
-    ╔═══════════════════════════════════════════════════════════════════╗
-    ║  🚀 AgentsMCP - Revolutionary Multi-Agent Orchestration Platform  ║
-    ╠═══════════════════════════════════════════════════════════════════╣
-    ║                                                                   ║
-    ║        ▄▄▄▄▄▄▄▄   ▄▄▄▄▄▄▄▄▄   ▄▄▄▄▄▄▄▄▄   ▄▄▄   ▄▄   ▄▄▄▄▄▄▄▄▄   ║
-    ║       ▐░░░░░░░░▌ ▐░░░░░░░░░▌ ▐░░░░░░░░░▌ ▐░░░▌ ▐░░▌ ▐░░░░░░░░░▌  ║
-    ║       ▐░█▀▀▀▀▀█░▌▐░█▀▀▀▀▀▀▀  ▐░█▀▀▀▀▀▀▀  ▐░▀░░▌▐░▀░▌  ▀▀▀▀█░█▀▀▀▀  ║
-    ║       ▐░▌       ▐░▌          ▐░▌          ▐░▌▐░░▐░▌▐░▌     ▐░▌      ║
-    ║       ▐░█▄▄▄▄▄█░▌▐░▌ ▄▄▄▄▄▄▄▄▐░█▄▄▄▄▄▄▄  ▐░▌ ▐░▐░▌ ▐░▌     ▐░▌      ║
-    ║       ▐░░░░░░░░▌ ▐░▌▐░░░░░░░░▌▐░░░░░░░░░▌ ▐░▌  ▐▐░▌  ▐░▌     ▐░▌      ║
-    ║       ▐░█▀▀▀▀▀█░▌▐░▌ ▀▀▀▀▀▀█░▌▐░█▀▀▀▀▀▀▀  ▐░▌   ▐░▌   ▐░▌     ▐░▌      ║
-    ║       ▐░▌       ▐░▌       ▐░▌▐░▌          ▐░▌    ▐░▌   ▐░▌     ▐░▌      ║
-    ║       ▐░▌       ▐░█▄▄▄▄▄▄▄█░▌▐░█▄▄▄▄▄▄▄  ▐░▌     ▐░▌   ▐░▌     ▐░▌      ║
-    ║       ▐░▌       ▐░░░░░░░░░▌ ▐░░░░░░░░░▌ ▐░▌      ▐░▌  ▐░▌     ▐░▌      ║
-    ║        ▀         ▀▀▀▀▀▀▀▀▀   ▀▀▀▀▀▀▀▀▀   ▀        ▀    ▀       ▀       ║
-    ║                                                                   ║
-    ╚═══════════════════════════════════════════════════════════════════╝
-    {Fore.RESET}
-        """
-        print(header_art)
-        
-        # Welcome message with features
-        welcome_content = f"""
-{theme.palette.secondary}Welcome to the future of multi-agent orchestration!{Fore.RESET}
+        # Simple welcome message
+        welcome_content = f"""{theme.palette.secondary}Welcome to AgentsMCP!{Fore.RESET}
 
-🎼 {theme.palette.accent}Symphony Mode{Fore.RESET}: Conduct agents like a maestro
-🧠 {theme.palette.accent}Predictive Spawning{Fore.RESET}: AI-powered agent provisioning  
-📊 {theme.palette.accent}Real-time Analytics{Fore.RESET}: Beautiful metrics visualization
-🎨 {theme.palette.accent}Adaptive Themes{Fore.RESET}: Automatic light/dark detection
-⚡ {theme.palette.accent}Lightning Fast{Fore.RESET}: Sub-millisecond response times
+{theme.palette.text_muted}A revolutionary multi-agent orchestration platform.{Fore.RESET}
 
-{theme.palette.text_muted}Available Modes:{Fore.RESET}
-• {theme.palette.primary}Interactive{Fore.RESET}: Full-featured command interface
-• {theme.palette.primary}Dashboard{Fore.RESET}: Real-time orchestration monitoring
-• {theme.palette.primary}Statistics{Fore.RESET}: Advanced metrics and trends
-
-{theme.palette.warning}Press any key to continue, or Ctrl+C to exit...{Fore.RESET}
+{theme.palette.primary}Type 'help' to get started.{Fore.RESET}
         """
         
         welcome_box = self.ui.box(
             welcome_content.strip(),
-            title="🎯 Getting Started",
-            style='heavy',
-            width=min(self.ui.terminal_width - 4, 85)
+            title="🚀 AgentsMCP",
+            style='light',
+            width=min(self.ui.terminal_width - 4, 60)
         )
         print(welcome_box)
         
-        # Add a funny broa.biz rule or quote
-        funny_content = random.choice(self.BROA_RULES + self.FUNNY_QUOTES)
-        funny_box = self.ui.box(
-            f"💡 {funny_content}\n\n🌐 Inspired by broa.biz - Check out more at https://broa.biz",
-            title="😄 Daily Wisdom",
-            style='rounded',
-            width=min(self.ui.terminal_width - 4, 80)
-        )
-        print(funny_box)
-        print()
-        
-        # Wait for user input or timeout
-        try:
-            import select
-            if select.select([sys.stdin], [], [], 5.0)[0]:  # 5 second timeout
-                sys.stdin.read(1)
-        except:
-            await asyncio.sleep(5)  # Fallback for non-Unix systems
-        
+        # Wait briefly then clear for a cleaner interface
+        await asyncio.sleep(1)
         print(self.ui.clear_screen())
     
     async def _run_interactive_mode(self):
         """Run the interactive command interface"""
         print(self.ui.clear_screen())
         
-        # Show mode header
+        # Show简洁 mode header
         header = self.ui.box(
-            "🎮 Interactive Command Mode - Type 'help' for available commands",
-            title="Interactive Mode",
+            "Interactive Mode - Type 'help' for commands",
+            title="🎮 AgentsMCP",
             style='light',
-            width=min(self.ui.terminal_width - 4, 90)
+            width=min(self.ui.terminal_width - 4, 60)
         )
         print(header)
         print()
@@ -323,28 +308,21 @@ class CLIApp:
         if hasattr(self.command_interface, 'stop'):
             self.command_interface.stop()
         
-        # Show goodbye message
+        # Show简洁 goodbye message
         print(self.ui.clear_screen())
         
         goodbye_message = f"""
-{theme.palette.primary}
-    ╔════════════════════════════════════════════╗
-    ║  🎭 Thank you for using AgentsMCP!          ║
-    ║                                            ║
-    ║  🚀 Ready to orchestrate the future?       ║
-    ║  💫 Your agents await your next command    ║
-    ╚════════════════════════════════════════════╝
-{Fore.RESET}
+{theme.palette.primary}Thank you for using AgentsMCP!{Fore.RESET}
 
 {theme.palette.secondary}Session completed successfully.{Fore.RESET}
-{theme.palette.text_muted}May your code be bug-free and your agents be swift! ✨{Fore.RESET}
+{theme.palette.text_muted}May your code be bug-free and your agents be swift!{Fore.RESET}
         """
         print(goodbye_message)
         
         # Add a parting funny rule or quote
         parting_content = random.choice(self.BROA_RULES + self.FUNNY_QUOTES)
         parting_box = self.ui.box(
-            f"🎉 {parting_content}\n\n🌐 More laughs at https://broa.biz - Thanks for the inspiration!",
+            f"🎉 {parting_content}",
             title="😊 Until Next Time",
             style='rounded',
             width=min(self.ui.terminal_width - 4, 80)
@@ -492,6 +470,29 @@ class CLIApp:
                         }
                     }
                 }
+
+                # Optionally include locally installed CLI MCP servers
+                try:
+                    claude_code_bin = shutil.which("claude-code")
+                    if claude_code_bin:
+                        config["mcpServers"]["claude-code-cli"] = {
+                            "command": claude_code_bin,
+                            "args": ["mcp-server"],
+                            "env": {"ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"}
+                        }
+                except Exception:
+                    pass
+
+                try:
+                    codex_bin = shutil.which("codex") or shutil.which("codex-cli")
+                    if codex_bin:
+                        config["mcpServers"]["codex-cli"] = {
+                            "command": codex_bin,
+                            "args": ["mcp-server"],
+                            "env": {}
+                        }
+                except Exception:
+                    pass
                 
                 # Format as pretty-printed JSON
                 config_json = json.dumps(config, indent=2)

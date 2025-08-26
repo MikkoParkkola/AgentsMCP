@@ -9,8 +9,46 @@ automated resource allocation.
 import asyncio
 import json
 import logging
-import numpy as np
+import math
 from collections import defaultdict, deque
+
+# Optional numpy import for enhanced calculations
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    # Fallback to standard library functions
+    HAS_NUMPY = False
+    class MockNumpy:
+        @staticmethod
+        def mean(values):
+            return sum(values) / len(values) if values else 0.0
+        @staticmethod
+        def std(values):
+            if not values:
+                return 0.0
+            mean_val = sum(values) / len(values)
+            return math.sqrt(sum((x - mean_val) ** 2 for x in values) / len(values))
+        @staticmethod
+        def clip(value, min_val, max_val):
+            return max(min_val, min(max_val, value))
+        @staticmethod
+        def array(values):
+            return values
+        @staticmethod
+        def percentile(values, p):
+            if not values:
+                return 0.0
+            sorted_vals = sorted(values)
+            k = (len(sorted_vals) - 1) * p / 100
+            f = math.floor(k)
+            c = math.ceil(k)
+            if f == c:
+                return sorted_vals[int(k)]
+            d0 = sorted_vals[int(f)] * (c - k)
+            d1 = sorted_vals[int(c)] * (k - f)
+            return d0 + d1
+    np = MockNumpy()
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum

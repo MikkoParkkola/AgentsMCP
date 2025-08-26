@@ -17,9 +17,15 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # Exclude heavy optional stacks to speed up build and startup
+    excludes=[
+        'torch','torchvision','torchaudio','tensorflow','tf_keras','jax',
+        'scipy','pandas','sklearn','matplotlib','numba','llvmlite','pyarrow',
+        'transformers','datasets','onnxruntime','django','yt_dlp','librosa',
+        'sounddevice','grpc','google','opentelemetry','sentry_sdk','PIL.ImageTk',
+    ],
     noarchive=False,
-    optimize=0,
+    optimize=1,
 )
 pyz = PYZ(a.pure)
 

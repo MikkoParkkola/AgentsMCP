@@ -7,3 +7,4 @@ __pycache__/
 build/
 .coverage
 .aider*
+.agentsmcp_install_cache

@@ -3,6 +3,7 @@
 This file records notable changes to the project. Keep entries in reverse chronological order.
 
 ## [Unreleased]
+- Architecture: add architecture analysis synthesis and adopt prioritized roadmap (AgentManager singleton in API; job cleanup fix; EventBus consolidation; queue/worker pool + 429 overload; async providers with retry/backoff; tool sandboxing; JWT auth, rate limits; config consolidation).
 - Provider config validation (K1): add `validate_provider_config` returning non-raising results.
 - API key persistence (K2): new `/apikey [provider]` command with masked input; keys saved to YAML providers map.
 - Validation wiring (K3): `/provider` and `/models` show friendly, non-blocking validation banners.
@@ -44,3 +45,9 @@ This file records notable changes to the project. Keep entries in reverse chrono
 ### Fixed
 - ...
 -->
+## 2025-08-26
+
+- Default interactive agent set to `ollama-turbo-coding` using `gpt-oss:120b`.
+- CLI `--provider` now accepts `ollama-turbo`.
+- README updated with macOS binary path and usage; documented defaults and MCP tools.
+- Verified web UI serves from `/ui` and health endpoint responds.

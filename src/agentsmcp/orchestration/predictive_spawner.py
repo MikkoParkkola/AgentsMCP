@@ -13,9 +13,37 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import json
 import uuid
-import numpy as np
+import math
 from collections import deque, defaultdict
 import statistics
+
+# Optional numpy import for enhanced calculations
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    # Fallback to standard library functions
+    HAS_NUMPY = False
+    class MockNumpy:
+        @staticmethod
+        def mean(values):
+            return sum(values) / len(values) if values else 0.0
+        @staticmethod
+        def std(values):
+            if not values:
+                return 0.0
+            mean_val = sum(values) / len(values)
+            return math.sqrt(sum((x - mean_val) ** 2 for x in values) / len(values))
+        @staticmethod
+        def exp(x):
+            return math.exp(x)
+        @staticmethod
+        def clip(value, min_val, max_val):
+            return max(min_val, min(max_val, value))
+        @staticmethod
+        def array(values):
+            return values
+    np = MockNumpy()
 
 logger = logging.getLogger(__name__)
 

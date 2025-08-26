@@ -112,7 +112,14 @@ class RAGPipeline:
         self, query: str, max_results: int
     ) -> List[RetrievalResult]:
         """Retrieve documents using embedding similarity."""
-        import numpy as np
+        import math
+        
+        # Optional numpy import for enhanced calculations
+        try:
+            import numpy as np
+            HAS_NUMPY = True
+        except ImportError:
+            HAS_NUMPY = False
 
         # Generate query embedding
         query_embedding = self.embedder.encode(query)
@@ -121,10 +128,18 @@ class RAGPipeline:
         for document in self.documents.values():
             if document.embedding:
                 # Calculate cosine similarity
-                doc_embedding = np.array(document.embedding)
-                similarity = np.dot(query_embedding, doc_embedding) / (
-                    np.linalg.norm(query_embedding) * np.linalg.norm(doc_embedding)
-                )
+                if HAS_NUMPY:
+                    doc_embedding = np.array(document.embedding)
+                    similarity = np.dot(query_embedding, doc_embedding) / (
+                        np.linalg.norm(query_embedding) * np.linalg.norm(doc_embedding)
+                    )
+                else:
+                    # Fallback without numpy
+                    doc_embedding = document.embedding
+                    dot_product = sum(a * b for a, b in zip(query_embedding, doc_embedding))
+                    norm_query = math.sqrt(sum(a * a for a in query_embedding))
+                    norm_doc = math.sqrt(sum(b * b for b in doc_embedding))
+                    similarity = dot_product / (norm_query * norm_doc) if norm_query * norm_doc > 0 else 0.0
 
                 if similarity >= self.rag_config.similarity_threshold:
                     results.append(

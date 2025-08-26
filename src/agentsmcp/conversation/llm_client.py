@@ -11,7 +11,19 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
+# Import tool registry for tool execution
+from ..tools.base_tools import tool_registry
+# Import tools to ensure they're registered
+from ..tools import file_tools
+
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Ensure we have a handler for debugging
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(handler)
 
 @dataclass
 class ModelCapabilities:
@@ -45,6 +57,8 @@ class LLMClient:
         self.system_context = self._build_system_context(orchestration_working)
         self._model_capabilities: Optional[ModelCapabilities] = None
         self._capabilities_cache = {}
+        # Initialize MCP tools for file system access
+        self.mcp_tools = self._get_mcp_tools()
         
     def _load_config(self, config_path: Optional[Path] = None) -> Dict[str, Any]:
         """Load LLM configuration from user's settings."""
@@ -64,7 +78,9 @@ class LLMClient:
             "host": "http://127.0.0.1:11435", 
             "temperature": 0.7,
             "max_tokens": 4096,  # Higher default for better responses
-            "context_window": 128000  # 128k tokens for gpt-oss models
+            "context_window": 128000,  # 128k tokens for gpt-oss models
+            # Provider-specific keys map
+            "api_keys": {}
         }
         
         # Adjust defaults based on provider to optimize for context windows
@@ -85,6 +101,36 @@ class LLMClient:
             })
         
         return default_config
+
+    def _get_api_key(self, provider: str) -> Optional[str]:
+        """Return API key for a provider from config.api_keys or env as fallback."""
+        keys = self.config.get("api_keys", {}) if isinstance(self.config, dict) else {}
+        key = keys.get(provider)
+        if key:
+            return key
+        # Env fallback mapping
+        env_map = {
+            "ollama-turbo": "OLLAMA_API_KEY",
+            "openai": "OPENAI_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+        }
+        env_var = env_map.get(provider)
+        if env_var:
+            return os.getenv(env_var)
+        return None
+
+    def _get_timeout(self, key: str, default: float) -> float:
+        """Get per-endpoint timeout seconds from config.timeouts, or default."""
+        try:
+            tmap = self.config.get("timeouts") if isinstance(self.config, dict) else None
+            if isinstance(tmap, dict):
+                val = tmap.get(key)
+                if isinstance(val, (int, float)) and val > 0:
+                    return float(val)
+        except Exception:
+            pass
+        return float(default)
         
     def _check_mcp_availability(self) -> bool:
         """Check if MCP agents are actually available and working."""
@@ -92,11 +138,108 @@ class LLMClient:
         # handles MCP servers through its own infrastructure rather than importable modules
         # The actual availability will be checked during delegation calls
         return True
+    
+    def _get_mcp_tools(self) -> List[Dict[str, Any]]:
+        """Get available MCP tools for file system operations."""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read the contents of a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {
+                                "type": "string",
+                                "description": "The path to the file to read"
+                            }
+                        },
+                        "required": ["file_path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_directory",
+                    "description": "List the contents of a directory",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "The directory path to list"
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_files",
+                    "description": "Search for files matching a pattern",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "pattern": {
+                                "type": "string",
+                                "description": "The search pattern or glob"
+                            },
+                            "path": {
+                                "type": "string",
+                                "description": "The directory to search in (default: current directory)",
+                                "default": "."
+                            }
+                        },
+                        "required": ["pattern"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "get_file_info",
+                    "description": "Get information about a file or directory",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": {
+                                "type": "string",
+                                "description": "The path to get information about"
+                            }
+                        },
+                        "required": ["path"]
+                    }
+                }
+            }
+        ]
         
     def _build_system_context(self, orchestration_working: bool = False) -> str:
-        """Build system context for AgentsMCP conversational interface."""
-        if orchestration_working:
-            return """You are an intelligent conversational assistant for AgentsMCP, a multi-agent orchestration platform. You act as an LLM client that can intelligently orchestrate specialized agents when needed.
+        """Build system context for AgentsMCP conversational interface.
+
+        Also loads local guidance from AGENTS.md / CLAUDE.md / QWEN.md / GEMINI.md
+        when present, to enrich instructions without requiring network access.
+        """
+        supplemental = []
+        try:
+            from pathlib import Path
+            for name in ("AGENTS.md", "CLAUDE.md", "QWEN.md", "GEMINI.md"):
+                p = Path.cwd() / name
+                if p.exists() and p.is_file():
+                    try:
+                        txt = p.read_text(encoding="utf-8")
+                        if len(txt) > 12000:
+                            txt = txt[:12000] + "\n... [truncated]"
+                        supplemental.append(f"# {name}\n\n{txt}")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        base_text = """You are an intelligent conversational assistant for AgentsMCP, a multi-agent orchestration platform. You act as an LLM client that can intelligently orchestrate specialized agents when needed.
 
 YOUR PRIMARY ROLE:
 - Act as a normal LLM chat client for regular conversation and simple queries
@@ -147,8 +290,12 @@ CONVERSATION STYLE:
 - Provide context and progress updates for complex tasks
 
 Remember: You're primarily an LLM client that smartly delegates complex tasks to specialized agents while handling regular chat naturally."""
+        if supplemental:
+            base_text += "\n\n# PROJECT INSTRUCTIONS\n\n" + "\n\n".join(supplemental)
+        if orchestration_working:
+            return base_text
         else:
-            return """You are a conversational assistant for AgentsMCP. You should provide helpful responses and can execute specific commands when appropriate.
+            fallback_text = """You are a conversational assistant for AgentsMCP. You should provide helpful responses and can execute specific commands when appropriate.
 
 YOUR CAPABILITIES:
 - Answer questions and provide explanations
@@ -178,9 +325,12 @@ CONVERSATION STYLE:
 - Suggest alternatives when possible
 
 Remember: Be truthful about the system's current state rather than creating false expectations."""
+            if supplemental:
+                fallback_text += "\n\n# PROJECT INSTRUCTIONS\n\n" + "\n\n".join(supplemental)
+            return fallback_text
 
     async def send_message(self, message: str, context: Optional[Dict[str, Any]] = None) -> str:
-        """Send message to LLM and get response."""
+        """Send message to LLM and get response with multi-turn tool execution."""
         try:
             # Add user message to history with timestamp
             from datetime import datetime
@@ -188,26 +338,120 @@ Remember: Be truthful about the system's current state rather than creating fals
             user_msg = ConversationMessage(role="user", content=message, timestamp=timestamp, context=context)
             self.conversation_history.append(user_msg)
             
-            # Prepare messages for LLM with auto-detected capabilities
-            messages = await self._prepare_messages()
+            # Multi-turn tool execution loop
+            max_tool_turns = 3  # Prevent infinite loops
+            turn = 0
             
-            # Use real MCP ollama client based on provider
-            response = await self._call_llm_via_mcp(messages)
-            if not response:
-                return "Sorry, I'm having trouble connecting to the LLM service. Please check your configuration in settings."
-            
-            # Extract response content
-            assistant_content = self._extract_response_content(response)
-            if not assistant_content:
-                return "I received an empty response. Could you please try rephrasing your request?"
+            while turn < max_tool_turns:
+                turn += 1
+                logger.debug(f"Tool execution turn {turn}/{max_tool_turns}")
                 
-            # Add assistant response to history with timestamp
-            from datetime import datetime
-            response_timestamp = datetime.now().isoformat()
-            assistant_msg = ConversationMessage(role="assistant", content=assistant_content, timestamp=response_timestamp)
-            self.conversation_history.append(assistant_msg)
+                # Prepare messages for LLM with auto-detected capabilities
+                messages = await self._prepare_messages()
+                
+                # Use real MCP ollama client based on provider
+                response = await self._call_llm_via_mcp(messages)
+                if not response:
+                    return "Sorry, I'm having trouble connecting to the LLM service. Please check your configuration in settings."
+                
+                # Check for tool calls in response
+                tool_calls = self._extract_tool_calls(response)
+                
+                if not tool_calls:
+                    # No tool calls - extract final response and return
+                    assistant_content = self._extract_response_content(response)
+                    if not assistant_content:
+                        # Robust fallback when provider returns empty content
+                        fb = await self._fallback_response(messages)
+                        try:
+                            assistant_content = fb.get("choices", [{}])[0].get("message", {}).get("content", "I ran into an issue; please try again.")
+                        except Exception:
+                            assistant_content = "I ran into an issue; please try again."
+                    
+                    # Add final assistant response to history
+                    response_timestamp = datetime.now().isoformat()
+                    assistant_msg = ConversationMessage(role="assistant", content=assistant_content, timestamp=response_timestamp)
+                    self.conversation_history.append(assistant_msg)
+                    
+                    return assistant_content
+                
+                # Execute tool calls and add to history
+                assistant_content = self._extract_response_content(response)
+                if assistant_content:
+                    # Add assistant's message with tool calls to history
+                    response_timestamp = datetime.now().isoformat()
+                    assistant_msg = ConversationMessage(role="assistant", content=assistant_content, timestamp=response_timestamp)
+                    self.conversation_history.append(assistant_msg)
+                
+                # Execute tool calls and add results as separate messages
+                for tool_call in tool_calls:
+                    try:
+                        tool_name = tool_call.get('function', {}).get('name', '')
+                        parameters = tool_call.get('function', {}).get('arguments', {})
+                        
+                        # Parse arguments if they're a JSON string
+                        if isinstance(parameters, str):
+                            import json
+                            try:
+                                parameters = json.loads(parameters)
+                            except json.JSONDecodeError:
+                                logger.error(f"Failed to parse tool call arguments: {parameters}")
+                                continue
+                        
+                        # Execute the tool
+                        result = await self._execute_tool_call(tool_name, parameters)
+                        
+                        # Add tool result as a user message to continue the conversation
+                        tool_timestamp = datetime.now().isoformat()
+                        tool_result_msg = ConversationMessage(
+                            role="user", 
+                            content=f"Tool execution result for {tool_name}: {result}", 
+                            timestamp=tool_timestamp
+                        )
+                        self.conversation_history.append(tool_result_msg)
+                        
+                    except Exception as e:
+                        logger.error(f"Error executing tool call {tool_call}: {e}")
+                        # Add error as user message
+                        error_timestamp = datetime.now().isoformat()
+                        error_msg = ConversationMessage(
+                            role="user", 
+                            content=f"Tool execution error for {tool_name}: {str(e)}", 
+                            timestamp=error_timestamp
+                        )
+                        self.conversation_history.append(error_msg)
+                
+                # Continue to next turn to let LLM process tool results
             
-            return assistant_content
+            # If we hit max tool turns, ask for final analysis without tools
+            logger.debug("Max tool turns reached, requesting final analysis")
+            
+            # Add a message asking for final analysis
+            analysis_timestamp = datetime.now().isoformat()
+            analysis_request_msg = ConversationMessage(
+                role="user", 
+                content="Based on the tool execution results above, please provide your complete analysis and recommendations. Do not use any more tools, just give your comprehensive response based on what you've discovered.", 
+                timestamp=analysis_timestamp
+            )
+            self.conversation_history.append(analysis_request_msg)
+            
+            # Get final analysis without allowing more tool calls
+            messages = await self._prepare_messages()
+            response = await self._call_llm_via_mcp(messages, enable_tools=False)
+            
+            if response:
+                # Extract final analysis content
+                assistant_content = self._extract_response_content(response)
+                if assistant_content:
+                    # Add final assistant response to history
+                    response_timestamp = datetime.now().isoformat()
+                    assistant_msg = ConversationMessage(role="assistant", content=assistant_content, timestamp=response_timestamp)
+                    self.conversation_history.append(assistant_msg)
+                    
+                    return assistant_content
+            
+            # Fallback if final analysis fails
+            return "I've gathered information using tools but encountered an issue providing the final analysis. Please try asking your question again."
                 
         except Exception as e:
             logger.error(f"Error in LLM communication: {e}")
@@ -295,7 +539,7 @@ Remember: Be truthful about the system's current state rather than creating fals
         try:
             import httpx
             
-            api_key = os.getenv("OLLAMA_API_KEY")
+            api_key = self._get_api_key("ollama-turbo")
             if not api_key:
                 logger.warning("No OLLAMA_API_KEY, skipping ollama.com capability detection")
                 return None
@@ -457,29 +701,76 @@ Remember: Be truthful about the system's current state rather than creating fals
             # Fallback to config
             return self.config.get("max_tokens", 1024)
     
-    async def _call_llm_via_mcp(self, messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
-        """Call the LLM via real MCP client based on configured provider."""
+    async def _call_llm_via_mcp(self, messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
+        """Call the LLM using the configured provider with robust fallbacks.
+
+        Order: primary -> OpenAI -> OpenRouter -> local Ollama -> Codex
+        Only providers with a detected config/env key are attempted (except local Ollama).
+        
+        Args:
+            messages: Messages to send to the LLM
+            enable_tools: Whether to include tools in the LLM call (default: True)
+        """
         try:
-            # Use actual MCP client for LLM calls
-            if self.provider == "ollama-turbo":
-                return await self._call_ollama_turbo(messages)
-            elif self.provider == "ollama":
-                return await self._call_ollama(messages)
-            elif self.provider == "openai":
-                return await self._call_openai(messages)
-            elif self.provider == "codex":
-                return await self._call_codex(messages)
-            else:
-                logger.warning(f"Unknown provider {self.provider}, falling back to ollama-turbo")
-                return await self._call_ollama_turbo(messages)
-                
+            logger.info(f"Calling LLM with provider: {self.provider}, model: {self.model}")
+            primary = (self.provider or "ollama-turbo").lower()
+            candidates = [primary, "openai", "openrouter", "anthropic", "ollama", "codex"]
+            tried = set()
+
+            def has_key(p: str) -> bool:
+                if p == "ollama":
+                    return True
+                return bool(self._get_api_key(p))
+
+            for prov in candidates:
+                if prov in tried:
+                    continue
+                tried.add(prov)
+                if prov != "ollama" and not has_key(prov):
+                    logger.debug(f"Skipping {prov} (no key configured)")
+                    continue
+                try:
+                    logger.info(f"Trying provider: {prov}")
+                    result = None
+                    if prov == "ollama-turbo":
+                        result = await self._call_ollama_turbo(messages, enable_tools)
+                    elif prov == "openai":
+                        result = await self._call_openai(messages, enable_tools)
+                    elif prov == "openrouter":
+                        result = await self._call_openrouter(messages, enable_tools)
+                    elif prov == "ollama":
+                        result = await self._call_ollama(messages, enable_tools)
+                    elif prov == "anthropic":
+                        result = await self._call_anthropic(messages, enable_tools)
+                    elif prov == "codex":
+                        result = await self._call_codex(messages, enable_tools)
+
+                    if result:
+                        content = self._extract_response_content(result)
+                        tool_calls = self._extract_tool_calls(result)
+                        
+                        # Success if we have content OR tool calls
+                        if (content and content.strip()) or tool_calls:
+                            logger.info(f"Provider {prov} succeeded")
+                            return result
+                        else:
+                            logger.warning(f"Provider {prov} returned empty content and no tool calls; trying next")
+                except Exception as e:
+                    logger.warning(f"Provider {prov} failed: {e}")
+                    continue
+
+            logger.error("All candidate providers failed or returned empty content")
+            return None
         except Exception as e:
             logger.error(f"Error calling LLM via MCP: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return None
     
-    async def _call_ollama_turbo(self, messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    async def _call_ollama_turbo(self, messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
         """Call Ollama with priority: 1) ollama.com API, 2) local proxy, 3) MCP."""
         try:
+            logger.info("Starting ollama-turbo call chain")
             import httpx
             
             # Convert messages to Ollama format
@@ -491,39 +782,43 @@ Remember: Be truthful about the system's current state rather than creating fals
                 })
             
             # Try ollama.com API first (primary)
-            result = await self._try_ollama_com_api(ollama_messages)
+            logger.info("Trying ollama.com API...")
+            result = await self._try_ollama_com_api(ollama_messages, enable_tools)
             if result:
+                logger.info("ollama.com API succeeded")
                 return result
+            else:
+                logger.warning("ollama.com API failed")
                 
             # Try local proxy (fallback)
-            result = await self._try_local_proxy(ollama_messages)
+            result = await self._try_local_proxy(ollama_messages, enable_tools)
             if result:
                 return result
                 
             # Try local Ollama instance (last resort for direct API)
-            result = await self._try_local_ollama(ollama_messages)
+            result = await self._try_local_ollama(ollama_messages, enable_tools)
             if result:
                 return result
                 
             # If all direct methods fail, try MCP as absolute last resort
             logger.warning("All direct Ollama methods failed, trying MCP...")
-            return await self._call_ollama(messages)
+            return await self._call_ollama(messages, enable_tools)
                 
-        except ImportError:
-            logger.error("httpx not available for Ollama API calls")
-            return await self._fallback_response(messages)
+        except ImportError as e:
+            logger.error(f"httpx not available for Ollama API calls: {e}")
+            return None
         except Exception as e:
             logger.error(f"Error in ollama-turbo chain: {e}")
-            return await self._fallback_response(messages)
+            return None
     
-    async def _try_ollama_com_api(self, ollama_messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    async def _try_ollama_com_api(self, ollama_messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
         """Try ollama.com API with authentication."""
         try:
             import httpx
             import os
             
             # Get API key from environment variable
-            api_key = os.getenv("OLLAMA_API_KEY")
+            api_key = self._get_api_key("ollama-turbo")
             if not api_key:
                 logger.warning("OLLAMA_API_KEY not set, skipping ollama.com API")
                 return None
@@ -531,7 +826,8 @@ Remember: Be truthful about the system's current state rather than creating fals
             # Use detected max tokens
             max_tokens = await self._get_max_tokens_for_api()
             
-            async with httpx.AsyncClient() as client:
+            turbo_timeout = self._get_timeout("ollama_turbo", 30.0)
+            async with httpx.AsyncClient(timeout=turbo_timeout) as client:
                 response = await client.post(
                     "https://ollama.com/api/chat",
                     headers={
@@ -546,19 +842,28 @@ Remember: Be truthful about the system's current state rather than creating fals
                             "num_predict": max_tokens
                         },
                         "stream": False,
-                        "tools": []
-                    },
-                    timeout=30.0
+                        "tools": self.mcp_tools if enable_tools else None
+                    }
                 )
                 
                 if response.status_code == 200:
                     result = response.json()
-                    logger.info("Successfully used ollama.com API")
+                    logger.info(f"Successfully used ollama.com API - Response: {result}")
+                    message = result.get("message", {})
+                    content = message.get("content", "")
+                    tool_calls = message.get("tool_calls", [])
+                    
+                    logger.info(f"Extracted content: '{content}'")
+                    logger.info(f"Tool calls present: {len(tool_calls)}")
+                    
+                    # Return the response with tool calls for multi-turn handling in send_message
+                    # DO NOT execute tools here - let send_message handle multi-turn execution
                     return {
                         "choices": [{
                             "message": {
                                 "role": "assistant",
-                                "content": result.get("message", {}).get("content", "")
+                                "content": content,
+                                "tool_calls": tool_calls  # Pass tool calls back
                             },
                             "finish_reason": "stop"
                         }]
@@ -571,7 +876,7 @@ Remember: Be truthful about the system's current state rather than creating fals
             logger.warning(f"Ollama.com API error: {e}")
             return None
     
-    async def _try_local_proxy(self, ollama_messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    async def _try_local_proxy(self, ollama_messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
         """Try local proxy that handles API key."""
         try:
             import httpx
@@ -579,7 +884,9 @@ Remember: Be truthful about the system's current state rather than creating fals
             # Use detected max tokens
             max_tokens = await self._get_max_tokens_for_api()
             
-            async with httpx.AsyncClient() as client:
+            # Local proxy can be a thin shim; allow a bit more time (configurable)
+            proxy_timeout = self._get_timeout("proxy", 60.0)
+            async with httpx.AsyncClient(timeout=proxy_timeout) as client:
                 response = await client.post(
                     "http://127.0.0.1:11435/api/chat",
                     json={
@@ -590,19 +897,25 @@ Remember: Be truthful about the system's current state rather than creating fals
                             "num_predict": max_tokens
                         },
                         "stream": False,
-                        "tools": []
-                    },
-                    timeout=30.0
+                        "tools": self.mcp_tools if enable_tools else None
+                    }
                 )
                 
                 if response.status_code == 200:
                     result = response.json()
                     logger.info("Successfully used local proxy")
+                    message = result.get("message", {})
+                    content = message.get("content", "")
+                    tool_calls = message.get("tool_calls", [])
+                    
+                    # Return the response with tool calls for multi-turn handling in send_message
+                    # DO NOT execute tools here - let send_message handle multi-turn execution
                     return {
                         "choices": [{
                             "message": {
                                 "role": "assistant",
-                                "content": result.get("message", {}).get("content", "")
+                                "content": content,
+                                "tool_calls": tool_calls  # Pass tool calls back
                             },
                             "finish_reason": "stop"
                         }]
@@ -615,7 +928,7 @@ Remember: Be truthful about the system's current state rather than creating fals
             logger.warning(f"Local proxy error: {e}")
             return None
     
-    async def _try_local_ollama(self, ollama_messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    async def _try_local_ollama(self, ollama_messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
         """Try local Ollama instance."""
         try:
             import httpx
@@ -623,7 +936,9 @@ Remember: Be truthful about the system's current state rather than creating fals
             # Use detected max tokens
             max_tokens = await self._get_max_tokens_for_api()
             
-            async with httpx.AsyncClient() as client:
+            # Local Ollama can cold-start models; allow generous timeout (configurable)
+            local_timeout = self._get_timeout("local_ollama", 120.0)
+            async with httpx.AsyncClient(timeout=local_timeout) as client:
                 response = await client.post(
                     "http://localhost:11434/api/chat",
                     json={
@@ -634,19 +949,25 @@ Remember: Be truthful about the system's current state rather than creating fals
                             "num_predict": max_tokens
                         },
                         "stream": False,
-                        "tools": []
-                    },
-                    timeout=30.0
+                        "tools": self.mcp_tools if enable_tools else None
+                    }
                 )
                 
                 if response.status_code == 200:
                     result = response.json()
                     logger.info("Successfully used local Ollama")
+                    message = result.get("message", {})
+                    content = message.get("content", "")
+                    tool_calls = message.get("tool_calls", [])
+                    
+                    # Return the response with tool calls for multi-turn handling in send_message
+                    # DO NOT execute tools here - let send_message handle multi-turn execution
                     return {
                         "choices": [{
                             "message": {
                                 "role": "assistant",
-                                "content": result.get("message", {}).get("content", "")
+                                "content": content,
+                                "tool_calls": tool_calls  # Pass tool calls back
                             },
                             "finish_reason": "stop"
                         }]
@@ -659,7 +980,7 @@ Remember: Be truthful about the system's current state rather than creating fals
             logger.warning(f"Local Ollama error: {e}")
             return None
     
-    async def _call_ollama(self, messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    async def _call_ollama(self, messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
         """Call Ollama via direct API, skipping MCP for reliability."""
         try:
             # Convert to ollama format
@@ -690,33 +1011,50 @@ Remember: Be truthful about the system's current state rather than creating fals
                 
         except Exception as e:
             logger.error(f"Error calling ollama: {e}")
-            return await self._fallback_response(messages)
+            return None
     
-    async def _call_openai(self, messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    async def _call_openai(self, messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
         """Call OpenAI via standard API (fallback if no MCP client)."""
         try:
             import openai
             
             # Use OpenAI API key from environment or config
-            api_key = os.getenv("OPENAI_API_KEY") or self.config.get("api_key")
+            api_key = self._get_api_key("openai")
             if not api_key:
                 logger.error("OpenAI API key not found")
-                return await self._fallback_response(messages)
+                return None
             
             client = openai.OpenAI(api_key=api_key)
+            # Enable tool use so the model can call functions when needed
             response = client.chat.completions.create(
                 model=self.config.get("model", "gpt-4o-mini"),
                 messages=messages,
                 temperature=self.config.get("temperature", 0.7),
-                max_tokens=self.config.get("max_tokens", 1024)
+                max_tokens=self.config.get("max_tokens", 1024),
+                tools=self.mcp_tools if enable_tools else None,
+                tool_choice="auto" if enable_tools else "none"
             )
+            
+            # Extract tool calls if present
+            tool_calls = []
+            if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
+                for tc in response.choices[0].message.tool_calls:
+                    tool_calls.append({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    })
             
             return {
                 "choices": [
                     {
                         "message": {
                             "role": response.choices[0].message.role,
-                            "content": response.choices[0].message.content
+                            "content": response.choices[0].message.content,
+                            "tool_calls": tool_calls  # Include tool calls
                         },
                         "finish_reason": response.choices[0].finish_reason
                     }
@@ -725,12 +1063,135 @@ Remember: Be truthful about the system's current state rather than creating fals
             
         except ImportError as e:
             logger.error(f"OpenAI library not available: {e}")
-            return await self._fallback_response(messages)
+            return None
         except Exception as e:
             logger.error(f"Error calling OpenAI: {e}")
-            return await self._fallback_response(messages)
+            return None
+
+    async def _call_openrouter(self, messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
+        """Call OpenRouter chat completions API (OpenAI-compatible schema)."""
+        try:
+            import httpx
+            api_key = self._get_api_key("openrouter")
+            if not api_key:
+                logger.warning("OpenRouter API key not found")
+                return None
+            model = self.config.get("model") or "openai/gpt-4o-mini"
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": self.config.get("temperature", 0.7),
+                "max_tokens": self.config.get("max_tokens", 1024),
+                # Allow natural tool use
+                "tools": self.mcp_tools if enable_tools else None,
+                "tool_choice": "auto" if enable_tools else "none",
+            }
+            timeout = self._get_timeout("openrouter", 30.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+            if resp.status_code != 200:
+                logger.warning(f"OpenRouter failed: {resp.status_code}")
+                return None
+            data = resp.json()
+            return data
+        except Exception as e:
+            logger.error(f"Error calling OpenRouter: {e}")
+            return None
+
+    async def _call_anthropic(self, messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
+        """Call Anthropic Messages API (Claude) with basic tool-use support.
+
+        Note: For full tool schema support, align tool specs with Anthropic's
+        input_schema. This implementation maps our OpenAI-style tools when present.
+        """
+        try:
+            import httpx
+            api_key = self._get_api_key("anthropic")
+            if not api_key:
+                logger.warning("Anthropic API key not found")
+                return None
+            model = self.config.get("model") or "claude-3-5-sonnet-20241022"
+            # Convert messages
+            anthro_msgs = []
+            for m in messages:
+                role = m.get("role", "user")
+                if role == "system":
+                    anthro_msgs.append({"role": "user", "content": [{"type": "text", "text": m.get("content", "")} ]})
+                else:
+                    anthro_msgs.append({"role": role, "content": [{"type": "text", "text": m.get("content", "")} ]})
+
+            # Map tools to Anthropic format
+            def to_anthropic_tools() -> Optional[List[Dict[str, Any]]]:
+                tools = []
+                for t in (self.mcp_tools or []):
+                    if t.get("type") == "function":
+                        fn = t.get("function", {})
+                        name = fn.get("name")
+                        desc = fn.get("description", "")
+                        schema = fn.get("parameters", {"type": "object"})
+                        if name:
+                            tools.append({"name": name, "description": desc, "input_schema": schema})
+                return tools or None
+            tools = to_anthropic_tools() if enable_tools else None
+
+            max_tokens = self.config.get("max_tokens", 1024)
+            temperature = self.config.get("temperature", 0.7)
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+            timeout = self._get_timeout("anthropic", 30.0)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                for _ in range(3):
+                    payload = {
+                        "model": model,
+                        "messages": anthro_msgs,
+                        "max_tokens": max_tokens,
+                        "temperature": temperature,
+                    }
+                    if tools:
+                        payload["tools"] = tools
+                    resp = await client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+                    if resp.status_code != 200:
+                        logger.warning(f"Anthropic failed: {resp.status_code} {resp.text[:160]}")
+                        return None
+                    data = resp.json()
+                    content_items = data.get("content", [])
+                    # Look for tool_use items
+                    tool_uses = [it for it in content_items if isinstance(it, dict) and it.get("type") == "tool_use"]
+                    if not tool_uses:
+                        # Return combined text
+                        parts = []
+                        for item in content_items:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                parts.append(item.get("text", ""))
+                            elif isinstance(item, str):
+                                parts.append(item)
+                        combined = "\n".join(p for p in parts if p)
+                        return {"choices": [{"message": {"role": "assistant", "content": combined}, "finish_reason": data.get("stop_reason", "stop")} ]}
+                    # Execute tools and append results
+                    tool_results = []
+                    for tu in tool_uses:
+                        name = tu.get("name")
+                        input_args = tu.get("input", {})
+                        tool_use_id = tu.get("id") or "tool-id"
+                        try:
+                            result = await self._execute_tool_call(name, input_args)
+                        except Exception as e:
+                            result = f"Error executing tool {name}: {e}"
+                        tool_results.append({"type": "tool_result", "tool_use_id": tool_use_id, "content": result or ""})
+                    anthro_msgs.append({"role": "user", "content": tool_results})
+            return None
+        except Exception as e:
+            logger.error(f"Error calling Anthropic: {e}")
+            return None
     
-    async def _call_codex(self, messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    async def _call_codex(self, messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
         """Call Codex via MCP - fallback to local ollama if codex fails."""
         try:
             # Convert messages to a single prompt for Codex
@@ -841,6 +1302,161 @@ Remember: Be truthful about the system's current state rather than creating fals
             ]
         }
     
+    async def _handle_tool_calls(self, response: Dict[str, Any]) -> Optional[str]:
+        """Handle tool calls from LLM response and return results."""
+        if not response:
+            return None
+        
+        tool_calls = []
+        
+        # Extract tool calls from different response formats
+        if 'choices' in response and len(response['choices']) > 0:
+            choice = response['choices'][0]
+            if 'message' in choice and 'tool_calls' in choice['message']:
+                tool_calls = choice['message']['tool_calls']
+        elif 'message' in response and 'tool_calls' in response['message']:
+            tool_calls = response['message']['tool_calls']
+            
+        if not tool_calls:
+            return None
+            
+        # Execute all tool calls
+        results = []
+        for tool_call in tool_calls:
+            try:
+                tool_name = tool_call.get('function', {}).get('name', '')
+                parameters = tool_call.get('function', {}).get('arguments', {})
+                
+                # Parse arguments if they're a JSON string
+                if isinstance(parameters, str):
+                    import json
+                    try:
+                        parameters = json.loads(parameters)
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse tool call arguments: {parameters}")
+                        continue
+                
+                # Execute the tool
+                result = await self._execute_tool_call(tool_name, parameters)
+                results.append(f"Tool: {tool_name}\nResult: {result}")
+                
+            except Exception as e:
+                logger.error(f"Error executing tool call {tool_call}: {e}")
+                results.append(f"Tool: {tool_name}\nError: {str(e)}")
+        
+        return "\n\n".join(results) if results else None
+
+    async def _execute_tool_call(self, tool_name: str, parameters: Dict[str, Any]) -> str:
+        """Execute MCP tool calls and return results."""
+        import os
+        import glob
+        from pathlib import Path
+        
+        try:
+            if tool_name == "read_file":
+                file_path = parameters.get("file_path", "")
+                try:
+                    path = Path(file_path)
+                    if not path.is_absolute():
+                        path = Path.cwd() / path
+                    
+                    if not path.exists():
+                        return f"Error: File '{file_path}' does not exist."
+                    
+                    if path.is_dir():
+                        return f"Error: '{file_path}' is a directory, not a file."
+                    
+                    content = path.read_text(encoding='utf-8')
+                    return f"Contents of {file_path}:\n\n{content}"
+                except Exception as e:
+                    return f"Error reading file '{file_path}': {str(e)}"
+            
+            elif tool_name == "list_directory":
+                dir_path = parameters.get("path", ".")
+                try:
+                    path = Path(dir_path)
+                    if not path.is_absolute():
+                        path = Path.cwd() / path
+                    
+                    if not path.exists():
+                        return f"Error: Directory '{dir_path}' does not exist."
+                    
+                    if not path.is_dir():
+                        return f"Error: '{dir_path}' is not a directory."
+                    
+                    items = []
+                    for item in sorted(path.iterdir()):
+                        if item.is_dir():
+                            items.append(f"{item.name}/")
+                        else:
+                            size = item.stat().st_size
+                            items.append(f"{item.name} ({size} bytes)")
+                    
+                    return f"Contents of {dir_path}:\n" + "\n".join(items)
+                except Exception as e:
+                    return f"Error listing directory '{dir_path}': {str(e)}"
+            
+            elif tool_name == "search_files":
+                pattern = parameters.get("pattern", "")
+                search_path = parameters.get("path", ".")
+                try:
+                    base_path = Path(search_path)
+                    if not base_path.is_absolute():
+                        base_path = Path.cwd() / base_path
+                    
+                    matches = list(base_path.rglob(pattern))
+                    if not matches:
+                        return f"No files found matching pattern '{pattern}' in '{search_path}'"
+                    
+                    results = []
+                    for match in sorted(matches)[:20]:  # Limit to first 20 results
+                        rel_path = match.relative_to(base_path)
+                        if match.is_dir():
+                            results.append(f"{rel_path}/")
+                        else:
+                            size = match.stat().st_size
+                            results.append(f"{rel_path} ({size} bytes)")
+                    
+                    return f"Files matching '{pattern}' in '{search_path}':\n" + "\n".join(results)
+                except Exception as e:
+                    return f"Error searching for '{pattern}': {str(e)}"
+            
+            elif tool_name == "get_file_info":
+                file_path = parameters.get("path", "")
+                try:
+                    path = Path(file_path)
+                    if not path.is_absolute():
+                        path = Path.cwd() / path
+                    
+                    if not path.exists():
+                        return f"Error: Path '{file_path}' does not exist."
+                    
+                    stat = path.stat()
+                    info = [
+                        f"Path: {path}",
+                        f"Type: {'Directory' if path.is_dir() else 'File'}",
+                        f"Size: {stat.st_size} bytes",
+                        f"Modified: {stat.st_mtime}",
+                    ]
+                    
+                    if path.is_file():
+                        try:
+                            with open(path, 'r', encoding='utf-8') as f:
+                                lines = sum(1 for _ in f)
+                            info.append(f"Lines: {lines}")
+                        except:
+                            pass
+                    
+                    return "\n".join(info)
+                except Exception as e:
+                    return f"Error getting info for '{file_path}': {str(e)}"
+            
+            else:
+                return f"Unknown tool: {tool_name}"
+                
+        except Exception as e:
+            return f"Tool execution error: {str(e)}"
+    
     def _generate_intelligent_response(self, user_message: str, messages: List[Dict[str, str]]) -> str:
         """Generate intelligent response based on user input and context."""
         user_lower = user_message.lower()
@@ -876,7 +1492,9 @@ Remember: Be truthful about the system's current state rather than creating fals
             'what kind of issues', 'find issues', 'project issues', 'code issues',
             'investigate this folder', 'analyze this folder', 'examine this folder',
             'repository analysis', 'analyze repository', 'scan repository',
-            'analyze the project in current directory', 'improvements you would make'
+            'analyze the project in current directory', 'improvements you would make',
+            'analyze the current repo', 'analyze repo', 'analyze the repo', 'suggest improvements',
+            'analyze current', 'analyze this', 'analyze here'
         ]):
             return "I'll analyze the project structure and identify any potential issues. [EXECUTE:analyze_repository]"
             
@@ -891,6 +1509,23 @@ Remember: Be truthful about the system's current state rather than creating fals
             
         else:
             return f"I understand you're asking: '{user_message}'. However, I'm currently unable to handle complex tasks as the agent orchestration system is not functioning properly. I can help with basic commands like status, settings, dashboard, help, and theme changes. What would you like me to do?"
+    
+    def _extract_tool_calls(self, response: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Extract tool calls from LLM response."""
+        if not response:
+            return []
+            
+        tool_calls = []
+        
+        # Extract tool calls from different response formats
+        if 'choices' in response and len(response['choices']) > 0:
+            choice = response['choices'][0]
+            if 'message' in choice and 'tool_calls' in choice['message']:
+                tool_calls = choice['message']['tool_calls']
+        elif 'message' in response and 'tool_calls' in response['message']:
+            tool_calls = response['message']['tool_calls']
+            
+        return tool_calls if tool_calls else []
     
     def _extract_response_content(self, response: Optional[Dict[str, Any]]) -> Optional[str]:
         """Extract content from LLM response."""
@@ -926,6 +1561,39 @@ Remember: Be truthful about the system's current state rather than creating fals
                     timestamp_str = dt.strftime("[%H:%M:%S] ")
                 except:
                     timestamp_str = ""
-            summary += f"{timestamp_str}{role_indicator} {msg.content[:50]}...\n"
+            summary += f"{timestamp_str}{role_indicator} {msg.content}\n"
         
         return summary
+    
+    async def _execute_tool(self, func_name: str, args: Dict[str, Any]) -> str:
+        """Execute a tool with given function name and arguments."""
+        # Map function names to the registered tools
+        tool_name_mapping = {
+            "list_directory": "list_directory",
+            "read_file": "read_file", 
+            "write_file": "write_file"
+        }
+        
+        # Get the actual tool name from mapping
+        actual_tool_name = tool_name_mapping.get(func_name, func_name)
+        
+        # Get the tool from registry
+        tool = tool_registry.get_tool(actual_tool_name)
+        if not tool:
+            raise Exception(f"Tool '{func_name}' not found in registry")
+        
+        # Map argument names if needed (some tools use different parameter names)
+        if func_name == "list_directory":
+            args = {"directory_path": args.get("path", ".")}
+        elif func_name == "read_file":
+            # Handle both 'path' and 'file_path' parameter names
+            file_path = args.get("file_path", args.get("path", ""))
+            args = {"file_path": file_path}
+        
+        logger.debug(f"Executing tool {func_name} with args: {args}")
+        
+        # Execute the tool
+        result = tool.execute(**args)
+        logger.debug(f"Tool {func_name} result: {result[:100]}...")
+        
+        return result

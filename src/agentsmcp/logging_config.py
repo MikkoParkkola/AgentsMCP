@@ -38,6 +38,13 @@ def configure_logging(level: str = "INFO", fmt: str = "json") -> None:
     for h in list(root.handlers):
         root.removeHandler(h)
 
+    # Also clear handlers from existing named loggers to avoid double emission
+    # when other modules configured logging earlier.
+    for name, logger in logging.root.manager.loggerDict.items():
+        if isinstance(logger, logging.Logger):
+            logger.handlers = []
+            logger.propagate = True
+
     handler = logging.StreamHandler()
     if fmt.lower() == "json":
         handler.setFormatter(_build_json_formatter())
