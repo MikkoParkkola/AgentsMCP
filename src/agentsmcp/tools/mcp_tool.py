@@ -4,7 +4,7 @@ import asyncio
 from typing import Any, Dict, List, Optional
 
 from ..config import Config
-from ..mcp.manager import MCPManager, MCPServer
+from ..mcp.manager import MCPManager, MCPServer, get_global_manager
 from .base_tools import BaseTool
 
 
@@ -40,7 +40,23 @@ class MCPCallTool(BaseTool):
                     enabled=s.enabled,
                 )
             )
-        return MCPManager(servers)
+        # Pass transport flags from config
+        allow_stdio = bool(getattr(self._config, "mcp_stdio_enabled", True))
+        allow_ws = bool(getattr(self._config, "mcp_ws_enabled", False))
+        allow_sse = bool(getattr(self._config, "mcp_sse_enabled", False))
+        return get_global_manager(servers, allow_stdio=allow_stdio, allow_ws=allow_ws, allow_sse=allow_sse)
+
+    async def aexecute(self, server: str, tool: str, params: Optional[Dict[str, Any]] = None) -> str:
+        # Validate server access
+        if self._allowed_servers is not None and server not in self._allowed_servers:
+            return (
+                f"Error: MCP server '{server}' is not allowed for this agent. "
+                f"Allowed: {sorted(self._allowed_servers)}"
+            )
+        params = params or {}
+
+        mgr = self._build_manager()
+        return await mgr.call_tool(server, tool, params)
 
     def execute(self, server: str, tool: str, params: Optional[Dict[str, Any]] = None) -> str:
         # Validate server access
@@ -59,7 +75,7 @@ class MCPCallTool(BaseTool):
             return (
                 "Unable to execute MCP call synchronously within a running event loop.\n"
                 f"Requested call -> server: {server}, tool: {tool}, params: {params}.\n"
-                "Consider calling MCP tools from a non-async context or add a dedicated async pathway."
+                "Consider calling .aexecute(...) from async code for proper async-first behavior."
             )
 
     def get_parameters_schema(self) -> Dict[str, Any]:

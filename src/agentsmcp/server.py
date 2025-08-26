@@ -49,6 +49,7 @@ class AgentServer:
 
     def __init__(self, config: Config, settings: Optional[AppSettings] = None):
         settings = settings or AppSettings()
+        self.settings = settings
         configure_logging(level=settings.log_level, fmt=settings.log_format)
         self.log = logging.getLogger(__name__)
         self.config = config
@@ -236,6 +237,225 @@ class AgentServer:
                 # Non-fatal if static can't be mounted
                 pass
 
+        # Settings API (minimal) for Web UI parity
+        @self.app.get("/settings")
+        async def get_settings():
+            try:
+                providers = {
+                    name: {
+                        "api_base": getattr(cfg, "api_base", None),
+                        "has_key": bool(getattr(cfg, "api_key", None)),
+                    }
+                    for name, cfg in (self.config.providers or {}).items()
+                }
+                agents = {
+                    name: {
+                        "model": ag.model,
+                        "provider": getattr(ag.provider, "value", str(ag.provider)),
+                    }
+                    for name, ag in self.config.agents.items()
+                }
+                return {"providers": providers, "agents": agents}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
+        class SettingsUpdate(BaseModel):
+            providers: Optional[dict] = None
+            agents: Optional[dict] = None
+
+        @self.app.put("/settings")
+        async def update_settings(body: SettingsUpdate):
+            try:
+                if body.providers:
+                    for name, upd in body.providers.items():
+                        if name not in self.config.providers:
+                            # create new entry if needed
+                            from .config import ProviderConfig, ProviderType
+                            try:
+                                ptype = ProviderType(name)
+                            except Exception:
+                                continue
+                            self.config.providers[name] = ProviderConfig(name=ptype)
+                        p = self.config.providers[name]
+                        if "api_base" in upd:
+                            p.api_base = upd.get("api_base")
+                        if "api_key" in upd:
+                            # accept empty to clear
+                            p.api_key = upd.get("api_key")
+                if body.agents:
+                    for name, upd in body.agents.items():
+                        if name in self.config.agents:
+                            ag = self.config.agents[name]
+                            if "model" in upd:
+                                ag.model = upd.get("model")
+                # persist to default path
+                try:
+                    path = self.config.default_config_path()
+                    self.config.save_to_file(path)
+                except Exception:
+                    pass
+                return {"ok": True}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
+        # Provider models listing for Web UI
+        @self.app.get("/providers/{provider}/models")
+        async def list_provider_models(provider: str):
+            try:
+                from .providers import list_models as pv_list_models
+                from .config import ProviderType, ProviderConfig
+                base_cfg = self.config.providers.get(provider)
+                cfg = ProviderConfig(
+                    name=ProviderType(provider),
+                    api_key=getattr(base_cfg, "api_key", None) if base_cfg else None,
+                    api_base=getattr(base_cfg, "api_base", None) if base_cfg else None,
+                )
+                models = pv_list_models(cfg.name, cfg)
+                return {"models": [m.to_dict() for m in models]}
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
+        # MCP config (minimal) — gated by config.mcp_api_enabled
+        if getattr(self.config, "mcp_api_enabled", False):
+            @self.app.get("/mcp")
+            async def get_mcp():
+                try:
+                    servers = [
+                        {
+                            "name": s.name,
+                            "enabled": s.enabled,
+                            "transport": s.transport,
+                            "command": s.command,
+                            "url": s.url,
+                        }
+                        for s in (self.config.mcp or [])
+                    ]
+                    flags = {
+                        "stdio": bool(getattr(self.config, "mcp_stdio_enabled", True)),
+                        "ws": bool(getattr(self.config, "mcp_ws_enabled", False)),
+                        "sse": bool(getattr(self.config, "mcp_sse_enabled", False)),
+                    }
+                    return {"servers": servers, "flags": flags}
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=str(e))
+
+            class MCPUpdate(BaseModel):
+                action: str
+                name: Optional[str] = None
+                transport: Optional[str] = None
+                command: Optional[list[str]] = None
+                url: Optional[str] = None
+                enabled: Optional[bool] = None
+                # flags
+                stdio: Optional[bool] = None
+                ws: Optional[bool] = None
+                sse: Optional[bool] = None
+
+            @self.app.put("/mcp")
+            async def update_mcp(body: MCPUpdate):
+                try:
+                    action = body.action
+                    lst = list(self.config.mcp or [])
+                    if action == "add" and body.name:
+                        from .config import MCPServerConfig
+                        if any(s.name == body.name for s in lst):
+                            raise HTTPException(status_code=400, detail="exists")
+                        lst.append(MCPServerConfig(name=body.name, transport=body.transport or "stdio", command=body.command, url=body.url, enabled=bool(body.enabled if body.enabled is not None else True)))
+                    elif action == "set_flags":
+                        # Merge provided flags into config
+                        if body.stdio is not None:
+                            setattr(self.config, "mcp_stdio_enabled", bool(body.stdio))
+                        if body.ws is not None:
+                            setattr(self.config, "mcp_ws_enabled", bool(body.ws))
+                        if body.sse is not None:
+                            setattr(self.config, "mcp_sse_enabled", bool(body.sse))
+                        try:
+                            path = self.config.default_config_path()
+                            self.config.save_to_file(path)
+                        except Exception:
+                            pass
+                        return {
+                            "ok": True,
+                            "flags": {
+                                "stdio": bool(getattr(self.config, "mcp_stdio_enabled", True)),
+                                "ws": bool(getattr(self.config, "mcp_ws_enabled", False)),
+                                "sse": bool(getattr(self.config, "mcp_sse_enabled", False)),
+                            },
+                        }
+                    elif action in ("enable", "disable") and body.name:
+                        found = False
+                        for s in lst:
+                            if s.name == body.name:
+                                s.enabled = (action == "enable")
+                                found = True
+                                break
+                        if not found:
+                            raise HTTPException(status_code=404, detail="not found")
+                    elif action == "remove" and body.name:
+                        lst = [s for s in lst if s.name != body.name]
+                    else:
+                        raise HTTPException(status_code=400, detail="bad action")
+                    self.config.mcp = lst  # type: ignore[assignment]
+                    try:
+                        path = self.config.default_config_path()
+                        self.config.save_to_file(path)
+                    except Exception:
+                        pass
+                    return {"ok": True}
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=str(e))
+
+            @self.app.get("/mcp/status")
+            async def mcp_status():
+                try:
+                    from .mcp.manager import MCPServer as _M, get_global_manager as _get
+                    servers = []
+                    for s in (self.config.mcp or []):
+                        servers.append(_M(name=s.name, command=s.command, transport=s.transport, url=s.url, env=s.env or {}, cwd=s.cwd, enabled=s.enabled))
+                    mgr = _get(
+                        servers,
+                        allow_stdio=bool(getattr(self.config, "mcp_stdio_enabled", True)),
+                        allow_ws=bool(getattr(self.config, "mcp_ws_enabled", False)),
+                        allow_sse=bool(getattr(self.config, "mcp_sse_enabled", False)),
+                    )
+                    st = await mgr.get_status()
+                    return {"manager": mgr.get_config(), "servers": st}
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=str(e))
+
+        # Discovery status (read-only)
+        @self.app.get("/discovery")
+        async def discovery_status():
+            try:
+                return {
+                    "enabled": bool(getattr(self.config, "discovery_enabled", False)),
+                    "allowlist": getattr(self.config, "discovery_allowlist", []),
+                    "has_token": bool(getattr(self.config, "discovery_token", None)),
+                }
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
+        # Costs (optional)
+        @self.app.get("/costs")
+        async def get_costs():
+            try:
+                try:
+                    from .cost.tracker import CostTracker  # type: ignore
+                except Exception:
+                    raise HTTPException(status_code=501, detail="costs unavailable")
+                t = CostTracker()
+                return {
+                    "total": t.total_cost,
+                    "daily": getattr(t, "get_daily_cost", lambda: None)(),
+                    "breakdown": getattr(t, "get_breakdown", lambda: None)(),
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
         @self.app.post("/spawn", response_model=SpawnResponse)
         async def spawn_agent(request: SpawnRequest):
             """Spawn a new agent to handle a task."""
@@ -319,6 +539,9 @@ class AgentServer:
             return response
 
     def _setup_metrics(self) -> None:
+        # Gate metrics by settings to avoid overhead by default
+        if getattr(self, "settings", None) and not self.settings.prometheus_enabled:
+            return
         if Instrumentator is not None:
             try:
                 Instrumentator().instrument(self.app).expose(self.app)
@@ -351,6 +574,23 @@ class AgentServer:
         server = uvicorn.Server(config)
         await server.serve()
 
+        # On shutdown, try to close MCP clients if any
+        try:
+            from .mcp.manager import get_global_manager as _get
+            servers = []
+            for s in (self.config.mcp or []):
+                from .mcp.manager import MCPServer as _M
+                servers.append(_M(name=s.name, command=s.command, transport=s.transport, url=s.url, env=s.env or {}, cwd=s.cwd, enabled=s.enabled))
+            mgr = _get(
+                servers,
+                allow_stdio=bool(getattr(self.config, "mcp_stdio_enabled", True)),
+                allow_ws=bool(getattr(self.config, "mcp_ws_enabled", False)),
+                allow_sse=bool(getattr(self.config, "mcp_sse_enabled", False)),
+            )
+            await mgr.close_all()
+        except Exception:
+            pass
+
 
 def create_app(config_path: Optional[str] = None) -> FastAPI:
     """Create a FastAPI app configured for AgentsMCP.
@@ -382,9 +622,9 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     return server.app
 
 
-# Uvicorn import target: "agentsmcp.server:app"
-# Only create app when not in testing mode
-if not os.getenv("TESTING"):
-    app = create_app()
-else:
-    app = None
+# Export only a factory by default to avoid import-time side effects.
+# Use with uvicorn's factory mode:
+#   uvicorn agentsmcp.server:create_app --factory
+# If you need a concrete app variable for legacy compatibility, create it in
+# your launcher script instead of at import time to keep startup fast.
+app = None  # intentionally not initialized at import time

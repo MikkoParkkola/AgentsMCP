@@ -1,0 +1,31 @@
+server:
+  host: localhost
+  port: 8000
+storage:
+  type: memory
+# Minimal agents: keep providers lean; set ollama-turbo as preferred for coding
+agents:
+  codex:
+    type: codex
+    provider: openai
+    model: gpt-4-turbo
+    tools: [filesystem, git, bash]
+  claude:
+    type: claude
+    provider: openai
+    model: gpt-4-turbo
+    tools: [filesystem, web_search]
+  ollama:
+    type: ollama
+    provider: ollama
+    model: gpt-oss:20b
+    tools: [filesystem]
+  ollama-turbo-coding:
+    type: coding-specialist
+    provider: ollama-turbo
+    model: gpt-oss:120b
+    tools: [filesystem, git, bash]
+# UI and discovery disabled by default
+ui_enabled: false
+discovery_enabled: false
+mcp: []

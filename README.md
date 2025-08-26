@@ -143,7 +143,23 @@ curl http://localhost:8000/metrics       # Metrics
 
 ## Configuration
 
-AgentsMCP uses environment-based configuration. See `.env.example` for all options:
+AgentsMCP uses environment-based configuration. See `.env.example` for all options. For quick starts, use the presets under `examples/`:
+
+- Minimal: `examples/config-minimal.yaml` (memory storage, core agents, UI and discovery off)
+- Full: `examples/config-full.yaml` (adds UI mount, some MCP servers)
+
+Install extras for optional features:
+
+- Discovery: `pip install -e .[discovery]`
+- Metrics: `pip install -e .[metrics]`
+- RAG: `pip install -e .[rag]`
+- Security: `pip install -e .[security]`
+- UI/Cost/Bench placeholders: `.[ui]`, `.[cost]`, `.[bench]`
+
+Environment flags of interest:
+
+- `AGENTS_PROMETHEUS_ENABLED=false` (default) to disable metrics overhead
+- `AGENTSMCP_CONFIG=/path/to/config.yaml` to pick a preset
 
 ```bash
 # Server
@@ -198,6 +214,33 @@ pytest tests/test_agent_manager.py
 - **RAG Pipeline**: Extensible document retrieval and processing
 
 ## Production Deployment
+
+## Performance Notes
+
+- Use uvicorn factory mode to avoid import-time app creation:
+  - `uvicorn agentsmcp.server:create_app --factory --host 127.0.0.1 --port 8000`
+- CLI lazy-loads heavy modules; startup is fastest when using simple commands:
+  - `agentsmcp --help` or `agentsmcp models`
+- Interactive mode does not start the Web UI by default; opt-in with:
+  - `agentsmcp interactive --webui`
+- MCP package warmup is now explicit to avoid default network calls:
+  - `agentsmcp mcp warmup` (optional; caches common `npx` MCP servers)
+
+MCP API and UI
+- `/mcp` REST endpoints are disabled by default. Enable by config:
+  - Set `mcp_api_enabled: true` in your config (or env override via `AGENTSMCP_CONFIG`).
+- The static Web UI (`/ui`) is mounted only when `ui_enabled: true` in config.
+
+MCP Transport Flags
+- Control which transports the manager is allowed to use (defaults favor stdio only):
+  - `mcp_stdio_enabled: true`
+  - `mcp_ws_enabled: false`
+  - `mcp_sse_enabled: false`
+- These flags are merged from environment via AppSettings; set `AGENTSMCP_MCP_STDIO_ENABLED`, `AGENTSMCP_MCP_WS_ENABLED`, `AGENTSMCP_MCP_SSE_ENABLED` as needed.
+
+CLI
+- Show MCP status: `agentsmcp mcp status` (also available via REST at `/mcp/status` when enabled)
+
 
 See [docs/deployment.md](docs/deployment.md) for comprehensive deployment guidance including:
 

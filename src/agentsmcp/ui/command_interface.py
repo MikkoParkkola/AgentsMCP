@@ -421,6 +421,19 @@ class CommandInterface:
                 ),
         ]
 
+        # Large prompt editor
+        edit_cmd = CommandDefinition(
+            name="edit",
+            description="Open a multiline prompt editor and optionally execute",
+            handler=self._cmd_edit,
+            category="session",
+            examples=["edit", "edit --execute"],
+            parameters=[
+                {"name": "execute", "type": "bool", "default": False, "help": "Execute immediately after editing"}
+            ]
+        )
+        self.register_command(edit_cmd)
+
         for cmd in session_commands:
             self.register_command(cmd)
     
@@ -597,13 +610,13 @@ job monitoring, and system health checks."""
     async def _show_welcome(self):
         """Show a simplified welcome message and system status"""
         # Create a简洁 welcome message
-        title = "🎼 AgentsMCP Revolutionary CLI"
+        title = "🎼 AgentsMCP CLI"
         
         welcome_content = [
-            "Welcome to the future of AI agent orchestration!",
+            "Welcome to AgentsMCP.",
             "",
-            "Commands start with '/' (e.g., /help, /agents, /create)",
-            "Everything else is treated as conversation with AI agents.",
+            "Commands start with '/' (e.g., /help, /agents, /execute)",
+            "Other input is treated as conversation with AI agents.",
             "",
             f"Theme: {self.theme_manager.get_current_theme().name}",
             f"LLM: ollama-turbo (conversational mode enabled)",
@@ -613,12 +626,6 @@ job monitoring, and system health checks."""
         welcome_card = self.ui.card(title, welcome_text, status="success")
         
         print(welcome_card)
-        print()  # Extra spacing
-        
-        # Show daily wisdom and keep it persistent
-        daily_wisdom = self._get_daily_wisdom()
-        wisdom_card = self.ui.card("✨ Daily Wisdom", daily_wisdom, status="info")
-        print(wisdom_card)
         print()  # Extra spacing
     
     def _generate_prompt(self) -> str:
@@ -766,6 +773,71 @@ job monitoring, and system health checks."""
             error_msg = f"Input processing error: {e}"
             print(self.theme_manager.colorize(f"❌ {error_msg}", 'error'))
             return False, error_msg
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Lightweight token estimate (~chars/4)."""
+        try:
+            return max(1, int(len(text) / 4))
+        except Exception:
+            return len(text)
+
+    async def _cmd_edit(self, execute: bool = False) -> str:
+        """Open a multiline editor for large prompts and optionally execute it."""
+        import tempfile
+        from pathlib import Path
+
+        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+        tmp = None
+        content = ""
+        try:
+            if editor:
+                tmp = tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".txt")
+                tmp_path = Path(tmp.name)
+                tmp.close()
+                # Open editor
+                os.system(f"{editor} {tmp_path}")
+                content = tmp_path.read_text(encoding="utf-8", errors="ignore")
+            else:
+                # Fallback: simple here-doc style input
+                print(self.theme_manager.colorize("Enter your prompt. Finish with Ctrl-D (EOF) on a new line.", 'info'))
+                lines: List[str] = []
+                try:
+                    while True:
+                        line = sys.stdin.readline()
+                        if not line:
+                            break
+                        lines.append(line)
+                except KeyboardInterrupt:
+                    pass
+                content = "".join(lines)
+        finally:
+            if tmp:
+                try:
+                    os.unlink(tmp.name)
+                except Exception:
+                    pass
+
+        content = content.strip()
+        if not content:
+            return self.ui.box("No content captured.", title="Edit Prompt", style='warning')
+
+        # Show token estimate and length
+        tokens = self._estimate_tokens(content)
+        summary = f"Captured {len(content):,} chars (~{tokens:,} tokens)."
+
+        # Execute now?
+        if execute:
+            resp = await self.conversation_manager.process_input(content)
+            return self.ui.box(
+                f"{summary}\n\nResponse:\n{resp}", title="Edit & Execute", style='success'
+            )
+        else:
+            # Stash into context; next input can be "/send" or paste manually
+            self.current_context['last_edited_prompt'] = content
+            return self.ui.box(
+                f"{summary}\nStored in context as last_edited_prompt. Use: /execute '<short instruction>' or paste to run.",
+                title="Edit Prompt", style='info'
+            )
     
     def _is_direct_command(self, user_input: str) -> bool:
         """Check if input is a direct command (starts with /)"""

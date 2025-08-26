@@ -17,14 +17,7 @@ dependencies = [
     "openai-agents>=0.2.9,<0.3.0",
     "openai>=1.0.0,<2.0.0",
     "python-json-logger",
-    "prometheus-fastapi-instrumentator",
-
-    # Critical dependencies for Agent Discovery & Coordination
-    "cryptography>=41.0.0,<42.0.0",
-    "aiohttp>=3.8.0,<4.0.0",
-    "websockets>=11.0.0,<12.0.0",
-    "jsonschema>=4.0.0,<5.0.0",
-    "python-jose[cryptography]>=3.3.0,<4.0.0",
+    # Metrics/discovery/security moved to extras to keep minimal install light
 ]
 
 [project.scripts]
@@ -42,6 +35,27 @@ dev = [
 rag = [
     "sentence-transformers",
     "numpy",
+]
+ui = [
+    # UI relies on rich (core); keep extra placeholder for clarity
+]
+cost = [
+    # cost features currently have no extra third-party deps
+]
+discovery = [
+    "aiohttp>=3.8.0,<4.0.0",
+    "websockets>=11.0.0,<12.0.0",
+    "jsonschema>=4.0.0,<5.0.0",
+]
+security = [
+    "cryptography>=41.0.0,<42.0.0",
+    "python-jose[cryptography]>=3.3.0,<4.0.0",
+]
+metrics = [
+    "prometheus-fastapi-instrumentator",
+]
+bench = [
+    # placeholder for future benchmarking deps
 ]
 
 [tool.pytest.ini_options]

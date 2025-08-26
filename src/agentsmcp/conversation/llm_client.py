@@ -1592,8 +1592,19 @@ Remember: Be truthful about the system's current state rather than creating fals
         
         logger.debug(f"Executing tool {func_name} with args: {args}")
         
-        # Execute the tool
-        result = tool.execute(**args)
+        # Execute the tool (async-first)
+        try:
+            aexec = getattr(tool, "aexecute", None)
+            if aexec is not None and callable(aexec):
+                # If tool provides async execution, prefer it
+                result = await aexec(**args)  # type: ignore[misc]
+            else:
+                # Fallback: run sync execute in a worker thread
+                import asyncio as _asyncio
+                result = await _asyncio.to_thread(tool.execute, **args)
+        except Exception as e:
+            logger.exception(f"Tool {func_name} execution failed: {e}")
+            raise
         logger.debug(f"Tool {func_name} result: {result[:100]}...")
         
         return result

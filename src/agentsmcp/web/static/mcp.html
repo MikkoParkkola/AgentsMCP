@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>MCP Servers</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 1.5rem; }
+      .row { display:flex; gap:1rem; }
+      .col { flex:1; border:1px solid #ddd; padding:1rem; border-radius:8px; }
+      label { display:block; font-weight:600; margin-top:0.5rem; }
+      input { padding:6px; width: 240px; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border:1px solid #ddd; padding:6px; }
+      .banner { padding:8px 12px; border-radius:6px; margin-bottom: 10px; display:none; }
+      .banner.ok { background:#e6ffe6; color:#063; border:1px solid #c7f3c7; }
+      .banner.err { background:#ffe6e6; color:#933; border:1px solid #f2c1c1; }
+    </style>
+  </head>
+  <body>
+    <h1>MCP Servers</h1>
+    <div id="banner" class="banner"></div>
+    <div class="row">
+      <div class="col">
+        <h3>Current Servers</h3>
+        <table>
+          <thead><tr><th>Name</th><th>Enabled</th><th>Transport</th><th>Command / URL</th></tr></thead>
+          <tbody id="servers"></tbody>
+        </table>
+      </div>
+      <div class="col">
+        <h3>Add Server</h3>
+        <label>Name</label>
+        <input id="name" />
+        <label>Transport</label>
+        <input id="transport" value="stdio" />
+        <label>Command (space-separated)</label>
+        <input id="command" placeholder="npx -y @modelcontextprotocol/server-git" />
+        <label>URL (for sse/websocket)</label>
+        <input id="url" />
+        <div style="margin-top:8px;">
+          <button id="add">Add</button>
+          <a href="/ui/">Back</a>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const banner = document.getElementById('banner');
+      function show(msg, ok=true){ banner.className='banner '+(ok?'ok':'err'); banner.textContent=msg; banner.style.display='block'; }
+
+      async function load(){
+        const r = await fetch('/mcp');
+        const j = await r.json();
+        const tb = document.getElementById('servers');
+        tb.innerHTML='';
+        (j.servers||[]).forEach(s => {
+          const tr = document.createElement('tr');
+          const cmd = (s.command||[]).join(' ');
+          const url = s.url||'';
+          tr.innerHTML = `<td>${s.name}</td><td>${s.enabled?'Yes':'No'} <button data-act="toggle" data-name="${s.name}">${s.enabled?'Disable':'Enable'}</button> <button data-act="remove" data-name="${s.name}">Remove</button></td><td>${s.transport||''}</td><td>${cmd||url}</td>`;
+          tb.appendChild(tr);
+        });
+        tb.querySelectorAll('button').forEach(btn => btn.addEventListener('click', async (e)=>{
+          const name = btn.getAttribute('data-name');
+          const act = btn.getAttribute('data-act');
+          const action = act === 'toggle' ? (btn.textContent==='Enable'?'enable':'disable') : 'remove';
+          const r = await fetch('/mcp', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action, name})});
+          if (r.ok) { show('Updated'); load(); } else { show('Update failed', false); }
+        }));
+      }
+
+      document.getElementById('add').addEventListener('click', async ()=>{
+        try {
+          const name = document.getElementById('name').value.trim();
+          const transport = document.getElementById('transport').value.trim();
+          const command = document.getElementById('command').value.trim();
+          const url = document.getElementById('url').value.trim();
+          const body = {action:'add', name, transport, command: command?command.split(/\s+/):null, url: url||null};
+          const r = await fetch('/mcp', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+          if (r.ok) { show('Added'); load(); } else { show('Add failed', false); }
+        } catch (e) { show('Error: '+e, false); }
+      });
+
+      load();
+    </script>
+  </body>
+</html>

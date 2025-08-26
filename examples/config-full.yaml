@@ -1,0 +1,46 @@
+server:
+  host: 0.0.0.0
+  port: 8000
+storage:
+  type: memory
+providers:
+  openai:
+    name: openai
+  ollama:
+    name: ollama
+    api_base: "http://localhost:11434"
+  ollama-turbo:
+    name: ollama-turbo
+    api_base: "https://ollama.com"
+agents:
+  codex:
+    type: codex
+    provider: openai
+    model: gpt-4-turbo
+    tools: [filesystem, git, bash]
+  claude:
+    type: claude
+    provider: openai
+    model: gpt-4-turbo
+    tools: [filesystem, web_search]
+  ollama:
+    type: ollama
+    provider: ollama
+    model: gpt-oss:20b
+    tools: [filesystem, git, bash]
+  ollama-turbo-coding:
+    type: coding-specialist
+    provider: ollama-turbo
+    model: gpt-oss:120b
+    tools: [filesystem, git, bash]
+mcp:
+  - name: git-mcp
+    enabled: true
+    transport: stdio
+    command: ["npx", "-y", "@modelcontextprotocol/server-git"]
+  - name: agentsmcp-self
+    enabled: true
+    transport: http
+    url: "http://localhost:8000"
+ui_enabled: true
+discovery_enabled: false

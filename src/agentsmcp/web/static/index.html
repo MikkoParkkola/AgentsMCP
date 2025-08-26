@@ -8,11 +8,23 @@
       .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
       .card { border: 1px solid #ddd; padding: 1rem; border-radius: 8px; }
       pre { background: #f7f7f7; padding: 0.5rem; border-radius: 4px; }
+      .banner { padding: 8px 12px; margin-bottom: 10px; border-radius: 6px; display:none; }
+      .banner.error { background: #ffe6e6; color: #a00; border: 1px solid #f5c2c2; }
+      .banner.info { background: #e6f0ff; color: #004; border: 1px solid #c2d4f5; }
     </style>
   </head>
   <body>
     <h1>AgentsMCP Dashboard</h1>
-    <div class="grid">
+    <div style="margin:8px 0;">
+      <a href="/ui/settings.html">Settings</a> ·
+      <a href="/ui/models.html">Models</a> ·
+      <a href="/ui/mcp.html">MCP</a> ·
+      <a href="/ui/discovery.html">Discovery</a> ·
+      <a href="/ui/costs.html">Costs</a> ·
+      <a href="/ui/jobs.html">Jobs</a>
+    </div>
+    <div id="banner" class="banner info">Starting… Checking server readiness…</div>
+    <div class="grid" id="content" style="display:none;">
       <div class="card">
         <h3>Status</h3>
         <div id="status">Loading…</div>
@@ -42,6 +54,10 @@
       </div>
       <div class="card">
         <h3>Events</h3>
+        <div style="margin-bottom:6px;">
+          <label><input type="checkbox" id="pause-events" /> Pause</label>
+          <button id="clear-events" style="margin-left:6px;">Clear</button>
+        </div>
         <pre id="events" style="height:200px; overflow:auto"></pre>
       </div>
       <div class="card">
@@ -50,24 +66,72 @@
       </div>
     </div>
     <script>
+      const banner = document.getElementById('banner');
+      const content = document.getElementById('content');
+
+      async function waitForReady(maxMs = 5000) {
+        const start = Date.now();
+        let delay = 250;
+        while (Date.now() - start < maxMs) {
+          try {
+            const r = await fetch('/health/ready', {cache:'no-store'});
+            if (r.ok) return true;
+          } catch (e) {}
+          await new Promise(res => setTimeout(res, delay));
+          delay = Math.min(1500, delay * 1.7);
+        }
+        return false;
+      }
+
+      function showError(msg) {
+        banner.className = 'banner error';
+        banner.textContent = msg;
+        banner.style.display = 'block';
+      }
+
+      function showInfo(msg) {
+        banner.className = 'banner info';
+        banner.textContent = msg;
+        banner.style.display = 'block';
+      }
+
+      function hideBanner() {
+        banner.style.display = 'none';
+      }
+
+      async function bootstrap() {
+        const ready = await waitForReady();
+        if (!ready) {
+          showError('Server not ready. Please ensure agentsmcp server is running.');
+          return;
+        }
+        hideBanner();
+        content.style.display = 'grid';
+        refreshStats();
+        refreshMetrics();
+        setInterval(refreshStats, 3000);
+        setInterval(refreshMetrics, 3000);
+        setupSSE();
+        setupActions();
+      }
+
       async function refreshStats(){
         try {
           const r = await fetch('/stats');
           const j = await r.json();
           document.getElementById('status').textContent = JSON.stringify(j, null, 2);
         } catch (e) {
-          document.getElementById('status').textContent = 'Error: ' + e;
+          showError('Failed to load status: ' + e);
         }
-        // list current jobs
         try {
           const rj = await fetch('/jobs');
           const jj = await rj.json();
           document.getElementById('jobs').textContent = JSON.stringify(jj, null, 2);
-        } catch {}
+        } catch (e) {
+          showError('Failed to load jobs: ' + e);
+        }
       }
-      }
-      refreshStats();
-      setInterval(refreshStats, 3000);
+
       async function refreshMetrics(){
         try {
           const r = await fetch('/metrics');
@@ -86,37 +150,71 @@
             ctx.fillStyle = '#333';
             ctx.fillText(keys[i].slice(0,3), x, 155);
           });
-        } catch (e) {}
+        } catch (e) {
+          showError('Failed to load metrics: ' + e);
+        }
       }
-      setInterval(refreshMetrics, 3000); refreshMetrics();
 
-      // SSE subscribe
-      try {
-        const ev = new EventSource('/events');
-        ev.onmessage = (msg) => {
+      function setupSSE(){
+        let retryDelay = 500;
+        function connect(){
+          try {
+            const ev = new EventSource('/events');
+            ev.onmessage = (msg) => {
+              const paused = document.getElementById('pause-events').checked;
+              if (paused) return;
+              const el = document.getElementById('events');
+              el.textContent += msg.data + '\n';
+              el.scrollTop = el.scrollHeight;
+            };
+            ev.onerror = () => {
+              ev.close();
+              setTimeout(connect, retryDelay);
+              retryDelay = Math.min(5000, retryDelay * 1.8);
+            };
+          } catch (e) {
+            setTimeout(connect, retryDelay);
+            retryDelay = Math.min(5000, retryDelay * 1.8);
+          }
+        }
+        connect();
+      }
+      // clear
+      document.addEventListener('click', (e)=>{
+        if (e.target && e.target.id === 'clear-events'){
           const el = document.getElementById('events');
-          el.textContent += msg.data + '\n';
-          el.scrollTop = el.scrollHeight;
-        };
-      } catch (e) {}
-
-      // spawn handler
-      document.getElementById('spawn-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const agent = document.getElementById('agent').value;
-        const task = document.getElementById('task').value;
-        const r = await fetch('/spawn', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({agent_type: agent, task, timeout: 120})});
-        const j = await r.json();
-        document.getElementById('spawn-result').textContent = JSON.stringify(j, null, 2);
+          el.textContent = '';
+        }
       });
 
-      document.getElementById('cancel-btn').addEventListener('click', async () => {
-        const id = document.getElementById('cancel-id').value.trim();
-        if (!id) return;
-        const r = await fetch('/jobs/' + id, {method:'DELETE'});
-        const j = await r.json();
-        alert('Cancel: ' + JSON.stringify(j));
-      });
+      function setupActions(){
+        document.getElementById('spawn-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          try {
+            const agent = document.getElementById('agent').value;
+            const task = document.getElementById('task').value;
+            const r = await fetch('/spawn', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({agent_type: agent, task, timeout: 120})});
+            const j = await r.json();
+            document.getElementById('spawn-result').textContent = JSON.stringify(j, null, 2);
+          } catch (e) {
+            showError('Failed to spawn: ' + e);
+          }
+        });
+
+        document.getElementById('cancel-btn').addEventListener('click', async () => {
+          try {
+            const id = document.getElementById('cancel-id').value.trim();
+            if (!id) return;
+            const r = await fetch('/jobs/' + id, {method:'DELETE'});
+            const j = await r.json();
+            showInfo('Cancel: ' + JSON.stringify(j));
+          } catch (e) {
+            showError('Failed to cancel: ' + e);
+          }
+        });
+      }
+
+      bootstrap();
     </script>
   </body>
   </html>

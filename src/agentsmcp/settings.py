@@ -54,8 +54,15 @@ class AppSettings(BaseSettings):
     rag_max_results: int = Field(default=10)
     rag_similarity_threshold: float = Field(default=0.7)
 
-    # Observability
-    prometheus_enabled: bool = Field(default=True)
+    # Observability (default off for minimal startup)
+    prometheus_enabled: bool = Field(default=False)
+
+    # REST API toggles
+    mcp_api_enabled: bool = Field(default=False, description="Enable /mcp REST endpoints")
+    # MCP transport toggles
+    mcp_stdio_enabled: bool = Field(default=True)
+    mcp_ws_enabled: bool = Field(default=False)
+    mcp_sse_enabled: bool = Field(default=False)
 
     def to_runtime_config(self, base: Optional[Config] = None) -> Config:
         """Merge environment settings into a runtime Config object.
@@ -104,5 +111,20 @@ class AppSettings(BaseSettings):
 
         # Transport unchanged for now
         base.transport = base.transport or TransportConfig()
+
+        # Feature toggles
+        try:
+            # Prefer explicit env toggle when set
+            base.mcp_api_enabled = bool(self.mcp_api_enabled or getattr(base, "mcp_api_enabled", False))  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        # Transport flags
+        try:
+            base.mcp_stdio_enabled = bool(self.mcp_stdio_enabled)  # type: ignore[attr-defined]
+            base.mcp_ws_enabled = bool(self.mcp_ws_enabled)  # type: ignore[attr-defined]
+            base.mcp_sse_enabled = bool(self.mcp_sse_enabled)  # type: ignore[attr-defined]
+        except Exception:
+            pass
 
         return base

@@ -1,31 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
-
-datas = []
-binaries = []
-hiddenimports = ['agentsmcp.cli']
-tmp_ret = collect_all('agentsmcp')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
     ['src/agentsmcp/cli.py'],
-    pathex=['src', 'src'],
-    binaries=binaries,
-    datas=datas,
-    hiddenimports=hiddenimports,
+    pathex=[],
+    binaries=[],
+    datas=[],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # Exclude heavy optional stacks to speed up build and startup
-    excludes=[
-        'torch','torchvision','torchaudio','tensorflow','tf_keras','jax',
-        'scipy','pandas','sklearn','matplotlib','numba','llvmlite','pyarrow',
-        'transformers','datasets','onnxruntime','django','yt_dlp','librosa',
-        'sounddevice','grpc','google','opentelemetry','sentry_sdk','PIL.ImageTk',
-    ],
+    excludes=[],
     noarchive=False,
-    optimize=1,
+    optimize=0,
 )
 pyz = PYZ(a.pure)
 
@@ -48,5 +35,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['none'],
 )

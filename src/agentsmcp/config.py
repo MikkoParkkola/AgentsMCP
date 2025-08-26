@@ -234,6 +234,12 @@ class Config(BaseSettings):
 
     # Optional MCP servers (disabled by default)
     mcp: List[MCPServerConfig] = Field(default_factory=list)
+    # Expose REST endpoints for MCP management (/mcp) when true
+    mcp_api_enabled: bool = Field(default=False, description="Enable /mcp REST API for managing MCP servers")
+    # Transport feature flags
+    mcp_stdio_enabled: bool = Field(default=True, description="Allow stdio transport for MCP")
+    mcp_ws_enabled: bool = Field(default=False, description="Allow WebSocket transport for MCP")
+    mcp_sse_enabled: bool = Field(default=False, description="Allow SSE transport for MCP")
 
     # Discovery & coordination flags (AD5)
     discovery_enabled: bool = Field(default=False, description="Enable local discovery announcer/registry")
@@ -293,7 +299,7 @@ class Config(BaseSettings):
         return v
 
     # Web UI (WUI6): enable/disable minimal built-in dashboard
-    ui_enabled: bool = Field(default=True, description="Mount /ui static dashboard when true")
+    ui_enabled: bool = Field(default=False, description="Mount /ui static dashboard when true")
 
     @classmethod
     def from_file(cls, path: Path) -> "Config":

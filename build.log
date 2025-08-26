@@ -1,50 +1,37 @@
-90 INFO: PyInstaller: 6.15.0, contrib hooks: 2025.8
-91 INFO: Python: 3.10.9
-98 INFO: Platform: macOS-15.6-arm64-arm-64bit
-98 INFO: Python environment: /Users/mikko/.pyenv/versions/3.10.9
-380 INFO: JWT secret auto-generated for local development session.
-382 ERROR: {"component": "agentsmcp.discovery.agent_service.AgentRegistry", "exc_info": "TypeError(\"AgentRegistry.__init__() missing 1 required positional argument: 'ttl_seconds'\")", "event": "Failed to instantiate AgentRegistry", "timestamp": "2025-08-26T06:00:38.195498Z"}
-382 WARNING: {"event": "Using mock component for AgentRegistry", "timestamp": "2025-08-26T06:00:38.195558Z"}
-400 ERROR: {"component": "agentsmcp.discovery.matching_engine.DiscoveryEngine", "exc_info": "TypeError(\"DiscoveryEngine.__init__() missing 1 required positional argument: 'registry'\")", "event": "Failed to instantiate DiscoveryEngine", "timestamp": "2025-08-26T06:00:38.213091Z"}
-400 WARNING: {"event": "Using mock component for DiscoveryEngine", "timestamp": "2025-08-26T06:00:38.213154Z"}
-401 ERROR: {"component": "agentsmcp.discovery.coordination.CoordinationNode", "exc_info": "TypeError(\"CoordinationNode.__init__() missing 1 required positional argument: 'service_name'\")", "event": "Failed to instantiate CoordinationNode", "timestamp": "2025-08-26T06:00:38.214539Z"}
-401 WARNING: {"event": "Using mock component for CoordinationNode", "timestamp": "2025-08-26T06:00:38.214578Z"}
-402 ERROR: {"component": "agentsmcp.discovery.raft_cluster.RaftCluster", "exc_info": "TypeError(\"RaftCluster.__init__() missing 3 required positional arguments: 'node_id', 'bind_address', and 'peers'\")", "event": "Failed to instantiate RaftCluster", "timestamp": "2025-08-26T06:00:38.215245Z"}
-402 WARNING: {"event": "Using mock component for RaftCluster", "timestamp": "2025-08-26T06:00:38.215279Z"}
-407 INFO: {"provider": "InMemoryProvider", "event": "memory_subsystem_initialized", "timestamp": "2025-08-26T06:00:38.220220Z"}
-407 INFO: {"directory": "./static", "event": "static_files_mounted", "timestamp": "2025-08-26T06:00:38.220993Z"}
-483 WARNING: Failed to collect submodules for 'agentsmcp.ui' because importing 'agentsmcp.ui' raised: File "/Users/mikko/github/AgentsMCP/src/agentsmcp/ui/command_interface.py", line 294
-    generate_config_cmd = CommandDefinition(
-IndentationError: unexpected indent
-1297 INFO: Module search paths (PYTHONPATH):
+73 INFO: PyInstaller: 6.15.0, contrib hooks: 2025.8
+73 INFO: Python: 3.10.9
+79 INFO: Platform: macOS-15.6-arm64-arm-64bit
+79 INFO: Python environment: /Users/mikko/.pyenv/versions/3.10.9
+79 INFO: wrote /Users/mikko/github/AgentsMCP/agentsmcp.spec
+82 INFO: Module search paths (PYTHONPATH):
 ['/Users/mikko/.pyenv/versions/3.10.9/lib/python310.zip',
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10',
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/lib-dynload',
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages',
  '/Users/mikko/github/AgentsMCP/src',
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/setuptools/_vendor',
- '/Users/mikko/github/AgentsMCP/src',
- '/Users/mikko/github/AgentsMCP/src',
  '/Users/mikko/github/AgentsMCP/src']
-1584 INFO: Appending 'datas' from .spec
-1586 INFO: checking Analysis
-1791 INFO: checking PYZ
-1899 INFO: EXE target arch: arm64
-1899 INFO: Code signing identity: None
-1988 INFO: checking PKG
-2045 INFO: Building because toc changed
-2045 INFO: Building PKG (CArchive) agentsmcp.pkg
-44598 INFO: Building PKG (CArchive) agentsmcp.pkg completed successfully.
-44716 INFO: Bootloader /Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/bootloader/Darwin-64bit/run
-44716 INFO: checking EXE
-44772 INFO: Building because toc changed
-44772 INFO: Building EXE from EXE-00.toc
-44799 INFO: Copying bootloader EXE to /Users/mikko/github/AgentsMCP/dist/agentsmcp
-44799 INFO: Converting EXE to target arch (arm64)
-44817 INFO: Removing signature(s) from EXE
-44834 INFO: Modifying Mach-O image UUID(s) in EXE
-44989 INFO: Appending PKG archive to EXE
-45141 INFO: Fixing EXE headers for code signing
-45143 INFO: Re-signing the EXE
-45602 INFO: Building EXE from EXE-00.toc completed successfully.
-45723 INFO: Build complete! The results are available in: /Users/mikko/github/AgentsMCP/dist
+Traceback (most recent call last):
+  File "/Users/mikko/.pyenv/versions/3.10.9/bin/pyinstaller", line 7, in <module>
+    sys.exit(_console_script_run())
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/__main__.py", line 231, in _console_script_run
+    run()
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/__main__.py", line 215, in run
+    run_build(pyi_config, spec_file, **vars(args))
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/__main__.py", line 70, in run_build
+    PyInstaller.building.build_main.main(pyi_config, spec_file, **kwargs)
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/build_main.py", line 1282, in main
+    build(specfile, distpath, workpath, clean_build)
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/build_main.py", line 1220, in build
+    exec(code, spec_namespace)
+  File "/Users/mikko/github/AgentsMCP/agentsmcp.spec", line 4, in <module>
+    a = Analysis(
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/build_main.py", line 533, in __init__
+    self.hookspath += discover_hook_directories()
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/isolated/_parent.py", line 435, in wrapped
+    return call(function, *args, **kwargs)
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/isolated/_parent.py", line 404, in call
+    return isolated.call(function, *args, **kwargs)
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/isolated/_parent.py", line 322, in call
+    raise SubprocessDiedError(
+PyInstaller.isolated._parent.SubprocessDiedError: Child process died calling discover_hook_directories() with args=() and kwargs={}. Its exit code was -11.
