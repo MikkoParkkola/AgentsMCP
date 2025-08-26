@@ -92,3 +92,13 @@ Template:
 - **Outcome:** Accepted the architecture synthesis focusing on: single AgentManager instance in API, job cleanup fix, EventBus consolidation, queue/worker pool with 429 overload, async provider calls with retry/backoff, tool sandboxing, JWT auth (prod), rate limits, and config consolidation via AppSettings.
 - **Rationale:** Addresses correctness, robustness, and maintainability with minimal disruption and clear phased rollout.
 - **Details:** See [docs/architecture-analysis-synthesis.md](architecture-analysis-synthesis.md).
+## [0009] - UI/UX Overhaul Plan
+- **Date Added:** 2025-08-26
+- **Version:** Unreleased
+- **Branch:** main
+- **Submitter:** automated agent
+- **Decision Maker:** project maintainers
+- **Decision Date:** 2025-08-26
+- **Outcome:** Adopt two-phase UI/UX uplift: Phase A (stabilize + professional polish) and Phase B (delight + advanced), delivering feature parity across TUI and Web UI with professional tone and performance.
+- **Rationale:** Improve usability, completeness, performance, and visual consistency across entry points; address breakages and missing parity.
+- **Details:** See [docs/ui-ux-review.md](ui-ux-review.md).

@@ -3,6 +3,7 @@
 This file records notable changes to the project. Keep entries in reverse chronological order.
 
 ## [Unreleased]
+- UI/UX: Added comprehensive UI/UX review and adopted phased uplift plan (TUI via Textual shell; Web UI parity; readiness gating; SSE with backoff; standardized CLI outputs).
 - Architecture: add architecture analysis synthesis and adopt prioritized roadmap (AgentManager singleton in API; job cleanup fix; EventBus consolidation; queue/worker pool + 429 overload; async providers with retry/backoff; tool sandboxing; JWT auth, rate limits; config consolidation).
 - Provider config validation (K1): add `validate_provider_config` returning non-raising results.
 - API key persistence (K2): new `/apikey [provider]` command with masked input; keys saved to YAML providers map.
