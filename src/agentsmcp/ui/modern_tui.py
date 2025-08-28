@@ -283,6 +283,16 @@ class ModernTUI:
         self._render_counter = 0
         self._currently_rendering = False  # Guard against render feedback loops
         
+        # CRITICAL FIX: Add render synchronization lock to prevent race conditions
+        self._render_lock = asyncio.Lock()
+        
+        # CRITICAL FIX: Request coalescing for mark_dirty calls
+        self._pending_refresh_sections = set()
+        self._coalesce_lock = asyncio.Lock()
+        
+        # CRITICAL FIX: Flag for immediate footer refresh (bypass debounce)
+        self._immediate_footer_refresh = False
+        
         # Enhanced chat components - initialized later after console is ready
         self.enhanced_input = None
         self.chat_history = None
@@ -425,10 +435,10 @@ class ModernTUI:
         # Start SSE listener for real-time status updates
         await self._start_sse_listener()
 
-        # Event-driven Live rendering with optimized refresh rate
-        # Set refresh_per_second to 3 FPS (down from default ~20-30 FPS)
+        # Event-driven Live rendering with enhanced refresh rate for input responsiveness
+        # Set refresh_per_second to 15 FPS for immediate input feedback while maintaining performance
         # Use auto_refresh=False to prevent concatenation issues and screen_clear=True for clean frames
-        with Live(self._render(), console=self._console, refresh_per_second=3, auto_refresh=False, screen=True) as live:
+        with Live(self._render(), console=self._console, refresh_per_second=15, auto_refresh=False, screen=True) as live:
             try:
                 while self._running:
                     # Wait for either user input OR a refresh request
@@ -464,19 +474,42 @@ class ModernTUI:
                         # CRITICAL FIX: Clear the refresh event BEFORE checking content to prevent feedback loops
                         self._refresh_event.clear()
                         
-                        # Smart debounce - longer for idle periods, shorter for active typing
-                        debounce_time = 0.05 if self._is_user_typing() else 0.15
-                        await asyncio.sleep(debounce_time)
+                        # Check for immediate footer refresh flag - bypass all debounce
+                        immediate_refresh = getattr(self, '_immediate_footer_refresh', False)
+                        if immediate_refresh:
+                            # Reset flag and skip debounce completely for immediate input feedback
+                            self._immediate_footer_refresh = False
+                        else:
+                            # Smart debounce - longer for idle periods, shorter for active typing
+                            debounce_time = 0.05 if self._is_user_typing() else 0.15
+                            await asyncio.sleep(debounce_time)
                         
-                        # CRITICAL FIX: Only update Live if content has actually changed
-                        new_layout = self._render()
-                        layout_hash = self._get_layout_hash(new_layout)
-                        
-                        # Frame deduplication - only update if content changed
-                        if layout_hash != self._last_rendered_hash:
-                            live.update(new_layout)
-                            self._last_rendered_hash = layout_hash
-                            self._render_counter += 1
+                        # CRITICAL FIX: Synchronize rendering to prevent frame concatenation
+                        async with self._render_lock:
+                            # Set rendering flag to prevent feedback loops
+                            self._currently_rendering = True
+                            try:
+                                new_layout = self._render()
+                                layout_hash = self._get_layout_hash(new_layout)
+                                
+                                # If immediate refresh was requested for typing, force update
+                                if immediate_refresh:
+                                    # Force a repaint now to show typed characters instantly
+                                    try:
+                                        live.update(new_layout, refresh=True)
+                                    except TypeError:
+                                        # Older Rich versions may not support refresh kwarg
+                                        live.update(new_layout)
+                                    self._last_rendered_hash = layout_hash
+                                    self._render_counter += 1
+                                else:
+                                    # Frame deduplication - only update if content changed
+                                    if layout_hash != self._last_rendered_hash:
+                                        live.update(new_layout)
+                                        self._last_rendered_hash = layout_hash
+                                        self._render_counter += 1
+                            finally:
+                                self._currently_rendering = False
                             
             except (KeyboardInterrupt, SystemExit):
                 self._running = False
@@ -510,7 +543,7 @@ class ModernTUI:
     # Event-driven refresh API
     # ------------------------------------------------------------------- #
     def mark_dirty(self, section: str = "all") -> None:
-        """Mark UI section as needing refresh with smart caching.
+        """Mark UI section as needing refresh with request coalescing.
         
         Args:
             section: Which section to invalidate ("header", "content", "footer", "all")
@@ -519,37 +552,49 @@ class ModernTUI:
         if getattr(self, '_currently_rendering', False):
             return  # Skip marking dirty while we're already rendering
             
-        # Invalidate cache for specified section
-        if section == "all":
-            for key in self._cache_version:
-                self._cache_version[key] += 1
-        elif section in self._cache_version:
-            self._cache_version[section] += 1
-        
-        # CRITICAL FIX: Enhanced debouncing to prevent excessive refreshes
-        if not hasattr(self, '_last_dirty_time'):
-            self._last_dirty_time = {}
-        
-        import time
-        now = time.time()
-        
-        # CRITICAL FIX: Much more aggressive debounce times to reduce refresh frequency
-        section_debounce = {
-            "footer": 0.25,    # Input field - increased from 0.1 to 0.25
-            "header": 0.5,     # Status info - increased from 0.3 to 0.5  
-            "content": 0.3,    # Chat content - increased from 0.15 to 0.3
-            "sidebar": 1.0,    # Sidebar - increased from 0.5 to 1.0
-            "all": 0.4,        # General updates - increased from 0.2 to 0.4
-        }
-        
-        debounce_time = section_debounce.get(section, 0.4)
-        last_time = self._last_dirty_time.get(section, 0.0)
-        
-        # CRITICAL FIX: Only trigger refresh if enough time has passed for this section
-        # This prevents rapid-fire refresh events that cause scrollback flooding
-        if now - last_time > debounce_time:
-            self._refresh_event.set()
-            self._last_dirty_time[section] = now
+        # CRITICAL FIX: Use async task for coalescing to avoid blocking
+        asyncio.create_task(self._coalesce_mark_dirty(section))
+    
+    async def _coalesce_mark_dirty(self, section: str) -> None:
+        """Coalesce mark_dirty requests to prevent excessive refreshes."""
+        async with self._coalesce_lock:
+            # Add section to pending refresh set
+            if section == "all":
+                self._pending_refresh_sections = {"header", "content", "footer", "sidebar"}
+            else:
+                self._pending_refresh_sections.add(section)
+            
+            # CRITICAL FIX: Enhanced debouncing with adaptive timing
+            import time
+            now = time.time()
+            
+            # Initialize timing if needed
+            if not hasattr(self, '_last_dirty_time'):
+                self._last_dirty_time = {}
+            
+            # CRITICAL FIX: Optimized debounce times for responsiveness
+            section_debounce = {
+                "footer": 0.02,    # Input field - CRITICAL: Ultra-fast for typing
+                "header": 0.3,     # Status info
+                "content": 0.15,   # Chat content
+                "sidebar": 0.5,    # Sidebar
+            }
+            
+            # Use the shortest debounce time for any pending section
+            min_debounce = min(section_debounce.get(s, 0.2) for s in self._pending_refresh_sections)
+            last_time = max(self._last_dirty_time.get(s, 0.0) for s in self._pending_refresh_sections)
+            
+            # CRITICAL FIX: Only trigger refresh if enough time has passed
+            if now - last_time > min_debounce:
+                # Invalidate cache for all pending sections
+                for pending_section in self._pending_refresh_sections:
+                    if pending_section in self._cache_version:
+                        self._cache_version[pending_section] += 1
+                    self._last_dirty_time[pending_section] = now
+                
+                # Clear pending set and trigger refresh
+                self._pending_refresh_sections.clear()
+                self._refresh_event.set()
     
     def _get_cached_panel(self, section: str, generator_func) -> RenderableType:
         """Get cached panel or generate new one if cache is invalid.
@@ -680,50 +725,40 @@ class ModernTUI:
         return self._refresh_event.is_set()
     
     def _get_layout_hash(self, layout) -> str:
-        """Get a hash of the current layout content for frame deduplication."""
+        """CRITICAL FIX: Optimized hash generation using object IDs instead of string serialization."""
         try:
-            # Generate hash based on visible content in key sections
-            content_parts = []
+            # CRITICAL FIX: Use object IDs and cache versions instead of expensive string conversion
+            hash_components = []
             
-            # Hash header content
-            try:
-                if hasattr(layout, '__getitem__'):
-                    header_content = str(layout["header"])
-                    content_parts.append(f"header:{header_content}")
-            except (KeyError, AttributeError):
-                pass
-                
-            # Hash main content
-            try:
-                if hasattr(layout, '__getitem__'):
-                    if self._sidebar_collapsed:
-                        main_content = str(layout["main_area"])
-                    else:
-                        main_content = str(layout["content"])
-                    content_parts.append(f"content:{main_content}")
-            except (KeyError, AttributeError):
-                pass
-                
-            # Hash footer content
-            try:
-                if hasattr(layout, '__getitem__'):
-                    footer_content = str(layout["footer"])
-                    content_parts.append(f"footer:{footer_content}")
-            except (KeyError, AttributeError):
-                pass
-                
-            # Hash sidebar if not collapsed
-            if not self._sidebar_collapsed:
-                try:
-                    if hasattr(layout, '__getitem__'):
-                        sidebar_content = str(layout["sidebar"])
-                        content_parts.append(f"sidebar:{sidebar_content}")
-                except (KeyError, AttributeError):
-                    pass
+            # Hash based on cache versions (much faster than string conversion)
+            for section, version in self._cache_version.items():
+                hash_components.append(f"{section}:{version}")
             
-            # Generate hash from all content parts
-            combined_content = "|".join(content_parts)
-            return str(hash(combined_content))
+            # Add layout structure indicators without expensive string conversion
+            hash_components.extend([
+                f"mode:{self._current_mode.value}",
+                f"page:{self._current_page.value}",
+                f"focus:{self._current_focus.value}",
+                f"sidebar:{not self._sidebar_collapsed}",
+                f"palette:{self._command_palette_active}"
+            ])
+            
+            # CRITICAL FIX: Include object IDs for actual content changes
+            try:
+                if hasattr(layout, '__getitem__'):
+                    # Use object ID instead of string conversion for performance
+                    for section in ["header", "content", "footer", "sidebar"]:
+                        try:
+                            obj = layout[section]
+                            hash_components.append(f"{section}_id:{id(obj)}")
+                        except (KeyError, AttributeError):
+                            pass
+            except Exception:
+                pass
+            
+            # Generate lightweight hash
+            combined = "|".join(hash_components)
+            return str(hash(combined))
             
         except Exception:
             # Fallback to timestamp-based hash to prevent identical frames
@@ -824,8 +859,8 @@ class ModernTUI:
             self.mark_dirty("footer")  # Refresh input area on submit
             
         async def on_input_change(text: str) -> None:
-            # FIXED: Always trigger visual updates for typing feedback 
-            self.mark_dirty("footer")
+            # CRITICAL FIX: Force immediate visual updates for typing feedback 
+            self._force_immediate_footer_refresh()
             self._last_input_text = text
             
         self.realtime_input.on_submit(on_input_submit)
@@ -1226,12 +1261,15 @@ class ModernTUI:
     def _render_hybrid_footer(self) -> None:
         """Render footer with context-aware hotkeys and real-time input."""
         def generate_footer():
-            # FIXED: If we're in chat mode and have realtime input, show it instead of static hints
-            if (not self._sidebar_collapsed or self._current_page == SidebarPage.CHAT) and self.realtime_input is not None:
+            # CRITICAL FIX: Always use realtime input when available, regardless of mode
+            if self.realtime_input is not None:
                 try:
-                    # Use the realtime input field render directly for immediate input echo
+                    # CRITICAL FIX: Always render realtime input to show typed characters
                     return self.realtime_input.render()
-                except Exception:
+                except Exception as e:
+                    # Log the error for debugging but fall back to static footer
+                    import traceback
+                    self._log_suppressed_error("realtime_input_render", e)
                     # Fall back to static footer if realtime rendering fails
                     pass
             
@@ -1877,8 +1915,15 @@ class ModernTUI:
                 # Clean the input and submit it
                 clean_line = line.rstrip('\n')
                 if clean_line.strip():  # Only process non-empty lines
-                    # Submit to realtime input field if available
+                    # CRITICAL FIX: In line-based mode, set the input field content first so it's visible
                     if self.realtime_input is not None:
+                        # Set the input to show what was typed
+                        self.realtime_input.set_input(clean_line)
+                        # Force refresh to show the input
+                        self._force_immediate_footer_refresh()
+                        # Small delay so user can see what they typed
+                        await asyncio.sleep(0.1)
+                        # Now submit the input
                         await self.realtime_input.handle_submit(clean_line)
                     else:
                         # Direct to input queue for fallback
@@ -1920,13 +1965,13 @@ class ModernTUI:
                 if not key_str:
                     continue
                 
-                # FIXED: Handle slash character specially to prevent command palette issues
+                # CRITICAL FIX: Handle slash character specially for immediate echo
                 if key_str == "/":
                     # Always forward slash directly to input field for immediate echo
                     if self.realtime_input is not None:
                         handled = await self.realtime_input.handle_key(key_str)
                         if handled:
-                            self.mark_dirty("footer")  # Immediate refresh for slash
+                            self._force_immediate_footer_refresh()  # Force immediate refresh for slash
                             continue
                     
                 # Try hybrid keyboard handler first (shortcuts like Ctrl+B)
@@ -1939,8 +1984,8 @@ class ModernTUI:
                 if self.realtime_input is not None:
                     handled = await self.realtime_input.handle_key(key_str)
                     if handled:
-                        # FIXED: Always refresh footer for any key input to show typed characters
-                        self.mark_dirty("footer")
+                        # CRITICAL FIX: Force immediate footer refresh for typing feedback
+                        self._force_immediate_footer_refresh()
                         continue
                 
                 # Handle special keys that create complete input
@@ -1983,6 +2028,32 @@ class ModernTUI:
     def _refresh_input_display(self) -> None:
         """Force UI refresh to show updated input state."""
         self.mark_dirty("footer")  # Input display refresh
+        
+    def _force_immediate_footer_refresh(self) -> None:
+        """CRITICAL FIX: Force immediate footer refresh bypassing debounce for typing."""
+        # Clear ALL pending refresh sections to prevent interference
+        if hasattr(self, '_pending_refresh_sections'):
+            self._pending_refresh_sections.clear()
+        
+        # Reset debounce timestamps completely
+        if not hasattr(self, '_last_dirty_time'):
+            self._last_dirty_time = {}
+        
+        # Force timestamp reset for footer to bypass ALL debounce logic
+        self._last_dirty_time["footer"] = 0.0
+
+        # Bump footer cache version so layout hash changes and triggers Live.update
+        try:
+            if "footer" in self._cache_version:
+                self._cache_version["footer"] += 1
+        except Exception:
+            pass
+        
+        # Set special flag to indicate immediate refresh needed
+        self._immediate_footer_refresh = True
+        
+        # Trigger immediate refresh
+        self._refresh_event.set()
 
     # ------------------------------------------------------------------- #
     # SSE listener for real-time status updates

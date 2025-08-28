@@ -129,10 +129,10 @@ class RealTimeInputField:
         if not Text or not Panel:
             return f"{self.prompt}{self.get_current_input()}"
         
-        # FIXED: Ensure we're properly initialized before rendering
+        # CRITICAL FIX: Ensure we're properly initialized before rendering
         self._ensure_initialized()
             
-        # Build display text with cursor
+        # Build display text with cursor - CRITICAL FIX: Always show current input
         display_lines = []
         
         for i, line in enumerate(self._lines):
@@ -167,15 +167,13 @@ class RealTimeInputField:
                     content.append('\n')
                 content.append_text(line)
         
-        # Add prompt if specified - FIXED: Ensure prompt is properly shown
+        # CRITICAL FIX: Always show prompt with input content
         if self.prompt:
             prompt_text = Text(self.prompt, style="bold cyan")
             full_content = Text()
             full_content.append_text(prompt_text)
-            # FIXED: Add current input content after prompt
-            current_input = self.get_current_input()
-            if current_input or self.show_cursor:
-                full_content.append_text(content)
+            # CRITICAL FIX: Always append content, even if empty (to show cursor)
+            full_content.append_text(content)
             content = full_content
             
         return Panel(
@@ -274,7 +272,7 @@ class RealTimeInputField:
     # Private methods
     def _insert_char(self, char: str) -> None:
         """Insert character at cursor position."""
-        # FIXED: Ensure we're initialized before inserting
+        # CRITICAL FIX: Ensure we're initialized before inserting
         self._ensure_initialized()
         
         current_line = self._lines[self._cursor_row]
@@ -282,7 +280,7 @@ class RealTimeInputField:
         self._lines[self._cursor_row] = new_line
         self._cursor_col += 1
         
-        # FIXED: Ensure cursor stays visible during typing and force immediate display
+        # CRITICAL FIX: Ensure cursor stays visible during typing and force immediate display
         self._cursor_visible = True
         
     def _handle_backspace(self) -> None:
