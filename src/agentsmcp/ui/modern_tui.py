@@ -319,7 +319,8 @@ class ModernTUI:
 
         # Event-driven Live rendering with optimized refresh rate
         # Set refresh_per_second to 3 FPS (down from default ~20-30 FPS)
-        with Live(self._render(), console=self._console, refresh_per_second=3) as live:
+        # Use auto_refresh=False to prevent concatenation issues and screen_clear=True for clean frames
+        with Live(self._render(), console=self._console, refresh_per_second=3, auto_refresh=False, screen=True) as live:
             try:
                 while self._running:
                     # Wait for either user input OR a refresh request
@@ -361,7 +362,11 @@ class ModernTUI:
                             # Track what actually changed to reduce Live updates
                             changed_sections = self._render_with_change_tracking()
                             if changed_sections:
-                                live.update(self._layout)  # Update layout directly instead of full render
+                                # Use Rich Layout's proper update mechanism to prevent concatenation
+                                # Rich Live with auto_refresh=False and screen=True should handle frame clearing
+                                live.update(self._render())
+                                # Force refresh to ensure clean frame separation
+                                live.refresh()
                             self._refresh_event.clear()
                             
             except (KeyboardInterrupt, SystemExit):
