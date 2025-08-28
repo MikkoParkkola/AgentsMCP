@@ -213,6 +213,10 @@ class ModernTUI:
         else:
             self._console = None
         
+        # Track typing activity for smart refresh rates
+        self._last_keypress_time = 0.0
+        self._typing_timeout = 2.0  # Consider user stopped typing after 2 seconds
+        
         # Initialize RealTimeInputField now that console is available
         if RealTimeInputField is not None and self._console is not None:
             try:
@@ -313,8 +317,9 @@ class ModernTUI:
         # Start SSE listener for real-time status updates
         await self._start_sse_listener()
 
-        # Event-driven Live rendering – only refreshes when state actually changes
-        with Live(self._render(), console=self._console) as live:
+        # Event-driven Live rendering with optimized refresh rate
+        # Set refresh_per_second to 3 FPS (down from default ~20-30 FPS)
+        with Live(self._render(), console=self._console, refresh_per_second=3) as live:
             try:
                 while self._running:
                     # Wait for either user input OR a refresh request
@@ -345,10 +350,11 @@ class ModernTUI:
                     if input_received:
                         self.mark_dirty("content")  # Input processing affects chat history
                     
-                    # Handle refresh requests (with minimal debouncing for responsiveness)
+                    # Handle refresh requests with intelligent debouncing
                     if self._should_refresh():
-                        # Minimal debounce to batch rapid changes while keeping input responsive
-                        await asyncio.sleep(0.01)  # Reduced from 0.03 to 0.01 seconds
+                        # Smart debounce - longer for idle periods, shorter for active typing
+                        debounce_time = 0.05 if self._is_user_typing() else 0.15
+                        await asyncio.sleep(debounce_time)
                         
                         # Update UI only if still dirty after debounce
                         if self._should_refresh():
@@ -398,20 +404,29 @@ class ModernTUI:
         elif section in self._cache_version:
             self._cache_version[section] += 1
         
-        # Add debouncing to prevent excessive refreshes, but use shorter debounce for input
+        # Smart debouncing to prevent excessive refreshes
         if not hasattr(self, '_last_dirty_time'):
-            self._last_dirty_time = 0.0
+            self._last_dirty_time = {}
         
         import time
         now = time.time()
         
-        # Use shorter debounce for footer (input field) to enable real-time typing
-        debounce_time = 0.02 if section == "footer" else 0.1  # 20ms for input, 100ms for others
+        # Use adaptive debounce times per section
+        section_debounce = {
+            "footer": 0.1,     # Input field - reduced from 0.02 to 0.1
+            "header": 0.3,     # Status info - can update less frequently  
+            "content": 0.15,   # Chat content - moderate frequency
+            "sidebar": 0.5,    # Sidebar - rarely changes
+            "all": 0.2,        # General updates
+        }
         
-        # Only trigger refresh if enough time has passed
-        if now - self._last_dirty_time > debounce_time:
+        debounce_time = section_debounce.get(section, 0.2)
+        last_time = self._last_dirty_time.get(section, 0.0)
+        
+        # Only trigger refresh if enough time has passed for this section
+        if now - last_time > debounce_time:
             self._refresh_event.set()
-            self._last_dirty_time = now
+            self._last_dirty_time[section] = now
     
     def _get_cached_panel(self, section: str, generator_func) -> RenderableType:
         """Get cached panel or generate new one if cache is invalid.
@@ -440,23 +455,34 @@ class ModernTUI:
         """Update layout section only if content has actually changed. Returns True if updated."""
         current_key = f"current_{section}"
         
-        # Compare content by creating a hash of its string representation
+        # Enhanced content comparison to reduce false positives
         try:
-            # For Panel objects, get the content and title for comparison
+            # For Panel objects, extract meaningful content for comparison
             if hasattr(new_content, 'renderable') and hasattr(new_content, 'title'):
                 content_str = str(new_content.renderable) if new_content.renderable else ""
                 title_str = str(new_content.title) if new_content.title else ""
                 border_str = str(new_content.border_style) if hasattr(new_content, 'border_style') else ""
+                
+                # Clean whitespace and normalize for better comparison
+                content_str = ' '.join(content_str.split())
+                title_str = ' '.join(title_str.split())
+                
                 new_hash = hash((content_str, title_str, border_str))
             elif hasattr(new_content, '__rich__'):
-                new_hash = hash(str(new_content.__rich__()))
+                content_str = str(new_content.__rich__())
+                content_str = ' '.join(content_str.split())  # Normalize whitespace
+                new_hash = hash(content_str)
             else:
-                new_hash = hash(str(new_content))
+                content_str = str(new_content)
+                content_str = ' '.join(content_str.split())  # Normalize whitespace
+                new_hash = hash(content_str)
         except Exception:
             # Fallback to simple string comparison
             new_hash = hash(str(new_content))
             
         cached_hash = self._render_cache.get(current_key)
+        
+        # Only update if content has actually changed
         if cached_hash != new_hash:
             # Safety guard: check if section exists in layout using try/except
             # Rich Layout's __contains__ method doesn't work as expected and triggers __getitem__
@@ -485,7 +511,8 @@ class ModernTUI:
                         pass
                 # For other sections that don't exist, skip silently
             return False
-            
+        
+        # Content hasn't changed, no update needed
         return False
         
     def _render_with_change_tracking(self) -> list:
@@ -523,6 +550,29 @@ class ModernTUI:
     def _should_refresh(self) -> bool:
         """Return True if a refresh has been requested."""
         return self._refresh_event.is_set()
+    
+    def _is_user_typing(self) -> bool:
+        """Check if user is currently typing (within typing timeout)."""
+        import time
+        return time.time() - self._last_keypress_time < self._typing_timeout
+    
+    def _status_has_meaningful_change(self, old_status: Dict, new_status: Dict) -> bool:
+        """Check if status update contains meaningful changes worth refreshing for."""
+        # Compare key fields that are visible in the header
+        key_fields = ['active_agents', 'total_cost', 'current_model', 'connection_status']
+        
+        for field in key_fields:
+            old_val = old_status.get(field)
+            new_val = new_status.get(field)
+            
+            # For numeric values, only consider significant changes
+            if field == 'total_cost':
+                if old_val is None or new_val is None or abs(float(new_val or 0) - float(old_val or 0)) > 0.01:
+                    return True
+            elif old_val != new_val:
+                return True
+                
+        return False
         
     # ------------------------------------------------------------------- #
     # Error handling and rate limiting
@@ -595,8 +645,13 @@ class ModernTUI:
             self.mark_dirty("footer")  # Refresh input area on submit
             
         async def on_input_change(text: str) -> None:
-            # Trigger real-time visual updates for typing feedback
-            self.mark_dirty("footer")
+            # Trigger visual updates for typing feedback, but only if text actually changed
+            if hasattr(self, '_last_input_text') and self._last_input_text != text:
+                self.mark_dirty("footer")
+                self._last_input_text = text
+            elif not hasattr(self, '_last_input_text'):
+                self._last_input_text = text
+                self.mark_dirty("footer")
             
         self.realtime_input.on_submit(on_input_submit)
         self.realtime_input.on_change(on_input_change)
@@ -1596,6 +1651,10 @@ class ModernTUI:
                 if key_code is None and char is None:
                     continue
                 
+                # Update typing activity timestamp
+                import time
+                self._last_keypress_time = time.time()
+                
                 # Convert KeyCode to string for compatibility
                 key_str = None
                 if key_code:
@@ -1616,8 +1675,12 @@ class ModernTUI:
                 if self.realtime_input is not None:
                     handled = await self.realtime_input.handle_key(key_str)
                     if handled:
-                        # Input handled successfully - no need to trigger refresh here
-                        # The RealTimeInputField will trigger change events automatically
+                        # Input handled successfully - only refresh for visible character changes
+                        # Arrow keys and other navigation shouldn't trigger constant refreshes
+                        if key_str not in ['up', 'down', 'left', 'right', 'home', 'end']:
+                            # The RealTimeInputField will trigger change events automatically
+                            # for actual content changes, not navigation
+                            pass
                         continue
                 
                 # Handle special keys that create complete input
@@ -1721,9 +1784,11 @@ class ModernTUI:
         event_type = event.get("type", "")
         
         if event_type == "status_update":
-            # Update cached status for header display
-            self._last_status_update = event.get("data", {})
-            self.mark_dirty("header")  # Trigger header refresh
+            # Update cached status for header display, but only trigger refresh if meaningful change
+            new_status = event.get("data", {})
+            if not self._last_status_update or self._status_has_meaningful_change(self._last_status_update, new_status):
+                self._last_status_update = new_status
+                self.mark_dirty("header")  # Trigger header refresh
             
         elif event_type == "agent_spawned":
             # New agent started - could show notification in sidebar
@@ -1734,9 +1799,18 @@ class ModernTUI:
             self.mark_dirty("content")
             
         elif event_type == "cost_update":
-            # Cost information changed - update header
-            self._last_status_update = event.get("data", {})
-            self.mark_dirty("header")
+            # Cost information changed - update header only if significant change
+            new_cost_data = event.get("data", {})
+            old_cost = self._last_status_update.get('total_cost', 0) if self._last_status_update else 0
+            new_cost = new_cost_data.get('total_cost', 0)
+            
+            # Only update if cost change is significant (>1 cent)
+            if abs(float(new_cost) - float(old_cost)) > 0.01:
+                if self._last_status_update:
+                    self._last_status_update.update(new_cost_data)
+                else:
+                    self._last_status_update = new_cost_data
+                self.mark_dirty("header")
 
     # ------------------------------------------------------------------- #
     # User input dispatcher – interprets slash‑commands and forwards chat.
