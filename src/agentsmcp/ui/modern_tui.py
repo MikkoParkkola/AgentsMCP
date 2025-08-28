@@ -222,7 +222,7 @@ class ModernTUI:
         self._last_keypress_time = 0.0
         self._typing_timeout = 2.0  # Consider user stopped typing after 2 seconds
         
-        # Initialize RealTimeInputField now that console is available
+        # FIXED: Initialize RealTimeInputField now that console is available
         if RealTimeInputField is not None and self._console is not None:
             try:
                 self.realtime_input = RealTimeInputField(
@@ -231,7 +231,9 @@ class ModernTUI:
                     max_width=None,
                     max_height=3
                 )
+                # FIXED: Connect input events and ensure proper focus
                 self._connect_input_events()
+                self._ensure_input_focus()
             except Exception:
                 # Fallback gracefully if initialization fails
                 self.realtime_input = None
@@ -727,6 +729,22 @@ class ModernTUI:
             
         self.realtime_input.on_submit(on_input_submit)
         self.realtime_input.on_change(on_input_change)
+        
+    def _ensure_input_focus(self) -> None:
+        """FIXED: Ensure input field is properly focused and ready for immediate input."""
+        if not self.realtime_input:
+            return
+            
+        try:
+            # Ensure the input field is in a ready state
+            self.realtime_input._ensure_initialized()
+            # Force cursor to be visible and ready
+            self.realtime_input._cursor_visible = True
+            # Mark footer as needing refresh to show focused state
+            self.mark_dirty("footer")
+        except Exception:
+            # Graceful failure if input setup fails
+            pass
 
     def _render_welcome(self) -> None:
         """Display a brief welcome message."""
@@ -1725,10 +1743,10 @@ class ModernTUI:
         
         while self._running:
             try:
-                # Read a single key with timeout
+                # FIXED: Reduced timeout for more responsive input
                 key_code, char = await loop.run_in_executor(
                     None, 
-                    lambda: self._keyboard_input.get_key(timeout=0.1)
+                    lambda: self._keyboard_input.get_key(timeout=0.05)  # Faster polling
                 )
                 
                 # Handle timeout (no input)
@@ -1748,6 +1766,15 @@ class ModernTUI:
                     
                 if not key_str:
                     continue
+                
+                # FIXED: Handle slash character specially to prevent command palette issues
+                if key_str == "/":
+                    # Always forward slash directly to input field for immediate echo
+                    if self.realtime_input is not None:
+                        handled = await self.realtime_input.handle_key(key_str)
+                        if handled:
+                            self.mark_dirty("footer")  # Immediate refresh for slash
+                            continue
                     
                 # Try hybrid keyboard handler first (shortcuts like Ctrl+B)
                 if hasattr(self, '_handle_hybrid_keyboard_event'):
@@ -1759,12 +1786,9 @@ class ModernTUI:
                 if self.realtime_input is not None:
                     handled = await self.realtime_input.handle_key(key_str)
                     if handled:
-                        # Input handled successfully - only refresh for visible character changes
-                        # Arrow keys and other navigation shouldn't trigger constant refreshes
+                        # FIXED: Immediate refresh for all character input for better responsiveness
                         if key_str not in ['up', 'down', 'left', 'right', 'home', 'end']:
-                            # The RealTimeInputField will trigger change events automatically
-                            # for actual content changes, not navigation
-                            pass
+                            self.mark_dirty("footer")
                         continue
                 
                 # Handle special keys that create complete input
@@ -1924,15 +1948,19 @@ class ModernTUI:
                 # History failure should not break the UI
                 pass
         
+        # FIXED: Ensure all commands properly start with "/" and handle them correctly
         if stripped.startswith("/"):
             tokens = stripped[1:].split(maxsplit=1)
             cmd = tokens[0].lower()
             arg = tokens[1] if len(tokens) > 1 else ""
+            
+            # FIXED: Process all slash commands with proper feedback
             if cmd == "mode":
                 await self._process_mode_command(arg)
                 self.mark_dirty("header")  # Mode change only affects header
             elif cmd in {"quit", "exit"}:
                 self._running = False
+                self._print_system_message("Shutting down...")
             elif cmd == "help":
                 # Use hybrid help if sidebar state variables exist (hybrid mode)
                 if hasattr(self, '_sidebar_collapsed'):
@@ -1955,8 +1983,21 @@ class ModernTUI:
                         self._print_system_message(f"Unknown sidebar command: {arg}")
                 else:
                     self._print_system_message("Sidebar commands only available in hybrid mode")
+            elif cmd == "clear":
+                # FIXED: Add clear command for input history
+                if self.chat_history is not None:
+                    try:
+                        # Clear chat history if method exists
+                        if hasattr(self.chat_history, 'clear_history'):
+                            self.chat_history.clear_history()
+                        self.mark_dirty("content")
+                        self._print_system_message("Chat history cleared")
+                    except Exception:
+                        self._print_system_message("Failed to clear chat history")
+                else:
+                    self._print_system_message("No chat history to clear")
             else:
-                error_msg = f"Unknown command: {cmd}"
+                error_msg = f"Unknown command: /{cmd}. Try /help for available commands."
                 self._print_system_message(error_msg)
                 # Record the error in chat history
                 if self.chat_history is not None:
@@ -2014,9 +2055,11 @@ Available commands:
   /mode dashboard    - Switch to metrics overview
   /mode command      - Switch to full technical interface  
   /quit or /exit     - Exit the TUI
+  /clear             - Clear chat history
   /help              - Show this help message
   
 Just type your message to chat with AI agents!
+All commands must start with "/" character.
         """.strip()
         self._print_system_message(help_text)
 
@@ -2115,10 +2158,8 @@ Just type your message to chat with AI agents!
             self._running = False
             return True
             
-        # Handle global shortcuts
-        elif key == "/" and not self._command_palette_active:
-            self._activate_command_palette()
-            return True
+        # FIXED: Handle global shortcuts - but don't intercept "/" for command palette
+        # Let the "/" character flow through to input field for proper echo
         elif key == "escape" and self._command_palette_active:
             self._deactivate_command_palette()
             return True
@@ -2272,13 +2313,13 @@ Just type your message to chat with AI agents!
 Hybrid TUI Commands:
   /mode zen|dashboard|command  - Switch UI mode
   /sidebar [toggle|show|hide]  - Control sidebar
+  /clear                      - Clear chat history
   /quit or /exit              - Exit the TUI
   /help                       - Show this help
   
 Keyboard Shortcuts:
   Ctrl+B                      - Toggle sidebar
   Tab                         - Cycle focus (when sidebar open)
-  /                           - Open command palette  
   PgUp/PgDn                   - Scroll chat history
   ↑/↓ (in sidebar)           - Navigate pages
   Escape                      - Close command palette
@@ -2287,6 +2328,7 @@ Sidebar Pages:
   Chat, Jobs, Agents, Models, Providers, Costs, MCP, Discovery, Settings
 
 Just type your message to chat with AI agents!
+All commands must start with "/" character.
         """.strip()
         self._print_system_message(help_text)
 

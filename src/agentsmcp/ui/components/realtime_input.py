@@ -65,11 +65,12 @@ class RealTimeInputField:
         self.show_cursor = show_cursor
         self.cursor_style = cursor_style
         
-        # Input buffer state
+        # Input buffer state - FIXED: Initialize properly
         self._lines: List[str] = initial_text.split('\n') if initial_text else [""]
         self._cursor_row = len(self._lines) - 1
         self._cursor_col = len(self._lines[-1])
         self._cursor_visible = True
+        self._initialized = False  # Track initialization state
         
         # Event callbacks
         self._submit_callbacks: List[Callable[[str], Union[None, Awaitable[None]]]] = []
@@ -81,6 +82,9 @@ class RealTimeInputField:
         
         # Input sanitization
         self._ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        
+        # FIXED: Initialize properly from start
+        self._ensure_initialized()
         
     def on_submit(self, callback: Callable[[str], Union[None, Awaitable[None]]]) -> None:
         """Register callback for when user submits input (Enter key)."""
@@ -181,6 +185,16 @@ class RealTimeInputField:
         if not key:
             return False
             
+        # FIXED: Ensure field is initialized before handling input
+        self._ensure_initialized()
+        
+        # FIXED: Handle slash commands properly - ensure "/" is always processed
+        if key == "/":
+            # Always insert "/" character for command mode
+            self._insert_char(key)
+            await self._trigger_change()
+            return True
+            
         # Handle special keys
         if key == "enter":
             await self._handle_submit()
@@ -212,7 +226,7 @@ class RealTimeInputField:
             self._cursor_col = len(self._lines[self._cursor_row])
             return True
         elif len(key) == 1 and key.isprintable():
-            # Regular character input
+            # FIXED: Regular character input with immediate echo
             self._insert_char(key)
             await self._trigger_change()
             return True
@@ -254,12 +268,15 @@ class RealTimeInputField:
     # Private methods
     def _insert_char(self, char: str) -> None:
         """Insert character at cursor position."""
+        # FIXED: Ensure we're initialized before inserting
+        self._ensure_initialized()
+        
         current_line = self._lines[self._cursor_row]
         new_line = current_line[:self._cursor_col] + char + current_line[self._cursor_col:]
         self._lines[self._cursor_row] = new_line
         self._cursor_col += 1
         
-        # Ensure cursor stays visible during typing
+        # FIXED: Ensure cursor stays visible during typing and force immediate display
         self._cursor_visible = True
         
     def _handle_backspace(self) -> None:
@@ -366,3 +383,24 @@ class RealTimeInputField:
         
         # Clear after processing
         self.clear_input()
+    
+    def _ensure_initialized(self) -> None:
+        """FIXED: Ensure input field is properly initialized and ready."""
+        if self._initialized:
+            return
+            
+        # Reset to clean state if needed
+        if not self._lines or (len(self._lines) == 1 and not self._lines[0]):
+            self._lines = [""]
+            self._cursor_row = 0
+            self._cursor_col = 0
+        
+        # Ensure cursor is in valid position
+        if self._cursor_row >= len(self._lines):
+            self._cursor_row = len(self._lines) - 1
+        if self._cursor_col > len(self._lines[self._cursor_row]):
+            self._cursor_col = len(self._lines[self._cursor_row])
+            
+        # Mark as initialized
+        self._cursor_visible = True
+        self._initialized = True

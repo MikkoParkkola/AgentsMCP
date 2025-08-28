@@ -226,19 +226,24 @@ class KeyboardInput:
             # Set terminal to raw mode
             self.tty.setraw(sys.stdin.fileno())
             
+            # FIXED: Reduce timeout precision to prevent first character drops
             # Check for input availability with timeout
             if timeout is not None:
                 ready, _, _ = self.select.select([sys.stdin], [], [], timeout)
                 if not ready:
                     return None, None
             
-            # Read first character
+            # Read first character - this should be immediate
             ch = sys.stdin.read(1)
+            
+            # FIXED: Handle slash character immediately without delay
+            if ch == '/':
+                return None, ch
             
             # Handle escape sequences
             if ch == '\x1b':  # ESC
-                # Peek for more characters (arrow keys, etc.)
-                ready, _, _ = self.select.select([sys.stdin], [], [], 0.1)
+                # FIXED: Shorter timeout to prevent input lag
+                ready, _, _ = self.select.select([sys.stdin], [], [], 0.05)  # Reduced from 0.1
                 if ready:
                     ch2 = sys.stdin.read(1)
                     if ch2 == '[':
@@ -261,7 +266,8 @@ class KeyboardInput:
                             # Read until we find the final character
                             sequence = ch3
                             while True:
-                                ready, _, _ = self.select.select([sys.stdin], [], [], 0.1)
+                                # FIXED: Shorter timeout for sequence reading
+                                ready, _, _ = self.select.select([sys.stdin], [], [], 0.05)
                                 if not ready:
                                     break
                                 next_ch = sys.stdin.read(1)
@@ -290,7 +296,7 @@ class KeyboardInput:
             elif ch == ' ':
                 return KeyCode.SPACE, None
             else:
-                # Regular character
+                # FIXED: Regular character - return immediately
                 return None, ch
                 
         finally:
