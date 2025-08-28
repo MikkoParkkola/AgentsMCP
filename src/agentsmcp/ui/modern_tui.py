@@ -185,6 +185,11 @@ class ModernTUI:
         self._render_cache = {}
         self._cache_version = {"header": 0, "content": 0, "footer": 0, "chat_body": 0, "sidebar": 0}
         
+        # Frame deduplication system to prevent scrollback flooding
+        self._last_rendered_hash = None
+        self._render_counter = 0
+        self._currently_rendering = False  # Guard against render feedback loops
+        
         # Enhanced chat components - initialized later after console is ready
         self.enhanced_input = None
         self.chat_history = None
@@ -351,23 +356,24 @@ class ModernTUI:
                     if input_received:
                         self.mark_dirty("content")  # Input processing affects chat history
                     
-                    # Handle refresh requests with intelligent debouncing
+                    # Handle refresh requests with frame deduplication
                     if self._should_refresh():
+                        # CRITICAL FIX: Clear the refresh event BEFORE checking content to prevent feedback loops
+                        self._refresh_event.clear()
+                        
                         # Smart debounce - longer for idle periods, shorter for active typing
                         debounce_time = 0.05 if self._is_user_typing() else 0.15
                         await asyncio.sleep(debounce_time)
                         
-                        # Update UI only if still dirty after debounce
-                        if self._should_refresh():
-                            # Track what actually changed to reduce Live updates
-                            changed_sections = self._render_with_change_tracking()
-                            if changed_sections:
-                                # Use Rich Layout's proper update mechanism to prevent concatenation
-                                # Rich Live with auto_refresh=False and screen=True should handle frame clearing
-                                live.update(self._render())
-                                # Force refresh to ensure clean frame separation
-                                live.refresh()
-                            self._refresh_event.clear()
+                        # CRITICAL FIX: Only update Live if content has actually changed
+                        new_layout = self._render()
+                        layout_hash = self._get_layout_hash(new_layout)
+                        
+                        # Frame deduplication - only update if content changed
+                        if layout_hash != self._last_rendered_hash:
+                            live.update(new_layout)
+                            self._last_rendered_hash = layout_hash
+                            self._render_counter += 1
                             
             except (KeyboardInterrupt, SystemExit):
                 self._running = False
@@ -402,6 +408,10 @@ class ModernTUI:
         Args:
             section: Which section to invalidate ("header", "content", "footer", "all")
         """
+        # CRITICAL FIX: Prevent feedback loops during rendering
+        if getattr(self, '_currently_rendering', False):
+            return  # Skip marking dirty while we're already rendering
+            
         # Invalidate cache for specified section
         if section == "all":
             for key in self._cache_version:
@@ -409,26 +419,27 @@ class ModernTUI:
         elif section in self._cache_version:
             self._cache_version[section] += 1
         
-        # Smart debouncing to prevent excessive refreshes
+        # CRITICAL FIX: Enhanced debouncing to prevent excessive refreshes
         if not hasattr(self, '_last_dirty_time'):
             self._last_dirty_time = {}
         
         import time
         now = time.time()
         
-        # Use adaptive debounce times per section
+        # CRITICAL FIX: Much more aggressive debounce times to reduce refresh frequency
         section_debounce = {
-            "footer": 0.1,     # Input field - reduced from 0.02 to 0.1
-            "header": 0.3,     # Status info - can update less frequently  
-            "content": 0.15,   # Chat content - moderate frequency
-            "sidebar": 0.5,    # Sidebar - rarely changes
-            "all": 0.2,        # General updates
+            "footer": 0.25,    # Input field - increased from 0.1 to 0.25
+            "header": 0.5,     # Status info - increased from 0.3 to 0.5  
+            "content": 0.3,    # Chat content - increased from 0.15 to 0.3
+            "sidebar": 1.0,    # Sidebar - increased from 0.5 to 1.0
+            "all": 0.4,        # General updates - increased from 0.2 to 0.4
         }
         
-        debounce_time = section_debounce.get(section, 0.2)
+        debounce_time = section_debounce.get(section, 0.4)
         last_time = self._last_dirty_time.get(section, 0.0)
         
-        # Only trigger refresh if enough time has passed for this section
+        # CRITICAL FIX: Only trigger refresh if enough time has passed for this section
+        # This prevents rapid-fire refresh events that cause scrollback flooding
         if now - last_time > debounce_time:
             self._refresh_event.set()
             self._last_dirty_time[section] = now
@@ -460,7 +471,7 @@ class ModernTUI:
         """Update layout section only if content has actually changed. Returns True if updated."""
         current_key = f"current_{section}"
         
-        # Enhanced content comparison to reduce false positives
+        # CRITICAL FIX: Enhanced content comparison with better normalization
         try:
             # For Panel objects, extract meaningful content for comparison
             if hasattr(new_content, 'renderable') and hasattr(new_content, 'title'):
@@ -468,9 +479,14 @@ class ModernTUI:
                 title_str = str(new_content.title) if new_content.title else ""
                 border_str = str(new_content.border_style) if hasattr(new_content, 'border_style') else ""
                 
-                # Clean whitespace and normalize for better comparison
+                # Aggressive whitespace normalization to reduce false positives
                 content_str = ' '.join(content_str.split())
                 title_str = ' '.join(title_str.split())
+                
+                # Include timestamp information for time-sensitive content but normalize it
+                import re
+                # Normalize timestamps to reduce micro-changes (seconds only, not milliseconds)
+                content_str = re.sub(r'\d{2}:\d{2}:\d{2}\.\d+', lambda m: m.group(0).split('.')[0], content_str)
                 
                 new_hash = hash((content_str, title_str, border_str))
             elif hasattr(new_content, '__rich__'):
@@ -487,7 +503,7 @@ class ModernTUI:
             
         cached_hash = self._render_cache.get(current_key)
         
-        # Only update if content has actually changed
+        # CRITICAL FIX: Only update if content has actually changed (strict comparison)
         if cached_hash != new_hash:
             # Safety guard: check if section exists in layout using try/except
             # Rich Layout's __contains__ method doesn't work as expected and triggers __getitem__
@@ -517,7 +533,7 @@ class ModernTUI:
                 # For other sections that don't exist, skip silently
             return False
         
-        # Content hasn't changed, no update needed
+        # CRITICAL FIX: Content hasn't changed, no update needed - this prevents redundant Live.update() calls
         return False
         
     def _render_with_change_tracking(self) -> list:
@@ -555,6 +571,57 @@ class ModernTUI:
     def _should_refresh(self) -> bool:
         """Return True if a refresh has been requested."""
         return self._refresh_event.is_set()
+    
+    def _get_layout_hash(self, layout) -> str:
+        """Get a hash of the current layout content for frame deduplication."""
+        try:
+            # Generate hash based on visible content in key sections
+            content_parts = []
+            
+            # Hash header content
+            try:
+                if hasattr(layout, '__getitem__'):
+                    header_content = str(layout["header"])
+                    content_parts.append(f"header:{header_content}")
+            except (KeyError, AttributeError):
+                pass
+                
+            # Hash main content
+            try:
+                if hasattr(layout, '__getitem__'):
+                    if self._sidebar_collapsed:
+                        main_content = str(layout["main_area"])
+                    else:
+                        main_content = str(layout["content"])
+                    content_parts.append(f"content:{main_content}")
+            except (KeyError, AttributeError):
+                pass
+                
+            # Hash footer content
+            try:
+                if hasattr(layout, '__getitem__'):
+                    footer_content = str(layout["footer"])
+                    content_parts.append(f"footer:{footer_content}")
+            except (KeyError, AttributeError):
+                pass
+                
+            # Hash sidebar if not collapsed
+            if not self._sidebar_collapsed:
+                try:
+                    if hasattr(layout, '__getitem__'):
+                        sidebar_content = str(layout["sidebar"])
+                        content_parts.append(f"sidebar:{sidebar_content}")
+                except (KeyError, AttributeError):
+                    pass
+            
+            # Generate hash from all content parts
+            combined_content = "|".join(content_parts)
+            return str(hash(combined_content))
+            
+        except Exception:
+            # Fallback to timestamp-based hash to prevent identical frames
+            import time
+            return str(int(time.time() * 1000))
     
     def _is_user_typing(self) -> bool:
         """Check if user is currently typing (within typing timeout)."""
@@ -805,6 +872,8 @@ class ModernTUI:
         if not self._layout:
             return Text("[red]Layout not initialised[/red]")
 
+        # CRITICAL FIX: Set render guard to prevent feedback loops
+        self._currently_rendering = True
         try:
             # Render header with status information - wrapped with error handling
             try:
@@ -846,6 +915,10 @@ class ModernTUI:
             except Exception:
                 # Even the error panel failed - just pass silently to prevent infinite loops
                 pass
+        finally:
+            # CRITICAL FIX: Clear render guard after rendering is complete
+            self._currently_rendering = False
+            
         return self._layout
         
     # ----------------- Hybrid TUI Component Renderers ----------------- #
@@ -906,23 +979,29 @@ class ModernTUI:
             # Right side - system info
             right_items = []
             
-            # Current time
-            current_time = datetime.now().strftime("%H:%M:%S")
-            right_items.append(f"[dim]{current_time}[/dim]")
+            # CRITICAL FIX: Disable real-time clock to prevent scrollback flooding
+            # Time display causes constant re-renders - disabled for now
+            # right_items.append("[dim]Time display disabled[/dim]")
             
             # Web UI access method
             right_items.append("[dim]Web: agentsmcp dashboard --port 8000[/dim]")
             
-            # Memory usage (if available)
+            # Memory usage (if available) - CRITICAL FIX: Cache memory info to reduce updates
+            # Only update memory display every 30 seconds to prevent constant re-renders
             try:
                 import psutil
-                memory_percent = psutil.virtual_memory().percent
-                if memory_percent > 80:
-                    right_items.append(f"[red]RAM: {memory_percent:.0f}%[/red]")
-                elif memory_percent > 60:
-                    right_items.append(f"[yellow]RAM: {memory_percent:.0f}%[/yellow]")
-                else:
-                    right_items.append(f"[green]RAM: {memory_percent:.0f}%[/green]")
+                import time
+                mem_cache_key = f"mem_{int(time.time()) // 30 * 30}"  # 30-second buckets
+                if not hasattr(self, '_cached_memory') or self._cached_memory[0] != mem_cache_key:
+                    memory_percent = psutil.virtual_memory().percent
+                    if memory_percent > 80:
+                        mem_display = f"[red]RAM: {memory_percent:.0f}%[/red]"
+                    elif memory_percent > 60:
+                        mem_display = f"[yellow]RAM: {memory_percent:.0f}%[/yellow]"
+                    else:
+                        mem_display = f"[green]RAM: {memory_percent:.0f}%[/green]"
+                    self._cached_memory = (mem_cache_key, mem_display)
+                right_items.append(self._cached_memory[1])
             except ImportError:
                 # psutil not available, skip memory monitoring
                 pass

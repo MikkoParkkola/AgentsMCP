@@ -37,6 +37,20 @@ class DashboardConfig:
     show_animations: bool = True
     compact_mode: bool = False
     auto_refresh: bool = True
+    
+    def __post_init__(self):
+        """Adjust config for non-TTY environments to prevent scrollback flooding"""
+        try:
+            import sys
+            if not sys.stdout.isatty():
+                # CRITICAL FIX: In non-TTY environments (like timeout commands), 
+                # disable auto-refresh to prevent scrollback flooding
+                self.auto_refresh = False
+                self.refresh_interval = 10.0  # Much longer interval as fallback
+                self.show_animations = False
+        except Exception:
+            # If TTY detection fails, err on the side of caution
+            self.auto_refresh = False
 
 @dataclass
 class MetricPoint:
