@@ -197,6 +197,12 @@ class ModernTUI:
         # SSE listener for real-time status updates
         self._sse_task = None
         self._last_status_update = None
+        
+        # Error handling and rate limiting
+        self._error_counts = {}  # Track error counts per render section
+        self._max_errors_per_section = 3  # Max errors before fallback
+        self._error_suppression = {}  # Track suppressed errors
+        self._last_error_log_time = {}  # Rate limit error logging
 
     # ------------------------------------------------------------------- #
     # Public API
@@ -482,20 +488,85 @@ class ModernTUI:
             return mode_renderer()
         except Exception as exc:  # pragma: no cover – defensive
             # If something goes wrong we still want the UI to stay alive.
-            error_panel = Panel(
-                Text.from_markup(
-                    f"[bold red]Render error:[/bold red] {exc}\n"
-                    f"[dim]{traceback.format_exc()}[/dim]"
-                ),
-                title="Error",
-                border_style="red",
-            )
-            self._update_section_if_changed("content", error_panel)
-            return ["content"]
+            # Use error suppression to prevent infinite loops
+            self._log_suppressed_error("mode_renderer", exc)
+            
+            # Show a minimal error panel only if we haven't exceeded error limits
+            error_count = self._error_counts.get("mode_renderer", 0)
+            if error_count < self._max_errors_per_section:
+                error_panel = Panel(
+                    Text.from_markup("[bold red]UI Error:[/bold red] Display temporarily unavailable"),
+                    title="Error",
+                    border_style="red",
+                )
+                self._update_section_if_changed("content", error_panel)
+                return ["content"]
+            else:
+                # Too many errors, just return empty to prevent infinite loops
+                return []
 
     def _should_refresh(self) -> bool:
         """Return True if a refresh has been requested."""
         return self._refresh_event.is_set()
+        
+    # ------------------------------------------------------------------- #
+    # Error handling and rate limiting
+    # ------------------------------------------------------------------- #
+    def _render_with_fallback(self, section_name: str, render_func, fallback_content: str = "Content unavailable") -> RenderableType:
+        """Render with error handling and fallback content."""
+        import time
+        
+        # Check if section has exceeded error threshold
+        error_count = self._error_counts.get(section_name, 0)
+        if error_count >= self._max_errors_per_section:
+            # Show fallback content instead of trying to render
+            return Panel(
+                Text(f"{fallback_content}\n\n[dim]Render errors: {error_count}[/dim]", 
+                     style="dim", justify="center"),
+                title=f"{section_name.title()} (Fallback)",
+                border_style="red",
+            )
+        
+        try:
+            return render_func()
+        except Exception as e:
+            # Increment error count
+            self._error_counts[section_name] = error_count + 1
+            
+            # Rate limit error logging (max once per 5 seconds per section)
+            now = time.time()
+            last_log = self._last_error_log_time.get(section_name, 0)
+            if now - last_log > 5.0:
+                # Log error details for debugging
+                if self._console:
+                    self._console.print(f"[red]Render error in {section_name}:[/red] {e}", file=sys.stderr)
+                else:
+                    print(f"Render error in {section_name}: {e}", file=sys.stderr)
+                self._last_error_log_time[section_name] = now
+            
+            # Return fallback panel
+            return Panel(
+                Text(f"{fallback_content}\n\n[dim]Error: {str(e)[:50]}{'...' if len(str(e)) > 50 else ''}[/dim]",
+                     style="dim", justify="center"),
+                title=f"{section_name.title()} (Error)",
+                border_style="yellow",
+            )
+    
+    def _reset_error_count(self, section_name: str) -> None:
+        """Reset error count for a section (called on successful render)."""
+        if section_name in self._error_counts:
+            del self._error_counts[section_name]
+            
+    def _log_suppressed_error(self, section_name: str, error: Exception) -> None:
+        """Log an error once and suppress subsequent identical errors."""
+        error_key = f"{section_name}:{type(error).__name__}:{str(error)}"
+        if error_key not in self._error_suppression:
+            self._error_suppression[error_key] = 0
+            if self._console:
+                self._console.print(f"[red]First occurrence of error in {section_name}:[/red] {error}", file=sys.stderr)
+            else:
+                print(f"First occurrence of error in {section_name}: {error}", file=sys.stderr)
+        self._error_suppression[error_key] += 1
         
     def _connect_input_events(self) -> None:
         """Connect RealTimeInputField events to the TUI's refresh and input system."""
@@ -655,31 +726,46 @@ class ModernTUI:
             return Text("[red]Layout not initialised[/red]")
 
         try:
-            # Render header with status information
-            self._render_hybrid_header()
+            # Render header with status information - wrapped with error handling
+            try:
+                self._render_hybrid_header()
+            except Exception as e:
+                self._log_suppressed_error("render_header", e)
             
-            # Render sidebar if not collapsed
+            # Render sidebar if not collapsed - wrapped with error handling
             if not self._sidebar_collapsed:
-                self._render_sidebar()
+                try:
+                    self._render_sidebar()
+                except Exception as e:
+                    self._log_suppressed_error("render_sidebar", e)
             
-            # Render main content area based on current page
-            self._render_main_content()
+            # Render main content area based on current page - wrapped with error handling
+            try:
+                self._render_main_content()
+            except Exception as e:
+                self._log_suppressed_error("render_content", e)
             
-            # Render footer with hotkeys and hints
-            self._render_hybrid_footer()
+            # Render footer with hotkeys and hints - wrapped with error handling
+            try:
+                self._render_hybrid_footer()
+            except Exception as e:
+                self._log_suppressed_error("render_footer", e)
             
-        except Exception as exc:  # pragma: no cover – defensive
-            # If something goes wrong we still want the UI to stay alive.
-            error_panel = Panel(
-                Text.from_markup(
-                    f"[bold red]Render error:[/bold red] {exc}\n"
-                    f"[dim]{traceback.format_exc()}[/dim]"
-                ),
-                title="Error",
-                border_style="red",
-            )
-            content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
-            content_layout.update(error_panel)
+        except Exception as exc:  # pragma: no cover – defensive fallback
+            # If something goes wrong at the top level, show a minimal error panel
+            # But use error suppression to prevent infinite loops
+            self._log_suppressed_error("render_toplevel", exc)
+            try:
+                error_panel = Panel(
+                    Text.from_markup("[bold red]UI Error:[/bold red] Interface temporarily unavailable"),
+                    title="Error",
+                    border_style="red",
+                )
+                content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
+                content_layout.update(error_panel)
+            except Exception:
+                # Even the error panel failed - just pass silently to prevent infinite loops
+                pass
         return self._layout
         
     # ----------------- Hybrid TUI Component Renderers ----------------- #
@@ -789,8 +875,13 @@ class ModernTUI:
                 title="🔄 Status Lane" if not self._sidebar_collapsed else "💬 AgentsMCP",
             )
         
-        header = self._get_cached_panel("header", generate_header)
-        self._update_section_if_changed("header", header)
+        # Use error handling for header rendering
+        header = self._render_with_fallback("header", generate_header, "Status information unavailable")
+        try:
+            self._update_section_if_changed("header", header)
+            self._reset_error_count("header")  # Reset error count on success
+        except Exception as e:
+            self._log_suppressed_error("header", e)
         
     def _render_sidebar(self) -> None:
         """Render the collapsible sidebar with pages."""
@@ -828,9 +919,11 @@ class ModernTUI:
                 width=25,
             )
         
-        sidebar = self._get_cached_panel("sidebar", generate_sidebar)
+        # Use error handling for sidebar rendering
+        sidebar = self._render_with_fallback("sidebar", generate_sidebar, "Sidebar unavailable")
         try:
             self._layout["sidebar"].update(sidebar)
+            self._reset_error_count("sidebar")  # Reset error count on success
         except KeyError:
             # Sidebar section doesn't exist (shouldn't happen since we check _sidebar_collapsed above)
             pass
@@ -918,8 +1011,13 @@ class ModernTUI:
                 title=focus_title,
             )
         
-        footer = self._get_cached_panel("footer", generate_footer)
-        self._update_section_if_changed("footer", footer)
+        # Use error handling for footer rendering
+        footer = self._render_with_fallback("footer", generate_footer, "Input hints unavailable")
+        try:
+            self._update_section_if_changed("footer", footer)
+            self._reset_error_count("footer")  # Reset error count on success
+        except Exception as e:
+            self._log_suppressed_error("footer", e)
         
     # ----------------- Page Content Renderers ----------------- #
     def _render_chat_content(self) -> None:
@@ -947,21 +1045,22 @@ class ModernTUI:
             
     def _render_scrollable_chat_history(self) -> None:
         """Render chat history with scroll support."""
-        try:
+        def render_enhanced_chat():
             if self.chat_history is not None:
                 # Get terminal height and calculate available space
                 terminal_height = self._console.size.height if self._console else 24
                 available_height = max(terminal_height - 9, 5)  # Reserve space for header/footer/input
                 
                 # Render with scroll offset (note: ChatHistoryDisplay doesn't support scroll_offset yet)
-                chat_display = self.chat_history.render_history(
-                    height=available_height
-                )
-                
-                content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
-                content_layout["chat_history"].update(chat_display)
+                return self.chat_history.render_history(height=available_height)
             else:
-                self._render_legacy_scrollable_chat()
+                raise Exception("Enhanced chat history not available")
+        
+        try:
+            chat_display = self._render_with_fallback("chat_history", render_enhanced_chat, "Enhanced chat unavailable")
+            content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
+            content_layout["chat_history"].update(chat_display)
+            self._reset_error_count("chat_history")  # Reset error count on success
         except Exception:
             self._render_legacy_scrollable_chat()
             
@@ -1017,8 +1116,13 @@ class ModernTUI:
             )
             
         content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
-        chat_panel = self._get_cached_panel("chat_body", generate_chat)
-        content_layout["chat_history"].update(chat_panel)
+        # Use error handling for legacy chat rendering
+        chat_panel = self._render_with_fallback("legacy_chat", generate_chat, "Chat history unavailable")
+        try:
+            content_layout["chat_history"].update(chat_panel)
+            self._reset_error_count("legacy_chat")  # Reset error count on success
+        except Exception as e:
+            self._log_suppressed_error("legacy_chat", e)
         
     def _render_static_input(self) -> None:
         """Render static input field fallback."""
