@@ -24,8 +24,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import sys
 import traceback
+from collections import deque
+from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from typing import Any, Optional, List, Dict
 
@@ -82,6 +86,94 @@ except Exception as e:  # pragma: no cover
 
 
 # --------------------------------------------------------------------------- #
+# Log integration for TUI
+# --------------------------------------------------------------------------- #
+@dataclass
+class LogEntry:
+    """A structured log entry for TUI display."""
+    timestamp: datetime
+    level: str
+    logger_name: str
+    message: str
+    module: Optional[str] = None
+    function: Optional[str] = None
+    line_number: Optional[int] = None
+    
+    def format_for_display(self) -> str:
+        """Format log entry for TUI display."""
+        time_str = self.timestamp.strftime("%H:%M:%S.%f")[:-3]  # microseconds to milliseconds
+        level_color = {
+            "DEBUG": "dim",
+            "INFO": "green", 
+            "WARNING": "yellow",
+            "ERROR": "red",
+            "CRITICAL": "bold red"
+        }.get(self.level, "white")
+        
+        # Truncate logger name for cleaner display
+        short_logger = self.logger_name.split('.')[-1] if '.' in self.logger_name else self.logger_name
+        
+        return f"[dim]{time_str}[/dim] [{level_color}]{self.level:5}[/{level_color}] [cyan]{short_logger}[/cyan]: {self.message}"
+
+
+class TUILogHandler(logging.Handler):
+    """Custom log handler that captures log messages for TUI display."""
+    
+    def __init__(self, max_entries: int = 200):
+        super().__init__()
+        self.log_entries: deque[LogEntry] = deque(maxlen=max_entries)
+        self._tui_instance = None
+        
+        # Filter to only show relevant loggers
+        self.relevant_loggers = {
+            "agentsmcp",
+            "agentsmcp.conversation.llm_client",
+            "agentsmcp.conversation.dispatcher", 
+            "agentsmcp.mcp.manager",
+            "agentsmcp.orchestration",
+            "agentsmcp.agents",
+            "uvicorn",
+            "fastapi"
+        }
+    
+    def set_tui_instance(self, tui_instance):
+        """Set reference to TUI instance for triggering refreshes."""
+        self._tui_instance = tui_instance
+        
+    def emit(self, record: logging.LogRecord) -> None:
+        """Handle a log record by storing it for TUI display."""
+        try:
+            # Filter to only relevant loggers to reduce noise
+            if not any(record.name.startswith(logger) for logger in self.relevant_loggers):
+                return
+                
+            # Skip overly verbose debug messages
+            if record.levelno == logging.DEBUG and len(record.getMessage()) > 200:
+                return
+                
+            entry = LogEntry(
+                timestamp=datetime.fromtimestamp(record.created),
+                level=record.levelname,
+                logger_name=record.name,
+                message=record.getMessage(),
+                module=getattr(record, 'module', None),
+                function=getattr(record, 'funcName', None),
+                line_number=getattr(record, 'lineno', None)
+            )
+            
+            self.log_entries.append(entry)
+            
+            # Trigger TUI refresh if we have a reference and it's showing logs
+            if (self._tui_instance and 
+                hasattr(self._tui_instance, '_current_page') and
+                self._tui_instance._current_page == SidebarPage.LOGS):
+                self._tui_instance.mark_dirty("content")
+                
+        except Exception:
+            # Don't let log handling break the application
+            pass
+
+# --------------------------------------------------------------------------- #
 # Public enums & constants
 # --------------------------------------------------------------------------- #
 class TUIMode(Enum):
@@ -106,6 +198,7 @@ class SidebarPage(Enum):
     COSTS = "costs"
     MCP = "mcp"
     DISCOVERY = "discovery"
+    LOGS = "logs"
     SETTINGS = "settings"
 
 
@@ -194,6 +287,10 @@ class ModernTUI:
         self.enhanced_input = None
         self.chat_history = None
         self.realtime_input = None
+        
+        # Log handler for TUI integration
+        self.log_handler = TUILogHandler(max_entries=200)
+        self.log_handler.set_tui_instance(self)
         
         # Keyboard input handler for per-key events
         self._keyboard_input = None
@@ -306,6 +403,10 @@ class ModernTUI:
         
         self._layout = self._build_layout()
         self._running = True
+        
+        # Install TUI log handler to capture log messages
+        root_logger = logging.getLogger()
+        root_logger.addHandler(self.log_handler)
 
         # Show a short welcome unless the caller asked to silence it.
         if not self._no_welcome:
@@ -387,6 +488,10 @@ class ModernTUI:
                 
                 # Stop SSE listener
                 await self._stop_sse_listener()
+                
+                # Remove TUI log handler
+                root_logger = logging.getLogger()
+                root_logger.removeHandler(self.log_handler)
 
         # Persist UI state for next launch.
         try:
@@ -1112,6 +1217,7 @@ class ModernTUI:
             SidebarPage.COSTS: self._render_costs_content,
             SidebarPage.MCP: self._render_mcp_content,
             SidebarPage.DISCOVERY: self._render_discovery_content,
+            SidebarPage.LOGS: self._render_logs_content,
             SidebarPage.SETTINGS: self._render_settings_content,
         }.get(self._current_page, self._render_chat_content)
         
@@ -1167,6 +1273,8 @@ class ModernTUI:
                     hotkeys.append("🤖: Agent management")
                 elif self._current_page == SidebarPage.MODELS:
                     hotkeys.append("🧠: Model config")
+                elif self._current_page == SidebarPage.LOGS:
+                    hotkeys.append("📋: Activity logs")
             
             # Web UI hint
             hotkeys.append("[dim]Web: /dashboard[/dim]")
@@ -1388,6 +1496,64 @@ class ModernTUI:
         discovery_panel = self._get_cached_panel("discovery_content", generate_discovery)
         content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
         content_layout.update(discovery_panel)
+        
+    def _render_logs_content(self) -> None:
+        """Render logs monitoring page."""
+        def generate_logs():
+            log_entries = list(self.log_handler.log_entries)
+            
+            if not log_entries:
+                return Panel(
+                    Text("[dim]No log entries yet...\n\nBackground activity will appear here when it happens:\n• LLM processing\n• Tool execution\n• API calls\n• System events[/dim]",
+                         justify="center"),
+                    title="📋 Activity Logs",
+                    border_style="cyan",
+                )
+            
+            # Get recent entries - show more in logs view (last 100)
+            recent_entries = log_entries[-100:] if len(log_entries) > 100 else log_entries
+            
+            # Reverse for newest first display
+            recent_entries = list(reversed(recent_entries))
+            
+            # Format log entries for display
+            log_lines = []
+            for entry in recent_entries:
+                log_lines.append(entry.format_for_display())
+            
+            # Add summary info at the top
+            level_counts = {}
+            for entry in log_entries:
+                level_counts[entry.level] = level_counts.get(entry.level, 0) + 1
+                
+            level_summary = " | ".join([f"{level}: {count}" for level, count in sorted(level_counts.items())])
+            
+            summary_info = [
+                f"[bold]Live Activity Monitor[/bold] [dim]({len(recent_entries)} newest shown)[/dim]",
+                f"[dim]Total: {len(log_entries)} | Levels: {level_summary}[/dim]",
+                "[dim]Sources: AgentsMCP components, LLM clients, orchestration[/dim]",
+                ""  # Empty line for spacing
+            ]
+            
+            full_content = "\n".join(summary_info + log_lines)
+            
+            # Adjust height based on terminal size for better scrolling
+            terminal_height = self._console.size.height if self._console else 24
+            content_height = terminal_height - 8  # Account for header/footer/panel borders
+            
+            return Panel(
+                Text.from_markup(full_content),
+                title="📋 Activity Logs (Live)",
+                subtitle="[dim]Newest first • Auto-refreshing[/dim]",
+                border_style="cyan",
+                title_align="left",
+                height=content_height
+            )
+            
+        # Don't cache logs content as it updates frequently
+        logs_panel = generate_logs()
+        content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
+        content_layout.update(logs_panel)
         
     def _render_settings_content(self) -> None:
         """Render settings page."""
@@ -2311,7 +2477,7 @@ Keyboard Shortcuts:
   Escape                      - Close command palette
 
 Sidebar Pages:
-  Chat, Jobs, Agents, Models, Providers, Costs, MCP, Discovery, Settings
+  Chat, Jobs, Agents, Models, Providers, Costs, MCP, Discovery, Logs, Settings
 
 Just type your message to chat with AI agents!
 All commands must start with "/" character.
