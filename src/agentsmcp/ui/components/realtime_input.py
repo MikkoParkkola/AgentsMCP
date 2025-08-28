@@ -128,6 +128,9 @@ class RealTimeInputField:
         """Render the input field as a Rich renderable."""
         if not Text or not Panel:
             return f"{self.prompt}{self.get_current_input()}"
+        
+        # FIXED: Ensure we're properly initialized before rendering
+        self._ensure_initialized()
             
         # Build display text with cursor
         display_lines = []
@@ -164,12 +167,15 @@ class RealTimeInputField:
                     content.append('\n')
                 content.append_text(line)
         
-        # Add prompt if specified
+        # Add prompt if specified - FIXED: Ensure prompt is properly shown
         if self.prompt:
             prompt_text = Text(self.prompt, style="bold cyan")
             full_content = Text()
             full_content.append_text(prompt_text)
-            full_content.append_text(content)
+            # FIXED: Add current input content after prompt
+            current_input = self.get_current_input()
+            if current_input or self.show_cursor:
+                full_content.append_text(content)
             content = full_content
             
         return Panel(

@@ -719,13 +719,9 @@ class ModernTUI:
             self.mark_dirty("footer")  # Refresh input area on submit
             
         async def on_input_change(text: str) -> None:
-            # Trigger visual updates for typing feedback, but only if text actually changed
-            if hasattr(self, '_last_input_text') and self._last_input_text != text:
-                self.mark_dirty("footer")
-                self._last_input_text = text
-            elif not hasattr(self, '_last_input_text'):
-                self._last_input_text = text
-                self.mark_dirty("footer")
+            # FIXED: Always trigger visual updates for typing feedback 
+            self.mark_dirty("footer")
+            self._last_input_text = text
             
         self.realtime_input.on_submit(on_input_submit)
         self.realtime_input.on_change(on_input_change)
@@ -1122,8 +1118,17 @@ class ModernTUI:
         content_renderer()
         
     def _render_hybrid_footer(self) -> None:
-        """Render footer with context-aware hotkeys and hints."""
+        """Render footer with context-aware hotkeys and real-time input."""
         def generate_footer():
+            # FIXED: If we're in chat mode and have realtime input, show it instead of static hints
+            if (not self._sidebar_collapsed or self._current_page == SidebarPage.CHAT) and self.realtime_input is not None:
+                try:
+                    # Use the realtime input field render directly for immediate input echo
+                    return self.realtime_input.render()
+                except Exception:
+                    # Fall back to static footer if realtime rendering fails
+                    pass
+            
             # Command palette mode
             if self._command_palette_active:
                 return Panel(
@@ -1201,32 +1206,20 @@ class ModernTUI:
         """Render chat interface with scrollable history."""
         content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
         
-        # Split content into chat history and input
-        content_layout.split(
-            Layout(name="chat_history", ratio=1),
-            Layout(name="chat_input", size=3),
-        )
-        
-        # Render scrollable chat history
-        self._render_scrollable_chat_history()
-        
-        # Render input field
-        if self.realtime_input is not None:
-            try:
-                input_panel = self.realtime_input.render()
-                content_layout["chat_input"].update(input_panel)
-            except Exception:
-                self._render_static_input()
-        else:
-            self._render_static_input()
+        # FIXED: Only show chat history, input is handled by footer
+        # Just update content with scrollable chat history
+        self._render_scrollable_chat_history(content_layout)
             
-    def _render_scrollable_chat_history(self) -> None:
+    def _render_scrollable_chat_history(self, content_layout=None) -> None:
         """Render chat history with scroll support."""
+        if content_layout is None:
+            content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
+            
         def render_enhanced_chat():
             if self.chat_history is not None:
                 # Get terminal height and calculate available space
                 terminal_height = self._console.size.height if self._console else 24
-                available_height = max(terminal_height - 9, 5)  # Reserve space for header/footer/input
+                available_height = max(terminal_height - 6, 5)  # Reserve space for header/footer
                 
                 # Render with scroll offset (note: ChatHistoryDisplay doesn't support scroll_offset yet)
                 return self.chat_history.render_history(height=available_height)
@@ -1235,14 +1228,17 @@ class ModernTUI:
         
         try:
             chat_display = self._render_with_fallback("chat_history", render_enhanced_chat, "Enhanced chat unavailable")
-            content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
-            content_layout["chat_history"].update(chat_display)
+            # FIXED: Update the main content layout directly, not a sub-layout
+            content_layout.update(chat_display)
             self._reset_error_count("chat_history")  # Reset error count on success
         except Exception:
-            self._render_legacy_scrollable_chat()
+            self._render_legacy_scrollable_chat(content_layout)
             
-    def _render_legacy_scrollable_chat(self) -> None:
+    def _render_legacy_scrollable_chat(self, content_layout=None) -> None:
         """Legacy scrollable chat history rendering."""
+        if content_layout is None:
+            content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
+            
         def generate_chat():
             try:
                 history = self._get_chat_history()
@@ -1292,24 +1288,15 @@ class ModernTUI:
                 title_align="left",
             )
             
-        content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
         # Use error handling for legacy chat rendering
         chat_panel = self._render_with_fallback("legacy_chat", generate_chat, "Chat history unavailable")
         try:
-            content_layout["chat_history"].update(chat_panel)
+            # FIXED: Update the main content layout directly
+            content_layout.update(chat_panel)
             self._reset_error_count("legacy_chat")  # Reset error count on success
         except Exception as e:
             self._log_suppressed_error("legacy_chat", e)
         
-    def _render_static_input(self) -> None:
-        """Render static input field fallback."""
-        input_panel = Panel(
-            Text("Type your message (Shift+Enter for newline) >>> ", style="bold yellow"),
-            height=3,
-            style="dim",
-        )
-        content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
-        content_layout["chat_input"].update(input_panel)
         
     def _render_jobs_content(self) -> None:
         """Render jobs monitoring page."""
@@ -1786,9 +1773,8 @@ class ModernTUI:
                 if self.realtime_input is not None:
                     handled = await self.realtime_input.handle_key(key_str)
                     if handled:
-                        # FIXED: Immediate refresh for all character input for better responsiveness
-                        if key_str not in ['up', 'down', 'left', 'right', 'home', 'end']:
-                            self.mark_dirty("footer")
+                        # FIXED: Always refresh footer for any key input to show typed characters
+                        self.mark_dirty("footer")
                         continue
                 
                 # Handle special keys that create complete input

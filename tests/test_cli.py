@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from click.testing import CliRunner
 
-from agentsmcp.cli import main, interactive, dashboard, costs, budget, optimize
+from agentsmcp.cli import main, run_interactive, monitor_dashboard, monitor_costs, monitor_budget, knowledge_optimize
 
 
 class TestCLIBasics:
