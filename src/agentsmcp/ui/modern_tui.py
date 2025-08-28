@@ -183,7 +183,7 @@ class ModernTUI:
         
         # Initialize render caching system
         self._render_cache = {}
-        self._cache_version = {"header": 0, "content": 0, "footer": 0, "chat_body": 0}
+        self._cache_version = {"header": 0, "content": 0, "footer": 0, "chat_body": 0, "sidebar": 0}
         
         # Enhanced chat components - initialized later after console is ready
         self.enhanced_input = None
@@ -217,12 +217,15 @@ class ModernTUI:
            * reacts to ``Ctrl‑C`` or ``/mode`` commands.
         """
         # ------------------------------------------------------------------- #
-        # 1️⃣  TTY detection – graceful degradation if we cannot render Rich UI.
+        # 1️⃣  Rich TUI with graceful degradation - removed restrictive TTY check
         # ------------------------------------------------------------------- #
-        if not (sys.stdin.isatty() and sys.stdout.isatty() and Console):
+        # Note: We allow Rich rendering in non-TTY environments (Docker, CI, IDEs, etc.)
+        # since Rich Console with force_terminal=True can handle these cases gracefully.
+        # Only fall back to basic CLI if Console import is not available.
+        if not Console:
             await self._fallback_cli()
             return
-
+            
         # ------------------------------------------------------------------- #
         # 2️⃣  Initialise Rich console & layout
         # ------------------------------------------------------------------- #
