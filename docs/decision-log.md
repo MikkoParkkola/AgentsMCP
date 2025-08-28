@@ -102,3 +102,20 @@ Template:
 - **Outcome:** Adopt two-phase UI/UX uplift: Phase A (stabilize + professional polish) and Phase B (delight + advanced), delivering feature parity across TUI and Web UI with professional tone and performance.
 - **Rationale:** Improve usability, completeness, performance, and visual consistency across entry points; address breakages and missing parity.
 - **Details:** See [docs/ui-ux-review.md](ui-ux-review.md).
+
+## [0002] - Define CODEOWNERS and maintainer list
+- **Date Added:** 2025-08-21
+- **Version:** Unreleased
+- **Branch:** main
+- **Submitter:** automated agent
+- **Decision Maker:** project maintainers
+- **Decision Date:** 2025-08-27
+- **Outcome:** Set repository CODEOWNERS to @MikkoParkkola as the current maintainer.
+- **Rationale:** Replace placeholder @REPO_OWNER with an actual maintainer to enable reviews, ownership, and CODEOWNERS enforcement.
+- **Details:** See update to `.github/CODEOWNERS` in this commit.
+### HITL Approval System (2025-08-27)
+
+- Decision: Implemented HITL with async in-memory queue and JWT-signed approval tokens. Default timeout denies actions. Web UI added under `/hitl/` with RBAC via env-based user lists. Minimal integration by decorating internal high-risk operations.
+- Rationale: Immediate security hardening without heavy infra dependencies; preserves performance for non-critical operations.
+- Alternatives: External queue (Redis), DB-backed audit, cookie sessions. Deferred to future phases to keep scope tight.
+- Impact: Critical ops now blocked pending human approval; audit trail created; non-critical ops unchanged.

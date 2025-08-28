@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HITL Approvals</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+      h1 { margin-bottom: 0.25rem; }
+      .meta { color: #666; margin-bottom: 1rem; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { border: 1px solid #ddd; padding: 8px; font-size: 14px; }
+      th { background-color: #f7f7f7; text-align: left; }
+      tr:nth-child(even) { background-color: #fafafa; }
+      .op { font-weight: 600; }
+      .btn { padding: 6px 10px; border: 1px solid #ccc; background: #fff; cursor: pointer; border-radius: 4px; margin-right: 6px; }
+      .btn.approve { border-color: #2e7d32; color: #2e7d32; }
+      .btn.reject { border-color: #c62828; color: #c62828; }
+      .success { color: #2e7d32; }
+      .error { color: #c62828; }
+      #status { margin: 0.5rem 0 1rem; }
+    </style>
+  </head>
+  <body>
+    <h1>HITL Approval Queue</h1>
+    <div class="meta">User: <span id="user-name">{{ user }}</span></div>
+    <div id="login">
+      <input id="login-user" placeholder="username" value="admin" />
+      <input id="login-pass" type="password" placeholder="password" value="admin" />
+      <button class="btn" onclick="doLogin()">Login</button>
+    </div>
+
+    <div id="status"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Operation</th>
+          <th>Risk</th>
+          <th>Requested By</th>
+          <th>Created</th>
+          <th>Priority</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="queue-body">
+        {% for r in pending %}
+        <tr data-id="{{ r.id }}">
+          <td><code>{{ r.id }}</code></td>
+          <td class="op">{{ r.operation }}</td>
+          <td>{{ r.risk_level }}</td>
+          <td>{{ r.requested_by }}</td>
+          <td>{{ r.created_at }}</td>
+          <td>{{ r.priority }}</td>
+          <td>
+            <button class="btn approve" onclick="decide('{{ r.id }}', 'approved')">Approve</button>
+            <button class="btn reject" onclick="decide('{{ r.id }}', 'rejected')">Reject</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <script>
+      async function fetchQueue() {
+        try {
+          const resp = await fetch('/hitl/queue', { headers: authHeaders() });
+          if (!resp.ok) throw new Error('Failed queue fetch');
+          const items = await resp.json();
+          const tbody = document.getElementById('queue-body');
+          tbody.innerHTML = '';
+          for (const r of items) {
+            const tr = document.createElement('tr');
+            tr.setAttribute('data-id', r.id);
+            tr.innerHTML = `
+              <td><code>${r.id}</code></td>
+              <td class="op">${r.operation}</td>
+              <td>${r.risk_level}</td>
+              <td>${r.requested_by}</td>
+              <td>${r.created_at}</td>
+              <td>${r.priority}</td>
+              <td>
+                <button class="btn approve" onclick="decide('${r.id}', 'approved')">Approve</button>
+                <button class="btn reject" onclick="decide('${r.id}', 'rejected')">Reject</button>
+              </td>`;
+            tbody.appendChild(tr);
+          }
+        } catch (e) {
+          setStatus('error', 'Failed to refresh queue');
+        }
+      }
+
+      function setStatus(kind, text) {
+        const el = document.getElementById('status');
+        el.className = kind;
+        el.textContent = text;
+      }
+
+      function authHeaders() {
+        const token = localStorage.getItem('access_token') || '';
+        return token ? { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+      }
+
+      async function decide(requestId, decision) {
+        const reason = decision === 'rejected' ? prompt('Reason for rejection?') || '' : '';
+        try {
+          const resp = await fetch('/hitl/decide', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ request_id: requestId, decision, reason })
+          });
+          if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || 'Decision failed');
+          }
+          setStatus('success', `${decision.toUpperCase()} ${requestId}`);
+          // Remove row
+          const row = document.querySelector(`tr[data-id="${requestId}"]`);
+          if (row) row.remove();
+        } catch (e) {
+          setStatus('error', e.message);
+        }
+      }
+
+      // Auto-refresh queue every 5s
+      setInterval(fetchQueue, 5000);
+
+      async function doLogin() {
+        const u = document.getElementById('login-user').value;
+        const p = document.getElementById('login-pass').value;
+        try {
+          const resp = await fetch('/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: u, password: p })
+          });
+          if (!resp.ok) throw new Error('Login failed');
+          const data = await resp.json();
+          localStorage.setItem('access_token', data.access_token);
+          document.getElementById('user-name').textContent = u;
+          document.getElementById('login').style.display = 'none';
+          fetchQueue();
+        } catch (e) {
+          setStatus('error', e.message);
+        }
+      }
+    </script>
+  </body>
+  </html>

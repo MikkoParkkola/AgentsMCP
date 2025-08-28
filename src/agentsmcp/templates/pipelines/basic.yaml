@@ -1,0 +1,65 @@
+# AgentsMCP Basic Pipeline Template
+name: "{{ repository | default('basic') }}-pipeline"
+description: >
+  A minimal, production-ready pipeline template that demonstrates the essential
+  structure and can be easily customized for specific needs.
+version: "1.0.0"
+
+defaults:
+  timeout_seconds: 300
+  retries: 1
+  on_failure: retry
+
+stages:
+  - name: build
+    description: Build the project
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: build_project
+        payload:
+          build_command: "{{ build_command | default('make build') }}"
+          source_dir: "{{ source_dir | default('.') }}"
+        timeout_seconds: 600
+        retries: 1
+
+  - name: test
+    description: Run tests
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_tests
+        payload:
+          test_command: "{{ test_command | default('make test') }}"
+          test_dir: "{{ test_dir | default('tests') }}"
+        timeout_seconds: 600
+        retries: 2
+    depends_on: ["build"]
+
+  - name: deploy
+    description: Deploy the project (if enabled)
+    parallel: false
+    agents:
+      - type: codex
+        model: codex
+        task: deploy_project
+        payload:
+          deploy_command: "{{ deploy_command | default('make deploy') }}"
+          environment: "{{ environment | default('staging') }}"
+          deploy_enabled: "{{ deploy_enabled | default(false) }}"
+        timeout_seconds: 900
+        retries: 1
+        on_failure: skip
+    depends_on: ["test"]
+
+notifications:
+  on_success:
+    - type: slack
+      channel: "#ci-success"
+      message: "✅ Basic pipeline for {{ repository | default('project') }} completed successfully"
+  on_failure:
+    - type: slack
+      channel: "#ci-failure"
+      message: "❌ Basic pipeline for {{ repository | default('project') }} failed"

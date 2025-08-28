@@ -1,0 +1,178 @@
+# AgentsMCP Data Science Pipeline Template
+name: "{{ repository | default('data-science') }}-pipeline"
+description: >
+  Data science pipeline with notebook validation, model training, evaluation,
+  artifact management, and optional deployment of inference services.
+version: "1.0.0"
+
+defaults:
+  timeout_seconds: 600
+  retries: 1
+  on_failure: retry
+
+stages:
+  - name: setup
+    description: Setup Python environment for data science
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: setup_python
+        payload:
+          python_version: "{{ python_version | default('3.11') }}"
+        timeout_seconds: 300
+      - type: codex
+        model: codex
+        task: install_requirements
+        payload:
+          requirements_file: "requirements.txt"
+          extra_requirements: "requirements-ml.txt"
+        timeout_seconds: 900
+        retries: 2
+
+  - name: notebook-validation
+    description: Validate and test Jupyter notebooks
+    parallel: true
+    agents:
+      - type: claude
+        model: claude-3.5-sonnet
+        task: validate_notebooks
+        payload:
+          notebook_dir: "notebooks"
+          exclude_patterns: ["*checkpoint*", "*draft*"]
+        timeout_seconds: 900
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_notebook_tests
+        payload:
+          test_notebooks: "tests/test_notebooks"
+        timeout_seconds: 600
+
+  - name: data-validation
+    description: Validate input data quality and schema
+    parallel: false
+    agents:
+      - type: claude
+        model: claude-3.5-sonnet
+        task: validate_data_schema
+        payload:
+          data_path: "{{ data_path | default('data/') }}"
+          schema_file: "{{ schema_file | default('data/schema.json') }}"
+        timeout_seconds: 600
+
+  - name: unit-tests
+    description: Run unit tests for data processing code
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_pytest
+        payload:
+          test_path: "tests"
+          coverage: true
+          coverage_min: "{{ coverage_min | default('70') }}"
+        timeout_seconds: 900
+        retries: 1
+
+  - name: train-model
+    description: Train machine learning model
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: train_model
+        payload:
+          training_script: "{{ training_script | default('scripts/train.py') }}"
+          config_file: "{{ config_file | default('config/model_config.yaml') }}"
+          output_path: "{{ model_output_path | default('models/') }}"
+          model_name: "{{ model_name | default('model') }}"
+        timeout_seconds: 3600
+        retries: 1
+
+  - name: evaluate-model
+    description: Evaluate trained model performance
+    parallel: false
+    agents:
+      - type: claude
+        model: claude-3.5-sonnet
+        task: evaluate_model
+        payload:
+          evaluation_script: "{{ evaluation_script | default('scripts/evaluate.py') }}"
+          model_path: "{{ model_output_path | default('models/') }}/{{ model_name | default('model') }}.pkl"
+          test_data_path: "{{ test_data_path | default('data/test/') }}"
+          metrics_output: "reports/metrics.json"
+          min_accuracy: "{{ min_accuracy | default('0.8') }}"
+        timeout_seconds: 1800
+    depends_on: ["train-model"]
+
+  - name: model-validation
+    description: Validate model meets acceptance criteria
+    parallel: false
+    agents:
+      - type: claude
+        model: claude-3.5-sonnet
+        task: validate_model_performance
+        payload:
+          metrics_file: "reports/metrics.json"
+          acceptance_criteria: "{{ acceptance_criteria | default('config/acceptance.yaml') }}"
+        timeout_seconds: 300
+    depends_on: ["evaluate-model"]
+
+  - name: register-model
+    description: Register model in model registry
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: register_model
+        payload:
+          model_path: "{{ model_output_path | default('models/') }}/{{ model_name | default('model') }}.pkl"
+          model_name: "{{ model_name | default('model') }}"
+          version: "{{ model_version | default('1.0.0') }}"
+          registry_url: "{{ registry_url | default('') }}"
+          metadata_file: "reports/metrics.json"
+        timeout_seconds: 600
+        retries: 2
+    depends_on: ["model-validation"]
+
+  - name: build-inference-image
+    description: Build Docker image for model inference
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: docker_build
+        payload:
+          context: "."
+          dockerfile: "Dockerfile.inference"
+          image_name: "{{ inference_image_name | default('model-inference') }}"
+          image_tag: "{{ model_version | default('1.0.0') }}"
+        timeout_seconds: 1200
+        retries: 1
+    depends_on: ["register-model"]
+
+  - name: deploy-inference-service
+    description: Deploy inference service (if enabled)
+    parallel: false
+    agents:
+      - type: claude
+        model: claude-3.5-sonnet
+        task: kubernetes_deploy
+        payload:
+          namespace: "{{ inference_namespace | default('ml-prod') }}"
+          manifest_dir: "k8s/inference"
+          image_name: "{{ inference_image_name | default('model-inference') }}"
+          image_tag: "{{ model_version | default('1.0.0') }}"
+        timeout_seconds: 900
+        retries: 2
+    depends_on: ["build-inference-image"]
+
+notifications:
+  on_success:
+    - type: slack
+      channel: "#ml-ci-success"
+      message: "✅ ML model {{ model_name | default('model') }} v{{ model_version | default('1.0.0') }} deployed successfully"
+  on_failure:
+    - type: slack
+      channel: "#ml-ci-failure"
+      message: "❌ ML pipeline for {{ model_name | default('model') }} failed"

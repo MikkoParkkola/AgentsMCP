@@ -18,9 +18,10 @@ import asyncio
 import sys
 import time
 from typing import Dict, List, Any, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 import logging
+from zoneinfo import ZoneInfo
 
 from .theme_manager import ThemeManager
 from .ui_components import UIComponents
@@ -62,8 +63,11 @@ class StatusDashboard:
         
         # Dashboard state
         self.is_running = False
-        self.last_update = datetime.now()
+        self.last_update = self._get_local_time()
         self.update_count = 0
+        
+        # Timezone handling
+        self._setup_timezone()
         
         # Metrics history
         self.metrics_history: Dict[str, List[MetricPoint]] = {
@@ -83,6 +87,37 @@ class StatusDashboard:
             'last_update_time': 0.0
         }
     
+    def _setup_timezone(self):
+        """Setup timezone handling for the dashboard"""
+        try:
+            # Get system timezone
+            self.local_timezone = ZoneInfo(time.tzname[0] if time.tzname[0] else 'UTC')
+        except Exception:
+            self.local_timezone = None
+    
+    def _get_local_time(self) -> datetime:
+        """Get current time in local timezone"""
+        try:
+            if self.local_timezone:
+                return datetime.now(self.local_timezone)
+            return datetime.now()
+        except Exception:
+            return datetime.now()
+    
+    def _format_timestamp(self, dt: datetime) -> str:
+        """Format timestamp in local timezone"""
+        try:
+            if dt.tzinfo is None and self.local_timezone:
+                # If naive datetime, assume it's local
+                dt = dt.replace(tzinfo=self.local_timezone)
+            
+            # Convert to local timezone for display
+            local_dt = dt.astimezone()
+            return local_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            # Fallback to simple formatting
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+    
     async def start_dashboard(self) -> Dict[str, Any]:
         """
         Start the interactive dashboard
@@ -93,7 +128,7 @@ class StatusDashboard:
         logger.info("🚀 Starting Revolutionary Status Dashboard")
         
         self.is_running = True
-        self.last_update = datetime.now()
+        self.last_update = self._get_local_time()
         
         # Clear screen and hide cursor using precise ANSI control
         sys.stdout.write(self.ui.clear_screen())
@@ -154,7 +189,7 @@ class StatusDashboard:
     async def _update_dashboard(self):
         """Update dashboard content in place without scrolling"""
         self.update_count += 1
-        current_time = datetime.now()
+        current_time = self._get_local_time()
         
         # Get system status
         try:
@@ -235,7 +270,7 @@ class StatusDashboard:
     
     def _build_header_section(self, system_status: Dict[str, Any]) -> str:
         """Build dashboard header with title and key status"""
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        current_time = self._get_local_time().strftime("%Y-%m-%d %H:%M:%S")
         
         # Main title
         title = self.ui.heading("🎼 AgentsMCP Orchestration Dashboard", level=1, centered=True)
@@ -473,7 +508,7 @@ class StatusDashboard:
     
     async def _update_metrics_history(self, system_status: Dict[str, Any]):
         """Update metrics history for trend analysis"""
-        current_time = datetime.now()
+        current_time = self._get_local_time()
         
         # Extract metrics from system status
         performance_metrics = system_status.get("performance_metrics", {})
@@ -562,7 +597,7 @@ class StatusDashboard:
             system_status = {"error": str(e)}
         
         return {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": self._get_local_time().isoformat(),
             "update_count": self.update_count,
             "system_status": system_status,
             "metrics_history_length": {

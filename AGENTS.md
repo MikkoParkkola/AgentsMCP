@@ -7,6 +7,8 @@
 - Default to the **best implementable solution**; only ask if uncertainty >10% or Definition of Done (DoD) change required.
 - Deliver **production-ready solutions in one shot**, with strong security, performance, and maintainability.
 
+Note: For environment-tailored guidance (models, routing, sandbox/approvals) on this machine, see `AGENTS_LOCAL.md`.
+
 ---
 
 ## Delegation Strategy (MCP-First Approach)

@@ -1,0 +1,22 @@
+{
+  "module": "auth.validate_token",
+  "tests": [
+    {
+      "name": "valid_token_minimal",
+      "input": {"jwt": "<valid>", "aud": "app"},
+      "expect": {"ok": true, "sub": "user-123"}
+    },
+    {
+      "name": "expired_token",
+      "input": {"jwt": "<expired>", "aud": "app"},
+      "expect_error": "ExpiredToken"
+    },
+    {
+      "name": "wrong_audience",
+      "input": {"jwt": "<valid>", "aud": "other"},
+      "expect_error": "WrongAudience"
+    }
+  ],
+  "notes": "Golden tests are authoritative. QA owns changes."
+}
+

@@ -4,7 +4,7 @@ This repository documents a CLI-driven MCP agent system with an **extensible ret
 
 ## Architecture Overview
 - **CLI-first interface** for invoking agents.
-- **Extensible RAG layer** to plug in various data sources for context.
+- **Optional RAG layer** to plug in various data sources for context (disabled by default to avoid stale information issues).
 - **Configurable runtime** to adapt transports, storage, and tools via configuration files.
 - **Multi-agent workflow** enabling specialized agents for linting, testing, deployment, and other lifecycle tasks.
 
@@ -14,8 +14,9 @@ This repository documents a CLI-driven MCP agent system with an **extensible ret
 ### Phase 1 – Core runtime & CLI *(in progress)*
 - Introduce a CLI skeleton to orchestrate agents.
 - Ship configuration examples for transports and tools.
-### Phase 2 – Retrieval-augmented generation (RAG)
-- Implement a pluggable RAG module with at least one data-source plugin.
+### Phase 2 – Optional Retrieval-augmented generation (RAG)
+- Implement an OPTIONAL pluggable RAG module (disabled by default).
+- RAG can be enabled via configuration when fresh, up-to-date context is guaranteed.
 - Add unit and integration tests to meet ≥80% coverage.
 ### Phase 3 – Multi-agent workflow
 - Demonstrate a multi-agent CI pipeline driven via the new CLI.
@@ -24,17 +25,24 @@ This repository documents a CLI-driven MCP agent system with an **extensible ret
 - Document deployment options and external data-source integrations.
 - Expand docs, diagrams, and ADRs for maintainability.
 
-## Backlog
-- Replace placeholder CODEOWNERS with real maintainers.
-- Complete decision-log entry 0007.
-- Scaffold CLI for agent orchestration.
-- Implement minimal pluggable RAG module.
-- Provide configuration examples.
-- Demonstrate multi-agent CI pipeline.
-- Define standard agent roles and contracts.
-- Expand test coverage to ≥80%.
-- Document external data-source integration.
-- Create runtime setup guide.
+## Backlog (Updated with AGENTS.md v2 Progress)
+### Completed (P1-P5) ✅
+- ✅ P1: Role-Based Agent System with 7 specialized roles
+- ✅ P2: Versioned Envelopes (TaskEnvelopeV1, ResultEnvelopeV1)
+- ✅ P3: Two-Tier Architecture (MainCoordinator + stateless roles)
+- ✅ P4: Interface Control Documents + Golden Tests
+- ✅ P5: CLI Integration with roles command group
+
+### In Progress & Remaining
+- P6: Configuration Integration - Extend config system for role preferences
+- P7: Optional RAG Pipeline - Make RAG opt-in to avoid stale data issues
+- P8: Multi-Agent CI Pipeline - Demonstrate coordinated CI/CD workflows
+- P9: Web UI Integration - Connect dashboard to role-based system
+- P10: Testing & Coverage - Achieve ≥80% coverage with integration tests
+- Replace placeholder CODEOWNERS with real maintainers
+- Complete decision-log entry 0007
+- Document deployment patterns and scaling strategies
+- Create comprehensive runtime setup guide
 
 ## MCP Client Configuration
 
@@ -48,7 +56,10 @@ transport:
   type: http
 storage:
   type: memory
+# RAG is OPTIONAL - disabled by default to avoid stale context issues
+# Only enable when you can guarantee fresh, up-to-date data sources
 rag:
+  enabled: false  # Set to true only when needed
   embedding_model: sentence-transformers/all-MiniLM-L6-v2
   chunk_size: 512
   chunk_overlap: 50

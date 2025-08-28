@@ -13,6 +13,7 @@ python3 -m pip show pyinstaller >/dev/null 2>&1 || python3 -m pip install pyinst
 echo "==> Building agentsmcp (arm64)"
 # Disable discovery components during build to avoid noisy side‑effects
 export AGENTSMCP_DISABLE_DISCOVERY=1
+# Ensure we build in single-file mode and output to dist/
 pyinstaller --clean agentsmcp.spec
 
 echo "==> Done. Binary at: dist/agentsmcp"

@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from .registry import list_entries, Entry
 from .announcer import Agent, MDNSSocketManager
 from ..config import Config
-from ..security import SecurityManager
+from agentsmcp.security import SecurityManager
 from .exceptions import DiscoveryProtocolError, NetworkError, ServiceUnavailableError
 from .circuit_breaker import CircuitBreaker
 from .retry import exponential_backoff

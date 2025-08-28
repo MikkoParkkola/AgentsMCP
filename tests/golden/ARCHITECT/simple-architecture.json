@@ -1,0 +1,23 @@
+{
+  "task": {
+    "id": "arch-simple-001",
+    "objective": "Design a minimal architecture for a CRUD REST API",
+    "bounded_context": "single-node web application",
+    "inputs": {
+      "service_type": "REST-api",
+      "scale": "single-node",
+      "requirements": ["user auth", "data persistence", "RESTful endpoints"]
+    },
+    "acceptance_criteria": [
+      "Include database layer",
+      "Define API structure", 
+      "Address security considerations"
+    ]
+  },
+  "expected": {
+    "role": "ARCHITECT",
+    "status": ["SUCCESS"],
+    "decisions": ["/.*architecture.*$/", "/.*interface.*$/"],
+    "model_assigned": "/.*codex.*$/"
+  }
+}

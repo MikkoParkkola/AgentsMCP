@@ -20,11 +20,13 @@ import os
 import readline
 import rlcompleter
 from typing import Dict, List, Any, Optional, Callable, Tuple, Union
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 import json
 import shlex
 import logging
+from zoneinfo import ZoneInfo
+import time
 
 from .theme_manager import ThemeManager
 from .ui_components import UIComponents
@@ -551,9 +553,9 @@ class CommandInterface:
                         continue
                     
                     # Process command (conversational or direct)
-                    start_time = datetime.now()
+                    start_time = self._get_local_time()
                     success, result = await self._process_input(command_line)
-                    execution_time = (datetime.now() - start_time).total_seconds()
+                    execution_time = (self._get_local_time() - start_time).total_seconds()
                     
                     # Add to history
                     history_entry = CommandHistory(
@@ -661,26 +663,287 @@ job monitoring, and system health checks."""
             return self._generate_prompt()
 
     def _get_input_with_autocomplete(self, prompt: str) -> str:
-        """Get input with command autocomplete support"""
+        """Get multi-line input with proper paste support for iTerm2"""
+        try:
+            import asyncio
+            # Check if we're in an existing event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # If we're in a running loop, use the iTerm2 paste-optimized approach
+                return self._get_input_with_iterm2_paste_support(prompt)
+            except RuntimeError:
+                # No running loop, use the enhanced approach
+                return self._get_input_with_iterm2_paste_support(prompt)
+            
+        except Exception as e:
+            logger.warning(f"Error in multi-line input: {e}, falling back to simple input")
+            return input(prompt)
+
+    def _get_input_with_iterm2_paste_support(self, prompt: str) -> str:
+        """Multi-line input with iTerm2 bracketed paste mode support"""
+        import sys
+        import select
+        
+        # Try bracketed paste mode first
+        try:
+            # Enable bracketed paste mode for iTerm2
+            sys.stdout.write('\033[?2004h')  # Enable bracketed paste
+            sys.stdout.write(prompt)
+            sys.stdout.flush()
+            
+            # Wait for input with reasonable timeout
+            ready, _, _ = select.select([sys.stdin], [], [], 30)
+            if not ready:
+                return ""  # Timeout
+            
+            # Read first line/chunk
+            first_input = sys.stdin.readline()
+            if not first_input:
+                return ""
+            
+            # Check if this is bracketed paste
+            if '\033[200~' in first_input:
+                # Bracketed paste detected - read until end marker
+                return self._handle_bracketed_paste(first_input)
+            
+            # Not bracketed paste - check for multi-line paste the old way
+            first_line = first_input.rstrip('\n\r')
+            
+            # Quick check for more input (fallback paste detection)
+            more_ready, _, _ = select.select([sys.stdin], [], [], 0.2)
+            if more_ready:
+                return self._handle_paste_input_continuation(first_line)
+            else:
+                # Single line or interactive input
+                if first_line and not self._looks_incomplete(first_line):
+                    return first_line
+                else:
+                    return self._handle_interactive_input_continuation(first_line)
+                    
+        except (OSError, select.error):
+            # select() not available - fall back to simple input
+            return input().strip()
+        except (EOFError, KeyboardInterrupt):
+            return ""
+        finally:
+            # Always disable bracketed paste mode
+            try:
+                sys.stdout.write('\033[?2004l')
+                sys.stdout.flush()
+            except:
+                pass
+    
+    def _handle_bracketed_paste(self, first_input: str) -> str:
+        """Handle bracketed paste mode (reliable iTerm2 paste detection)"""
+        import sys
+        
+        # Remove the start marker if present
+        content = first_input.replace('\033[200~', '')
+        lines = []
+        
+        # Continue reading until we find the end marker
+        while True:
+            line = sys.stdin.readline()
+            if not line:
+                break
+            
+            # Check for end marker
+            if '\033[201~' in line:
+                # Remove end marker and add final content
+                final_content = line.replace('\033[201~', '')
+                if final_content.strip():
+                    lines.append(final_content.rstrip('\n\r'))
+                break
+            else:
+                lines.append(line.rstrip('\n\r'))
+                
+            # Safety check for very large pastes
+            if len(lines) > 1000:
+                print(self.theme_manager.colorize("⚠️  Large paste truncated at 1000 lines", 'warning'))
+                break
+        
+        # Add the initial content if it had any
+        if content.strip():
+            all_lines = [content.rstrip('\n\r')] + lines
+        else:
+            all_lines = lines
+            
+        result = '\n'.join(all_lines)
+        if len(all_lines) > 1:
+            print(self.theme_manager.colorize(f"✅ Bracketed paste: {len(all_lines)} lines", 'success'))
+        
+        return result
+    
+    def _handle_paste_input_continuation(self, first_line: str) -> str:
+        """Handle pasted input by reading all remaining lines quickly"""
+        import sys
+        import select
+        
+        lines = [first_line] if first_line else []
+        timeout = 0.3  # Longer timeout for large content
+        
+        try:
+            while True:
+                # Check if more input is available with generous timeout
+                ready, _, _ = select.select([sys.stdin], [], [], timeout)
+                if not ready:
+                    break  # No more input
+                
+                line = sys.stdin.readline()
+                if not line:
+                    break
+                    
+                lines.append(line.rstrip('\n\r'))
+                
+                # Reduce timeout for subsequent lines to detect end of paste faster
+                timeout = max(0.05, timeout * 0.8)
+                
+                # Safety check for very large pastes
+                if len(lines) > 1000:
+                    print(self.theme_manager.colorize("⚠️  Large paste truncated at 1000 lines", 'warning'))
+                    break
+                    
+        except (EOFError, KeyboardInterrupt):
+            pass
+        
+        result = '\n'.join(lines)
+        if len(lines) > 1:
+            print(self.theme_manager.colorize(f"✅ Multi-line paste: {len(lines)} lines", 'success'))
+        
+        return result
+    
+    def _handle_interactive_input_continuation(self, first_line: str) -> str:
+        """Handle interactive typing that started with first_line"""
+        import sys
+        
+        # If first line looks complete, return it
+        if first_line and not self._looks_incomplete(first_line):
+            return first_line
+        
+        # Otherwise, continue getting input interactively
+        lines = [first_line] if first_line else []
+        print(self.theme_manager.colorize("💡 Multi-line mode: Enter twice or empty line to finish", 'info'))
+        
+        empty_count = 0
+        while True:
+            try:
+                line = input("│ " if lines else "▶ ")
+                
+                if not line.strip():
+                    empty_count += 1
+                    if empty_count >= 2 or (len(lines) > 0 and empty_count >= 1):
+                        break
+                else:
+                    empty_count = 0
+                    lines.append(line)
+                    
+            except (EOFError, KeyboardInterrupt):
+                break
+        
+        return '\n'.join(lines)
+    
+    
+    def _looks_incomplete(self, line: str) -> bool:
+        """Check if a line looks incomplete and needs continuation"""
+        line = line.strip()
+        incomplete_endings = [':', '\\', ',', '(', '[', '{', 'and', 'or', 'if']
+        return any(line.endswith(ending) for ending in incomplete_endings)
+    
+
+    def _get_input_with_readline_fallback(self, prompt: str) -> str:
+        """Fallback using readline with enhanced multi-line support"""
+        try:
+            import readline
+            import select
+            import sys
+            
+            print(self.theme_manager.colorize("💡 Multi-line mode: \\ for line continuation | Enter to send", 'info'))
+            
+            # Check for immediate input (paste detection)
+            ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+            if ready:
+                # Paste detected - handle specially
+                return self._handle_paste_with_readline(prompt)
+            
+            # Regular interactive input
+            lines = []
+            sys.stdout.write(prompt)
+            sys.stdout.flush()
+            
+            while True:
+                try:
+                    if lines:
+                        line = input('│ ')
+                    else:
+                        line = input()
+                    
+                    # Check for line continuation
+                    if line.endswith('\\'):
+                        lines.append(line[:-1])  # Remove the backslash
+                        continue
+                    
+                    lines.append(line)
+                    
+                    # If empty line and we have content, finish
+                    if not line and len(lines) > 1:
+                        lines.pop()  # Remove the empty line
+                        break
+                    
+                    # If single line, finish immediately  
+                    if len(lines) == 1 and line.strip():
+                        break
+                        
+                except (EOFError, KeyboardInterrupt):
+                    break
+            
+            return '\n'.join(lines)
+            
+        except Exception:
+            return input(prompt)
+    
+    def _handle_paste_with_readline(self, prompt: str) -> str:
+        """Handle paste detection with readline"""
+        import sys
+        import select
+        
+        print(self.theme_manager.colorize("📋 Paste detected with readline", 'info'))
+        
+        lines = []
+        try:
+            while True:
+                ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if not ready:
+                    break
+                
+                line = sys.stdin.readline()
+                if not line:
+                    break
+                    
+                lines.append(line.rstrip('\n\r'))
+        except:
+            pass
+        
+        return '\n'.join(lines)
+
+    def _get_input_with_raw_terminal(self, prompt: str) -> str:
+        """Raw terminal input method (deprecated - now redirects to iTerm2 paste support)"""
+        return self._get_input_with_iterm2_paste_support(prompt)
+    
+    def _get_input_with_readline_fallback(self, prompt: str) -> str:
+        """Enhanced readline fallback with multi-line support"""
         try:
             import readline
             
             # Set up command completion
             def complete_command(text, state):
                 """Tab completion function for commands"""
-                # Only complete if text starts with '/'
                 if not text.startswith('/'):
                     return None
                 
-                # Remove '/' for matching
                 command_text = text[1:].lower()
-                
-                # Get all command names
                 command_names = sorted([f"/{cmd}" for cmd in self.commands.keys()])
                 
-                # Filter commands that start with the text
                 if command_text == "":
-                    # If just "/", show all commands
                     matches = command_names
                 else:
                     matches = [cmd for cmd in command_names if cmd[1:].lower().startswith(command_text)]
@@ -689,19 +952,239 @@ job monitoring, and system health checks."""
                     return matches[state]
                 return None
             
-            # Set up readline
             readline.set_completer(complete_command)
             readline.parse_and_bind("tab: complete")
             
-            # Get input
-            return input(prompt)
+            # Multi-line input handling with proper paste support
+            print(self.theme_manager.colorize("💡 Multi-line mode: Press Enter twice to send, paste works automatically", 'info'))
+            
+            lines = []
+            empty_line_count = 0
+            first_prompt = prompt
+            continuation_prompt = "│ "
+            
+            while True:
+                current_prompt = first_prompt if not lines else continuation_prompt
+                try:
+                    # Use timeout to detect pasted content
+                    import sys
+                    import select
+                    
+                    # Show prompt
+                    sys.stdout.write(current_prompt)
+                    sys.stdout.flush()
+                    
+                    # Check if there's immediate input available (indicates paste)
+                    has_immediate_input = select.select([sys.stdin], [], [], 0.01)[0]
+                    
+                    if has_immediate_input:
+                        # Likely pasted content - read all available input
+                        pasted_lines = []
+                        while select.select([sys.stdin], [], [], 0.01)[0]:
+                            line = sys.stdin.readline().rstrip('\n\r')
+                            pasted_lines.append(line)
+                            # Prevent infinite loop
+                            if len(pasted_lines) > 1000:
+                                break
+                        
+                        if pasted_lines:
+                            # Clear the prompt line and show what was pasted
+                            sys.stdout.write('\r\033[K')  # Clear current line
+                            print(f"📋 Pasted {len(pasted_lines)} lines:")
+                            for i, pasted_line in enumerate(pasted_lines):
+                                prefix = prompt if i == 0 else "│ "
+                                print(f"{prefix}{pasted_line}")
+                            
+                            lines.extend(pasted_lines)
+                            return '\n'.join(lines)
+                    
+                    # Normal single-line input
+                    line = input()
+                    
+                    if not line.strip():
+                        empty_line_count += 1
+                        if empty_line_count >= 2 or (empty_line_count >= 1 and lines):
+                            # Two empty lines or one empty line after content = send
+                            break
+                        else:
+                            lines.append('')  # Preserve empty lines in content
+                    else:
+                        empty_line_count = 0
+                        lines.append(line)
+                        
+                except EOFError:
+                    break
+                except (ImportError, OSError):
+                    # Fallback to simple line-by-line if select() not available
+                    line = input()
+                    if not line and lines:
+                        break
+                    lines.append(line)
+            
+            return '\n'.join(lines) if lines else ''
             
         except ImportError:
-            # Fallback to regular input if readline not available
             return input(prompt)
         except Exception:
-            # Fallback on any error
             return input(prompt)
+    
+    
+    def _get_input_with_iterm2_fallback(self, prompt: str) -> str:
+        """Enhanced fallback for iTerm2 with proper multi-line paste detection"""
+        import sys
+        import select
+        import termios
+        import tty
+        
+        print(self.theme_manager.colorize("📋 iTerm2 Multi-line: Paste or type | Shift+Enter: newline | Enter: send", 'info'))
+        sys.stdout.write(prompt)
+        sys.stdout.flush()
+        
+        # Try to detect paste vs typing using select()
+        try:
+            # Check if there's immediate input available (indicates paste)
+            ready, _, _ = select.select([sys.stdin], [], [], 0.1)
+            is_likely_paste = bool(ready)
+            
+            if is_likely_paste:
+                # Handle paste mode - read all available input at once
+                return self._handle_paste_mode(prompt)
+            else:
+                # Handle interactive typing mode  
+                return self._handle_interactive_typing(prompt)
+                
+        except (OSError, select.error):
+            # Fallback to simple line-by-line if select fails
+            return self._handle_simple_multiline(prompt)
+    
+    def _handle_paste_mode(self, prompt: str) -> str:
+        """Handle pasted multi-line content"""
+        import sys
+        
+        print(self.theme_manager.colorize("📋 Paste detected - reading all content...", 'info'))
+        
+        # Read all available input
+        content_lines = []
+        try:
+            while True:
+                # Use a short timeout to detect end of paste
+                import select
+                ready, _, _ = select.select([sys.stdin], [], [], 0.2)
+                if not ready:
+                    break  # No more input available
+                    
+                line = sys.stdin.readline()
+                if not line:
+                    break
+                    
+                content_lines.append(line.rstrip('\n\r'))
+                
+        except (EOFError, KeyboardInterrupt):
+            pass
+            
+        result = '\n'.join(content_lines)
+        print(self.theme_manager.colorize(f"✅ Captured {len(content_lines)} lines of pasted content", 'success'))
+        return result
+    
+    def _handle_interactive_typing(self, prompt: str) -> str:
+        """Handle interactive typing with Shift+Enter support"""
+        import sys
+        import termios
+        import tty
+        
+        lines = []
+        
+        try:
+            # Get terminal settings
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            
+            while True:
+                if lines:
+                    # Show continuation prompt
+                    sys.stdout.write('│ ')
+                    sys.stdout.flush()
+                
+                try:
+                    # Read a line
+                    line = input()
+                    
+                    # Check for double-enter (empty line to finish)
+                    if not line and lines:
+                        break
+                        
+                    lines.append(line)
+                    
+                except EOFError:
+                    break
+                except KeyboardInterrupt:
+                    return ""
+                    
+        finally:
+            # Restore terminal settings
+            try:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+            except:
+                pass
+        
+        return '\n'.join(lines)
+    
+    def _handle_simple_multiline(self, prompt: str) -> str:
+        """Simple fallback for multi-line input"""
+        import sys
+        
+        print(self.theme_manager.colorize("📝 Type your message (Enter on empty line to finish):", 'info'))
+        
+        lines = []
+        empty_line_count = 0
+        
+        while True:
+            try:
+                if lines:
+                    sys.stdout.write('│ ')
+                    sys.stdout.flush()
+                    
+                line = input()
+                
+                if not line:
+                    empty_line_count += 1
+                    if empty_line_count >= 1 and lines:
+                        # Single empty line after content - finish
+                        break
+                    # Preserve empty lines within content
+                    lines.append('')
+                else:
+                    empty_line_count = 0
+                    lines.append(line)
+                    
+            except (EOFError, KeyboardInterrupt):
+                break
+        
+        return '\n'.join(lines)
+    
+    def _get_local_time(self) -> datetime:
+        """Get current time in local timezone"""
+        try:
+            # Try to get system timezone
+            local_tz = ZoneInfo(time.tzname[0] if time.tzname[0] else 'UTC')
+            return datetime.now(local_tz)
+        except Exception:
+            # Fallback to system local time
+            return datetime.now()
+    
+    def _format_timestamp(self, dt: datetime) -> str:
+        """Format timestamp in local timezone"""
+        try:
+            if dt.tzinfo is None:
+                # If naive datetime, assume it's local
+                dt = dt.replace(tzinfo=ZoneInfo(time.tzname[0] if time.tzname[0] else 'UTC'))
+            
+            # Convert to local timezone for display
+            local_dt = dt.astimezone()
+            return local_dt.strftime("%H:%M:%S")
+        except Exception:
+            # Fallback to simple formatting
+            return dt.strftime("%H:%M:%S")
     
     def _show_prompt_context(self) -> str:
         """Show context above the prompt (optional enhancement for future)"""
@@ -1218,7 +1701,7 @@ job monitoring, and system health checks."""
                 
                 # Simulate spawn request
                 result = {
-                    "request_id": f"spawn_{datetime.now().strftime('%H%M%S')}",
+                    "request_id": f"spawn_{self._get_local_time().strftime('%H%M%S')}",
                     "specialization": specialization,
                     "estimated_spawn_time": "30 seconds"
                 }
@@ -1322,7 +1805,7 @@ job monitoring, and system health checks."""
             history_data.append([
                 str(i),
                 item.command,
-                item.timestamp.strftime("%H:%M:%S"),
+                self._format_timestamp(item.timestamp),
                 f"{item.execution_time:.2f}s",
                 status_icon
             ])

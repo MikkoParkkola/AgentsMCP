@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Any, Tuple
 
 from ..config import Config
 from .registry import Entry, write_entry, list_entries
-from ..security import SecurityManager
+from agentsmcp.security import SecurityManager
 from .resources import EnhancedAgent, Resource, ResourceType, HealthInfo, HealthState, AgentState
 
 logger = logging.getLogger(__name__)
@@ -713,4 +713,3 @@ def discover_agents() -> List[Agent]:
         )
         agents.append(agent)
     return agents
-

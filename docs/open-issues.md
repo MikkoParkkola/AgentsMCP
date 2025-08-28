@@ -17,18 +17,6 @@ Template:
   - Option A - pros / cons
   - Option B - pros / cons
 -->
-## [0002] - Define CODEOWNERS and maintainer list
-- **Date Added:** 2025-08-21
-- **Version:** Unreleased
-- **Branch:** main
-- **Submitter:** automated agent
-- **Decision Maker:** project maintainers
-- **Needed By:** 2025-09-01
-- **Status:** open
-- **Problem:** Placeholder CODEOWNERS uses @REPO_OWNER; real maintainers need to be specified.
-- **Options:**
-  - Provide GitHub usernames of maintainers.
-  - Use a GitHub team handle once defined.
 
 ## [0009] - Implement UI/UX Overhaul Phase A
 - **Date Added:** 2025-08-26
@@ -63,3 +51,21 @@ Template:
 - **Options:**
   - Implement Phase 1 as proposed: single AgentManager in API, fix cleanup time, consolidate EventBus, add metrics.
   - Defer EventBus consolidation and only patch API and cleanup bug (faster, less robust).
+
+## [0010] - P6.2 Configuration Integration (Implementation)
+- **Date Added:** 2025-08-27
+- **Version:** Unreleased
+- **Branch:** main
+- **Submitter:** automated agent
+- **Decision Maker:** project maintainers
+- **Needed By:** 2025-09-06
+- **Status:** open
+- **Problem:** Current config lacks user-friendly role preferences, first-run wizard, environment auto-detection, and automatic task-to-team composition.
+- **Solution Proposal:** See `docs/P6.2-config-design.md`.
+- **Tasks:**
+  - Add Pydantic models: RolePreference, TeamStage, RoutingPolicy, EnvironmentCapabilities, UXQuickPrefs.
+  - Implement detection module and `agentsmcp doctor`.
+  - Implement `agentsmcp setup` wizard.
+  - Integrate `role_preferences` and `routing.strategy` into DelegationEngine.
+  - Add task classifier + team templates in coordinator.
+  - Docs and tests per design.

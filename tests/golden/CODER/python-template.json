@@ -1,0 +1,23 @@
+{
+  "task": {
+    "id": "coder-template-001", 
+    "objective": "Generate code template structure for a Python CLI application",
+    "bounded_context": "command-line tool with configuration support",
+    "inputs": {
+      "language": "Python",
+      "framework": "argparse",
+      "features": ["config file support", "logging", "error handling"]
+    },
+    "acceptance_criteria": [
+      "Include main entry point",
+      "Support command-line arguments",
+      "Include basic error handling"
+    ]
+  },
+  "expected": {
+    "role": "CODER",
+    "status": ["SUCCESS"],
+    "decisions": ["/.*style.*$/", "/.*scope.*$/"],
+    "model_assigned": "/.*ollama.*$/"
+  }
+}

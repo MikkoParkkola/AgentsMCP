@@ -13,8 +13,18 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 import json
 import argparse
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+import time
 
 from .theme_manager import ThemeManager, Fore
+
+# The modern TUI is introduced in a later task. Import lazily so that the
+# package can still be imported when the class is not yet present.
+try:
+    from .modern_tui import ModernTUI  # type: ignore
+except Exception:  # pragma: no cover – import may legitimately fail now
+    ModernTUI = None
 from .ui_components import UIComponents
 from .status_dashboard import StatusDashboard
 from .command_interface import CommandInterface
@@ -79,8 +89,22 @@ class CLIApp:
         "Programming isn't about what you know; it's about what you can figure out. 🔍"
     ]
     
-    def __init__(self, config: CLIConfig = None):
+    def __init__(self, config: CLIConfig = None, mode: str = "interactive"):
+        """Create the CLI application driver.
+
+        Parameters
+        ----------
+        config: CLIConfig
+            Global configuration for the CLI application.
+        mode: str
+            The UI mode to launch. Known values are:
+            * "interactive" – legacy line-oriented REPL.
+            * "dashboard"   – dashboard UI (unchanged).
+            * "tui"         – modern TUI (default for the ``run interactive``
+                              command after this fix).
+        """
         self.config = config or CLIConfig()
+        self.current_mode = mode
         
         # Configure logging for interactive mode
         from ..logging_config import configure_logging
@@ -92,6 +116,9 @@ class CLIApp:
         # Create lightweight orchestration manager for CLI (avoids async initialization issues)
         from ..orchestration.orchestration_manager import OrchestrationManager
         self.orchestration_manager = self._create_cli_orchestration_manager()
+        
+        # Initialize timezone handling
+        self._setup_timezone()
         
         from .status_dashboard import DashboardConfig
         dashboard_config = DashboardConfig(
@@ -139,8 +166,11 @@ class CLIApp:
         
         # Application state
         self.is_running = False
-        self.current_mode = self.config.interface_mode
+        # Keep the mode passed to constructor, don't override with config default
+        # self.current_mode = self.config.interface_mode  # BUG: This overrides the constructor parameter
         self.session_start_time = None
+        # Track active TUI shell (if any) so signal handler can stop it
+        self._current_tui_shell = None
         
         # Register signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -150,6 +180,13 @@ class CLIApp:
         """Handle shutdown signals gracefully"""
         self.is_running = False
         print(f"\n{self.theme_manager.current_theme.palette.warning}Shutting down gracefully...{Fore.RESET}")
+        # If a TUI shell is running, request it to stop
+        try:
+            shell = getattr(self, "_current_tui_shell", None)
+            if shell is not None:
+                shell.running = False
+        except Exception:
+            pass
     
     async def start(self) -> Dict[str, Any]:
         """Start the CLI application"""
@@ -162,20 +199,48 @@ class CLIApp:
         else:
             self.theme_manager.auto_detect_theme()
         
-        # Show welcome screen
-        if self.config.show_welcome:
+        # Show welcome screen (skip for TUI to avoid ASCII art)
+        if self.config.show_welcome and self.current_mode != "tui":
             await self._show_welcome()
+
+        # Robust non-TTY fallback: if interactive mode is requested but stdin is not a TTY,
+        # avoid launching the TUI which requires a real terminal. Prefer dashboard.
+        try:
+            import sys as _sys
+            if self.current_mode == "interactive" and not _sys.stdin.isatty():
+                # Use dashboard in non-TTY environments
+                print(self.theme_manager.colorize("(no TTY detected) Launching dashboard", 'text_muted'))
+                self.current_mode = "dashboard"
+        except Exception:
+            # If detection fails, keep original mode
+            pass
         
         # Start main application loop
         try:
             if self.current_mode == "interactive":
+                # Legacy basic REPL (unchanged).
                 await self._run_interactive_mode()
             elif self.current_mode == "dashboard":
                 await self._run_dashboard_mode()
             elif self.current_mode == "stats":
                 await self._run_statistics_mode()
             elif self.current_mode == "tui":
-                await self._run_tui_shell()
+                # Modern world-class TUI – introduced in Task 2.
+                if ModernTUI is None:
+                    import logging
+                    logging.getLogger(__name__).error(
+                        "ModernTUI class not available – falling back to legacy interactive mode"
+                    )
+                    await self._run_interactive_mode()
+                else:
+                    try:
+                        await self._run_modern_tui()
+                    except Exception as exc:  # pragma: no cover – defensive
+                        import logging
+                        logging.getLogger(__name__).exception(
+                            "Failed to start ModernTUI, falling back to legacy mode"
+                        )
+                        await self._run_interactive_mode()
             else:
                 await self._run_interactive_mode()  # Default fallback
                 
@@ -256,11 +321,33 @@ class CLIApp:
     
     async def _run_tui_shell(self):
         """Run a minimal Rich-based TUI shell (scaffold)."""
-        print(self.ui.clear_screen())
         try:
             from .tui_shell import TUIShell
-            shell = TUIShell(theme_manager=self.theme_manager)
-            await shell.run()
+            # Ensure a real terminal is available for the TUI
+            try:
+                import sys as _sys
+                if not (_sys.stdin.isatty() and _sys.stdout.isatty()):
+                    raise RuntimeError("TUI requires a TTY (stdin/stdout not a terminal)")
+            except Exception:
+                # If detection failed assume not suitable
+                raise RuntimeError("TUI requires a TTY (terminal not detected)")
+            # Provide chat handler that routes to the existing conversation manager
+            async def _chat_handler(text: str) -> str:
+                try:
+                    if hasattr(self, 'command_interface') and hasattr(self.command_interface, 'conversation_manager'):
+                        resp = await self.command_interface.conversation_manager.process_input(text)
+                        return resp or "✅ Message processed successfully"
+                    else:
+                        return "⚠️ Conversation manager not available"
+                except Exception as e:
+                    return f"❌ Chat error: {str(e)}"
+
+            shell = TUIShell(theme_manager=self.theme_manager, chat_handler=_chat_handler)
+            self._current_tui_shell = shell
+            try:
+                await shell.run()
+            finally:
+                self._current_tui_shell = None
         except Exception as e:
             await self._show_error(f"TUI shell not available: {e}")
 
@@ -282,6 +369,28 @@ class CLIApp:
         
         # Start statistics display
         await self.statistics_display.start_display()
+
+    async def _run_modern_tui(self):
+        """Start the new ModernTUI.
+
+        This method extracts the UI-specific arguments (e.g. ``theme`` and
+        ``no_welcome``) from the config and forwards them to the TUI
+        constructor. ``ModernTUI.run()`` is expected to be an async coroutine
+        that drives the whole UI lifecycle.
+        """
+        # Pull known arguments from config
+        theme = self.config.theme_mode
+        no_welcome = not self.config.show_welcome
+
+        tui = ModernTUI(
+            config=self.config,
+            theme_manager=self.theme_manager,
+            conversation_manager=self.command_interface.conversation_manager,
+            orchestration_manager=self.orchestration_manager,
+            theme=theme,
+            no_welcome=no_welcome,
+        )
+        await tui.run()
     
     async def _show_error(self, error_message: str):
         """Display error message beautifully"""
@@ -320,30 +429,43 @@ class CLIApp:
         if hasattr(self.command_interface, 'stop'):
             self.command_interface.stop()
         
-        # Show简洁 goodbye message
-        print(self.ui.clear_screen())
-        
-        goodbye_message = f"""
-{theme.palette.primary}Thank you for using AgentsMCP!{Fore.RESET}
-
-{theme.palette.secondary}Session completed successfully.{Fore.RESET}
-{theme.palette.text_muted}May your code be bug-free and your agents be swift!{Fore.RESET}
-        """
-        print(goodbye_message)
-        
-        # Add a parting funny rule or quote
-        parting_content = random.choice(self.BROA_RULES + self.FUNNY_QUOTES)
-        parting_box = self.ui.box(
-            f"🎉 {parting_content}",
-            title="😊 Until Next Time",
-            style='rounded',
-            width=min(self.ui.terminal_width - 4, 80)
-        )
-        print(parting_box)
-        print()
-        
+        # Minimal goodbye (avoid ASCII art); especially quiet when TUI was used
+        if self.current_mode != "tui":
+            print(self.ui.clear_screen())
+            print(f"{theme.palette.primary}Goodbye!{Fore.RESET}")
         # Restore cursor
         print(self.ui.show_cursor(), end='')
+    
+    def _setup_timezone(self):
+        """Setup timezone handling for the application"""
+        try:
+            # Get system timezone
+            self.local_timezone = ZoneInfo(time.tzname[0] if time.tzname[0] else 'UTC')
+        except Exception:
+            self.local_timezone = None
+    
+    def _get_local_time(self) -> datetime:
+        """Get current time in local timezone"""
+        try:
+            if self.local_timezone:
+                return datetime.now(self.local_timezone)
+            return datetime.now()
+        except Exception:
+            return datetime.now()
+    
+    def _format_timestamp(self, dt: datetime) -> str:
+        """Format timestamp in local timezone"""
+        try:
+            if dt.tzinfo is None and self.local_timezone:
+                # If naive datetime, assume it's local
+                dt = dt.replace(tzinfo=self.local_timezone)
+            
+            # Convert to local timezone for display
+            local_dt = dt.astimezone()
+            return local_dt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            # Fallback to simple formatting
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
     
     def _create_cli_orchestration_manager(self):
         """Create a minimal orchestration manager for CLI use without async components."""
@@ -511,7 +633,7 @@ class CLIApp:
                 
                 # Add helpful header comments
                 header = f"""# MCP Client Configuration
-# Generated by AgentsMCP on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+# Generated by AgentsMCP on {self._format_timestamp(self._get_local_time())}
 # Current settings: {settings.get('provider')} / {settings.get('model')}
 #
 # Save this to one of:
@@ -539,7 +661,7 @@ class CLIApp:
                 import time
                 
                 # Basic status information for CLI mode
-                current_time = datetime.now()
+                current_time = self._get_local_time()
                 
                 return {
                     "system_status": "running",
@@ -596,7 +718,7 @@ class CLIApp:
                     return {
                         "task_id": task_id,
                         "execution_strategy": "analysis",
-                        "completion_time": datetime.now().strftime("%H:%M:%S"),
+                        "completion_time": self._format_timestamp(self._get_local_time()),
                         "status": "completed",
                         "results": {
                             "type": "codebase_analysis", 
@@ -609,18 +731,35 @@ class CLIApp:
                     return {
                         "task_id": task_id,
                         "execution_strategy": "simulation",
-                        "completion_time": datetime.now().strftime("%H:%M:%S"),
+                        "completion_time": self._format_timestamp(self._get_local_time()),
                         "status": "completed",
                         "results": {
                             "message": "Task simulated in CLI mode - full orchestration requires running agents"
                         }
                     }
+            
+            def _get_local_time(self):
+                """Get current local time with timezone info"""
+                from datetime import datetime
+                try:
+                    from zoneinfo import ZoneInfo
+                    import time
+                    # Get local timezone
+                    local_tz = ZoneInfo(time.tzname[0])
+                    return datetime.now(local_tz)
+                except ImportError:
+                    # Fallback for older Python versions
+                    return datetime.now()
+            
+            def _format_timestamp(self, dt) -> str:
+                """Format datetime as human-readable timestamp"""
+                return dt.strftime("%Y-%m-%d %H:%M:%S %Z").strip()
         
         return CLIOrchestrationManager()
 
     def switch_mode(self, new_mode: str) -> bool:
         """Switch between interface modes"""
-        if new_mode in ["interactive", "dashboard", "stats"]:
+        if new_mode in ["interactive", "dashboard", "stats", "tui"]:
             self.current_mode = new_mode
             return True
         return False

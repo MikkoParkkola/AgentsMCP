@@ -3,6 +3,12 @@
 This file records notable changes to the project. Keep entries in reverse chronological order.
 
 ## [Unreleased]
+- P6.2 Design: Add user-friendly configuration proposal (role preferences, auto-detection, smart defaults, first-run wizard, task-to-team mapping) in docs/P6.2-config-design.md.
+- Agents: add environment-tailored guide `AGENTS_LOCAL.md` and link from `AGENTS.md`.
+- Repo-Mapper: scaffold `ownership_map.json` and `path_locks.json` with no-overlap and lock policies.
+- Interfaces: add `interfaces/` with example ICD `auth.validate_token.json` and README.
+- Golden tests: add `golden_tests/auth.validate_token.json` and a skipped pytest placeholder in `tests/golden/`.
+- Automation: add `scripts/pre_pr_check.sh` to run ruff and pytest locally before opening PRs.
 - UI/UX: Added comprehensive UI/UX review and adopted phased uplift plan (TUI via Textual shell; Web UI parity; readiness gating; SSE with backoff; standardized CLI outputs).
 - Architecture: add architecture analysis synthesis and adopt prioritized roadmap (AgentManager singleton in API; job cleanup fix; EventBus consolidation; queue/worker pool + 429 overload; async providers with retry/backoff; tool sandboxing; JWT auth, rate limits; config consolidation).
 - Provider config validation (K1): add `validate_provider_config` returning non-raising results.
@@ -34,6 +40,7 @@ This file records notable changes to the project. Keep entries in reverse chrono
 - Initial placeholder.
 - Added Business Rules of Acquisition guidelines and linked them from AGENTS.md.
 - Added engineering handbook outlining principles and practices for AI-augmented teams.
+ - Governance: Set repository CODEOWNERS to @MikkoParkkola to enable review ownership and enforcement.
 
 <!--
 ## [vX.Y.Z] - YYYY-MM-DD
@@ -52,3 +59,13 @@ This file records notable changes to the project. Keep entries in reverse chrono
 - CLI `--provider` now accepts `ollama-turbo`.
 - README updated with macOS binary path and usage; documented defaults and MCP tools.
 - Verified web UI serves from `/ui` and health endpoint responds.
+## [Unreleased]
+
+- Security: Introduced Human-In-The-Loop (HITL) Approval System.
+  - Decorator `hitl_required()` for critical operations.
+  - Priority approval queue with timeout + default action.
+  - Web UI at `/hitl/` for approve/reject with RBAC.
+  - Cryptographically signed, one-time approval tokens (JWT) with replay protection.
+  - Audit trail persisted to `build/hitl_audit.log` (JSONL).
+  - Rate limiting on decision endpoint and security headers.
+  - Zero-impact fast path for non-critical ops.

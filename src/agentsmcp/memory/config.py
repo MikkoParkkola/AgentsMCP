@@ -45,11 +45,12 @@ if pydantic:
             description="PostgreSQL DSN for optional persistence.",
         )
 
-        class Config:
-            env_file = ".env"
-            env_file_encoding = "utf-8"
-            env_prefix = ""
-            use_enum_values = True
+        model_config = pydantic.ConfigDict(
+            env_file=".env",
+            env_file_encoding="utf-8",
+            env_prefix="",
+            use_enum_values=True
+        )
 else:
     # Simple fallback without pydantic validation
     class MemoryBackend:

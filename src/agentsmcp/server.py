@@ -7,15 +7,17 @@ import uvicorn
 import json
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from fastapi.responses import StreamingResponse, HTMLResponse
+from pydantic import BaseModel, ValidationError
+from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agent_manager import AgentManager
 from .config import Config
+from .orchestrator_factory import OrchestratorFactory, OrchestratorMode
 from .logging_config import configure_logging
 from .settings import AppSettings
 from .events import EventBus
+from .models import EnvelopeParser, EnvelopeStatus, EnvelopeError
 
 try:
     from prometheus_fastapi_instrumentator import Instrumentator  # type: ignore
@@ -70,6 +72,10 @@ class AgentServer:
 
         self.events = EventBus()
         self.agent_manager = AgentManager(config, events=self.events)
+        
+        # Initialize orchestrator using factory - simple mode by default
+        self.orchestrator = OrchestratorFactory.create(config)
+        
         self._setup_routes()
         self._setup_exception_handlers()
         self._setup_metrics()
@@ -85,9 +91,46 @@ class AgentServer:
     def _setup_routes(self):
         """Set up API routes."""
 
+        def _wants_envelope(request: Request) -> bool:
+            """Determine if client requested envelope; defaults to legacy (False).
+
+            Honors:
+            - Header X-Envelope: 1|true|yes
+            - Query param envelope=1|true|yes
+            - Accept: application/vnd.agentsmcp.envelope+json
+            - Header X-Legacy-Format: 1|true|yes forces legacy
+            - Query param legacy=1|true|yes forces legacy
+            """
+            try:
+                qp = request.query_params
+                # Force legacy if explicitly requested
+                legacy = str(qp.get("legacy", "")).lower() in {"1", "true", "yes"} or (
+                    request.headers.get("x-legacy-format", "").lower() in {"1", "true", "yes"}
+                )
+                if legacy:
+                    return False
+                return EnvelopeParser.wants_envelope(
+                    headers=request.headers, query_params=request.query_params
+                )
+            except Exception:
+                return False
+
+        def _wrap_response(request: Request, payload, status: EnvelopeStatus = EnvelopeStatus.SUCCESS, errors: list[EnvelopeError] | None = None):
+            if not _wants_envelope(request):
+                return payload
+            req_id = request.headers.get("x-request-id")
+            env = EnvelopeParser.build_envelope(
+                payload,
+                status=status,
+                errors=errors,
+                request_id=req_id,
+                source="agentsmcp-server",
+            )
+            return env.model_dump(mode="json")
+
         @self.app.get("/")
-        async def root():
-            return {
+        async def root(request: Request):
+            payload = {
                 "service": "AgentsMCP",
                 "version": "1.0.0",
                 "description": (
@@ -99,46 +142,50 @@ class AgentServer:
                     "health": "GET /health - Health check",
                 },
             }
+            return _wrap_response(request, payload)
 
         @self.app.get("/health")
-        async def health():
+        async def health(request: Request):
             """Basic health check endpoint."""
-            return {"status": "healthy", "timestamp": datetime.utcnow()}
+            return _wrap_response(request, {"status": "healthy", "timestamp": datetime.utcnow()})
 
         @self.app.get("/health/ready")
-        async def readiness():
+        async def readiness(request: Request):
             """Readiness check - confirms all dependencies are available."""
             try:
                 # Check storage connectivity
                 await self.agent_manager.storage.get_job_status("health-check")
 
-                return {
+                return _wrap_response(request, {
                     "status": "ready",
                     "timestamp": datetime.utcnow(),
                     "storage": "connected",
                     "agents": len(self.config.agents),
-                }
+                })
             except Exception as e:
-                raise HTTPException(
-                    status_code=503,
-                    detail={
-                        "status": "not ready",
-                        "error": str(e),
-                        "timestamp": datetime.utcnow(),
-                    },
-                )
+                raise HTTPException(status_code=503, detail=str(e))
+
+        @self.app.post("/refresh")
+        async def refresh(request: Request):
+            """Invalidate cached detector/model data so the UI can refresh quickly."""
+            try:
+                from .config.env_detector import refresh_env_detector_cache
+                refresh_env_detector_cache()
+                return _wrap_response(request, {"ok": True, "refreshed": True, "timestamp": datetime.utcnow()})
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
 
         @self.app.get("/health/live")
-        async def liveness():
+        async def liveness(request: Request):
             """Liveness check - confirms the service is alive."""
-            return {
+            return _wrap_response(request, {
                 "status": "alive",
                 "timestamp": datetime.utcnow(),
                 "uptime": datetime.utcnow().timestamp(),
-            }
+            })
 
         @self.app.get("/stats")
-        async def metrics():
+        async def metrics(request: Request):
             """Basic stats endpoint (non-Prometheus)."""
             active_jobs = len(
                 [
@@ -148,16 +195,16 @@ class AgentServer:
                 ]
             )
 
-            return {
+            return _wrap_response(request, {
                 "timestamp": datetime.utcnow(),
                 "total_jobs": len(self.agent_manager.jobs),
                 "active_jobs": active_jobs,
                 "agent_types": list(self.config.agents.keys()),
                 "storage_type": self.config.storage.type,
-            }
+            })
 
         @self.app.get("/metrics")
-        async def metrics_series():
+        async def metrics_series(request: Request):
             """Very simple metrics for UI charts (WUI4)."""
             counts = {
                 "completed": 0,
@@ -167,27 +214,48 @@ class AgentServer:
                 "running": 0,
                 "pending": 0,
             }
+            durations = list(getattr(self.agent_manager.metrics, "get", lambda k, d=None: [])("durations", [])) if isinstance(getattr(self.agent_manager, "metrics", None), dict) else []
+            # Fallback gather from job statuses
             for job in self.agent_manager.jobs.values():
                 st = job.status.state.value
                 if st in counts:
                     counts[st] += 1
-            return {"timestamp": datetime.utcnow(), "counts": counts}
+                if st == "running":
+                    counts["running"] += 0  # already counted
+            # Include queue insights
+            queue_len = getattr(self.agent_manager, "queue_size", lambda: 0)()
+            # Aggregate simple latency stats if present
+            avg_ms = 0.0
+            if durations:
+                avg_ms = (sum(durations) / max(1, len(durations))) * 1000.0
+            payload = {
+                "timestamp": datetime.utcnow(),
+                "counts": counts,
+                "queue": {"size": queue_len},
+                "throughput": {
+                    "running": self.agent_manager.metrics.get("running", 0) if isinstance(self.agent_manager.metrics, dict) else counts.get("running", 0),
+                    "completed": self.agent_manager.metrics.get("completed", 0) if isinstance(self.agent_manager.metrics, dict) else counts.get("completed", 0),
+                    "failed": self.agent_manager.metrics.get("failed", 0) if isinstance(self.agent_manager.metrics, dict) else counts.get("failed", 0),
+                    "avg_ms": avg_ms,
+                },
+            }
+            return _wrap_response(request, payload)
 
         # Capabilities for handshake (AD4)
         @self.app.get("/capabilities")
-        async def capabilities():
-            return {
+        async def capabilities(request: Request):
+            return _wrap_response(request, {
                 "agent_id": "agentsmcp-local",
                 "name": "agentsmcp",
                 "capabilities": list(self.config.agents.keys()),
                 "transport": "http",
                 "endpoint": f"http://{self.config.server.host}:{self.config.server.port}",
-            }
+            })
 
         # Coordination endpoints (AD4)
         @self.app.get("/coord/ping")
-        async def coord_ping():
-            return {"pong": True}
+        async def coord_ping(request: Request):
+            return _wrap_response(request, {"pong": True})
 
         class HandshakeRequest(BaseModel):
             agent_id: str
@@ -197,7 +265,10 @@ class AgentServer:
             token: str | None = None
 
         @self.app.post("/coord/handshake")
-        async def coord_handshake(req: HandshakeRequest):
+        async def coord_handshake(request: Request):
+            body = await request.json()
+            payload, _meta = EnvelopeParser.parse_body(body)
+            req = HandshakeRequest.model_validate(payload)
             # Enforce allowlist/token when configured (AD5)
             allow = set(getattr(self.config, "discovery_allowlist", []) or [])
             shared = getattr(self.config, "discovery_token", None)
@@ -205,11 +276,11 @@ class AgentServer:
                 raise HTTPException(status_code=403, detail="not allowed")
             if shared and req.token != shared:
                 raise HTTPException(status_code=403, detail="bad token")
-            return {"ok": True, "received": req.model_dump()}
+            return _wrap_response(request, {"ok": True, "received": req.model_dump()})
 
         # Jobs listing for UI (WUI5)
         @self.app.get("/jobs")
-        async def list_jobs():
+        async def list_jobs(request: Request):
             def _j(job):
                 return {
                     "job_id": job.job_id,
@@ -217,7 +288,7 @@ class AgentServer:
                     "state": job.status.state.value,
                     "updated_at": job.status.updated_at,
                 }
-            return {"jobs": [_j(j) for j in self.agent_manager.jobs.values()]}
+            return _wrap_response(request, {"jobs": [_j(j) for j in self.agent_manager.jobs.values()]})
 
         # SSE events (WUI1)
         @self.app.get("/events")
@@ -239,7 +310,7 @@ class AgentServer:
 
         # Settings API (minimal) for Web UI parity
         @self.app.get("/settings")
-        async def get_settings():
+        async def get_settings(request: Request):
             try:
                 providers = {
                     name: {
@@ -255,7 +326,7 @@ class AgentServer:
                     }
                     for name, ag in self.config.agents.items()
                 }
-                return {"providers": providers, "agents": agents}
+                return _wrap_response(request, {"providers": providers, "agents": agents})
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
 
@@ -264,7 +335,7 @@ class AgentServer:
             agents: Optional[dict] = None
 
         @self.app.put("/settings")
-        async def update_settings(body: SettingsUpdate):
+        async def update_settings(body: SettingsUpdate, request: Request):
             try:
                 if body.providers:
                     for name, upd in body.providers.items():
@@ -294,13 +365,13 @@ class AgentServer:
                     self.config.save_to_file(path)
                 except Exception:
                     pass
-                return {"ok": True}
+                return _wrap_response(request, {"ok": True})
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
 
         # Provider models listing for Web UI
         @self.app.get("/providers/{provider}/models")
-        async def list_provider_models(provider: str):
+        async def list_provider_models(provider: str, request: Request):
             try:
                 from .providers import list_models as pv_list_models
                 from .config import ProviderType, ProviderConfig
@@ -311,14 +382,14 @@ class AgentServer:
                     api_base=getattr(base_cfg, "api_base", None) if base_cfg else None,
                 )
                 models = pv_list_models(cfg.name, cfg)
-                return {"models": [m.to_dict() for m in models]}
+                return _wrap_response(request, {"models": [m.to_dict() for m in models]})
             except Exception as e:
                 raise HTTPException(status_code=400, detail=str(e))
 
         # MCP config (minimal) — gated by config.mcp_api_enabled
         if getattr(self.config, "mcp_api_enabled", False):
             @self.app.get("/mcp")
-            async def get_mcp():
+            async def get_mcp(request: Request):
                 try:
                     servers = [
                         {
@@ -335,7 +406,7 @@ class AgentServer:
                         "ws": bool(getattr(self.config, "mcp_ws_enabled", False)),
                         "sse": bool(getattr(self.config, "mcp_sse_enabled", False)),
                     }
-                    return {"servers": servers, "flags": flags}
+                    return _wrap_response(request, {"servers": servers, "flags": flags})
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=str(e))
 
@@ -352,7 +423,7 @@ class AgentServer:
                 sse: Optional[bool] = None
 
             @self.app.put("/mcp")
-            async def update_mcp(body: MCPUpdate):
+            async def update_mcp(body: MCPUpdate, request: Request):
                 try:
                     action = body.action
                     lst = list(self.config.mcp or [])
@@ -374,14 +445,14 @@ class AgentServer:
                             self.config.save_to_file(path)
                         except Exception:
                             pass
-                        return {
+                        return _wrap_response(request, {
                             "ok": True,
                             "flags": {
                                 "stdio": bool(getattr(self.config, "mcp_stdio_enabled", True)),
                                 "ws": bool(getattr(self.config, "mcp_ws_enabled", False)),
                                 "sse": bool(getattr(self.config, "mcp_sse_enabled", False)),
                             },
-                        }
+                        })
                     elif action in ("enable", "disable") and body.name:
                         found = False
                         for s in lst:
@@ -401,14 +472,14 @@ class AgentServer:
                         self.config.save_to_file(path)
                     except Exception:
                         pass
-                    return {"ok": True}
+                    return _wrap_response(request, {"ok": True})
                 except HTTPException:
                     raise
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=str(e))
 
             @self.app.get("/mcp/status")
-            async def mcp_status():
+            async def mcp_status(request: Request):
                 try:
                     from .mcp.manager import MCPServer as _M, get_global_manager as _get
                     servers = []
@@ -421,57 +492,62 @@ class AgentServer:
                         allow_sse=bool(getattr(self.config, "mcp_sse_enabled", False)),
                     )
                     st = await mgr.get_status()
-                    return {"manager": mgr.get_config(), "servers": st}
+                    return _wrap_response(request, {"manager": mgr.get_config(), "servers": st})
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=str(e))
 
         # Discovery status (read-only)
         @self.app.get("/discovery")
-        async def discovery_status():
+        async def discovery_status(request: Request):
             try:
-                return {
+                return _wrap_response(request, {
                     "enabled": bool(getattr(self.config, "discovery_enabled", False)),
                     "allowlist": getattr(self.config, "discovery_allowlist", []),
                     "has_token": bool(getattr(self.config, "discovery_token", None)),
-                }
+                })
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
 
         # Costs (optional)
         @self.app.get("/costs")
-        async def get_costs():
+        async def get_costs(request: Request):
             try:
                 try:
                     from .cost.tracker import CostTracker  # type: ignore
                 except Exception:
                     raise HTTPException(status_code=501, detail="costs unavailable")
                 t = CostTracker()
-                return {
+                return _wrap_response(request, {
                     "total": t.total_cost,
                     "daily": getattr(t, "get_daily_cost", lambda: None)(),
                     "breakdown": getattr(t, "get_breakdown", lambda: None)(),
-                }
+                })
             except HTTPException:
                 raise
             except Exception as e:
                 raise HTTPException(status_code=500, detail=str(e))
 
-        @self.app.post("/spawn", response_model=SpawnResponse)
-        async def spawn_agent(request: SpawnRequest):
+        @self.app.post("/spawn")
+        async def spawn_agent(raw_request: Request):
             """Spawn a new agent to handle a task."""
             try:
                 # Instantiate manager at call-time to support testing/mocking
                 mgr = AgentManager(self.config)
 
+                body = await raw_request.json()
+                payload, _meta = EnvelopeParser.parse_body(body)
+                req = SpawnRequest.model_validate(payload)
+
                 job_id = await mgr.spawn_agent(
-                    request.agent_type, request.task, request.timeout or 300
+                    req.agent_type, req.task, req.timeout or 300
                 )
 
-                return SpawnResponse(
-                    job_id=job_id,
-                    status="spawned",
-                    message=f"Agent {request.agent_type} spawned successfully",
-                )
+                payload_out = {
+                    "job_id": job_id,
+                    "status": "spawned",
+                    "message": f"Agent {req.agent_type} spawned successfully",
+                }
+                return _wrap_response(raw_request, payload_out)
 
             except HTTPException:
                 raise
@@ -482,8 +558,8 @@ class AgentServer:
                     raise HTTPException(status_code=400, detail=msg)
                 raise HTTPException(status_code=500, detail=msg)
 
-        @self.app.get("/status/{job_id}", response_model=StatusResponse)
-        async def get_job_status(job_id: str):
+        @self.app.get("/status/{job_id}")
+        async def get_job_status(job_id: str, request: Request):
             """Get the status of a running job."""
             try:
                 mgr = AgentManager(self.config)
@@ -492,14 +568,15 @@ class AgentServer:
                 if not status:
                     raise HTTPException(status_code=404, detail="Job not found")
 
-                return StatusResponse(
-                    job_id=job_id,
-                    state=status.state.name,
-                    output=status.output,
-                    error=status.error,
-                    created_at=status.created_at,
-                    updated_at=status.updated_at,
-                )
+                payload = {
+                    "job_id": job_id,
+                    "state": status.state.name,
+                    "output": status.output,
+                    "error": status.error,
+                    "created_at": status.created_at,
+                    "updated_at": status.updated_at,
+                }
+                return _wrap_response(request, payload)
 
             except HTTPException:
                 raise
@@ -508,7 +585,7 @@ class AgentServer:
                 raise HTTPException(status_code=500, detail=str(e))
 
         @self.app.delete("/jobs/{job_id}")
-        async def cancel_job(job_id: str):
+        async def cancel_job(job_id: str, request: Request):
             """Cancel a running job."""
             try:
                 mgr = AgentManager(self.config)
@@ -517,12 +594,116 @@ class AgentServer:
                 if not success:
                     raise HTTPException(status_code=404, detail="Job not found")
 
-                return {"job_id": job_id, "status": "cancelled"}
+                return _wrap_response(request, {"job_id": job_id, "status": "cancelled"})
 
             except HTTPException:
                 raise
             except Exception as e:
                 self.log.exception("Cancel failed: %s", e)
+                raise HTTPException(status_code=500, detail=str(e))
+
+        # Simple orchestration endpoints
+        class SimpleTaskRequest(BaseModel):
+            task: str
+            complexity: Optional[str] = "moderate"  # simple, moderate, complex
+            timeout: Optional[int] = 300
+            cost_sensitive: Optional[bool] = False
+            context_size_estimate: Optional[int] = 1000
+
+        @self.app.post("/simple/execute")
+        async def simple_execute(raw_request: Request):
+            """Execute task using simple orchestration (default mode)."""
+            try:
+                body = await raw_request.json()
+                payload, _meta = EnvelopeParser.parse_body(body)
+                req = SimpleTaskRequest.model_validate(payload)
+
+                # Convert to TaskRequest
+                from .simple_orchestrator import TaskRequest, TaskComplexity
+                task_request = TaskRequest(
+                    task=req.task,
+                    complexity=TaskComplexity(req.complexity or "moderate"),
+                    context_size_estimate=req.context_size_estimate or 1000,
+                    cost_sensitive=req.cost_sensitive or False
+                )
+
+                result = await self.orchestrator.execute_task(task_request, timeout=req.timeout or 300)
+                return _wrap_response(raw_request, result)
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                self.log.exception("Simple execute failed: %s", e)
+                raise HTTPException(status_code=500, detail=str(e))
+
+        class ChatRequest(BaseModel):
+            messages: list[dict[str, str]]
+            preferred_model: Optional[str] = None
+
+        @self.app.post("/simple/chat")
+        async def simple_chat(raw_request: Request):
+            """Chat using simple orchestration with model selection."""
+            try:
+                body = await raw_request.json()
+                payload, _meta = EnvelopeParser.parse_body(body)
+                req = ChatRequest.model_validate(payload)
+
+                result = await self.orchestrator.chat(req.messages, req.preferred_model)
+                return _wrap_response(raw_request, result)
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                self.log.exception("Simple chat failed: %s", e)
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.get("/simple/config")
+        async def get_orchestrator_config(request: Request):
+            """Get current orchestrator configuration and recommendations."""
+            try:
+                recommendations = OrchestratorFactory.get_mode_recommendations(self.config)
+                
+                # Get current preferences if available
+                preferences = {}
+                if hasattr(self.orchestrator, 'model_preferences'):
+                    for role, pref in self.orchestrator.model_preferences.items():
+                        preferences[role.value] = {
+                            "primary_model": pref.primary_model,
+                            "fallback_models": pref.fallback_models,
+                            "cost_threshold": pref.cost_threshold
+                        }
+
+                return _wrap_response(request, {
+                    "mode": "simple",  # Current server uses simple mode
+                    "recommendations": recommendations,
+                    "preferences": preferences
+                })
+
+            except Exception as e:
+                self.log.exception("Config fetch failed: %s", e)
+                raise HTTPException(status_code=500, detail=str(e))
+
+        class PreferencesRequest(BaseModel):
+            preferences: dict[str, dict[str, any]]
+
+        @self.app.put("/simple/config")
+        async def update_orchestrator_preferences(raw_request: Request):
+            """Update model preferences for simple orchestrator."""
+            try:
+                body = await raw_request.json()
+                payload, _meta = EnvelopeParser.parse_body(body)
+                req = PreferencesRequest.model_validate(payload)
+
+                if hasattr(self.orchestrator, 'configure_preferences'):
+                    self.orchestrator.configure_preferences(req.preferences)
+                    return _wrap_response(raw_request, {"status": "updated"})
+                else:
+                    raise HTTPException(status_code=501, detail="Orchestrator does not support runtime preferences")
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                self.log.exception("Preferences update failed: %s", e)
                 raise HTTPException(status_code=500, detail=str(e))
 
     def _setup_exception_handlers(self) -> None:
@@ -538,6 +719,80 @@ class AgentServer:
             )
             return response
 
+        @self.app.exception_handler(HTTPException)
+        async def http_exc_handler(request: Request, exc: HTTPException):
+            # Respect legacy clients: return default shape when requested
+            try:
+                qp = request.query_params
+                legacy = str(qp.get("legacy", "")).lower() in {"1", "true", "yes"} or (
+                    str(qp.get("envelope", "")).lower() in {"0", "false", "no"}
+                ) or (request.headers.get("x-legacy-format", "").lower() in {"1", "true", "yes"})
+            except Exception:
+                legacy = False
+            if legacy:
+                return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+            # Normalize errors into envelope; keep status code
+            detail = exc.detail
+            # Extract message and code if provided
+            if isinstance(detail, dict) and "message" in detail:
+                message = str(detail.get("message"))
+                code = str(detail.get("code", exc.status_code))
+                details = {k: v for k, v in detail.items() if k not in {"message", "code"}}
+            else:
+                message = str(detail)
+                code = str(exc.status_code)
+                details = None
+            errors = [EnvelopeError(code=code, message=message, details=details)]
+            env = EnvelopeParser.build_envelope(
+                None,
+                status=EnvelopeStatus.ERROR,
+                errors=errors,
+                request_id=request.headers.get("x-request-id"),
+                source="agentsmcp-server",
+            )
+            payload = env.model_dump(mode="json")
+            return JSONResponse(status_code=exc.status_code, content=payload)
+
+        @self.app.exception_handler(Exception)
+        async def generic_exc_handler(request: Request, exc: Exception):
+            try:
+                qp = request.query_params
+                legacy = str(qp.get("legacy", "")).lower() in {"1", "true", "yes"} or (
+                    str(qp.get("envelope", "")).lower() in {"0", "false", "no"}
+                ) or (request.headers.get("x-legacy-format", "").lower() in {"1", "true", "yes"})
+            except Exception:
+                legacy = False
+            if legacy:
+                return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
+
+            errors = [EnvelopeError(code="internal_error", message=str(exc))]
+            env = EnvelopeParser.build_envelope(
+                None,
+                status=EnvelopeStatus.ERROR,
+                errors=errors,
+                request_id=request.headers.get("x-request-id"),
+                source="agentsmcp-server",
+            )
+            return JSONResponse(status_code=500, content=env.model_dump(mode="json"))
+
+        @self.app.exception_handler(ValidationError)
+        async def validation_exc_handler(request: Request, exc: ValidationError):
+            try:
+                qp = request.query_params
+                legacy = str(qp.get("legacy", "")).lower() in {"1", "true", "yes"} or (
+                    str(qp.get("envelope", "")).lower() in {"0", "false", "no"}
+                ) or (request.headers.get("x-legacy-format", "").lower() in {"1", "true", "yes"})
+            except Exception:
+                legacy = False
+            if legacy:
+                return JSONResponse(status_code=422, content={"detail": str(exc)})
+            errors = [EnvelopeError(code="validation_error", message=str(exc))]
+            env = EnvelopeParser.build_envelope(
+                None, status=EnvelopeStatus.ERROR, errors=errors, request_id=request.headers.get("x-request-id"), source="agentsmcp-server"
+            )
+            return JSONResponse(status_code=422, content=env.model_dump(mode="json"))
+
     def _setup_metrics(self) -> None:
         # Gate metrics by settings to avoid overhead by default
         if getattr(self, "settings", None) and not self.settings.prometheus_enabled:
@@ -549,9 +804,9 @@ class AgentServer:
                 self.log.warning("Prometheus instrumentation failed to initialize")
 
         @self.app.get("/agents")
-        async def list_agents():
+        async def list_agents(request: Request):
             """List available agent types."""
-            return {
+            return _wrap_response(request, {
                 "agents": list(self.config.agents.keys()),
                 "configs": {
                     name: {
@@ -561,7 +816,7 @@ class AgentServer:
                     }
                     for name, config in self.config.agents.items()
                 },
-            }
+            })
 
     async def start(self):
         """Start the server."""

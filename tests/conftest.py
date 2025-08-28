@@ -235,6 +235,103 @@ This appears to be a well-structured Python project following standard conventio
     }
 
 
+# --------------------------------------------------------------------------- #
+#  Pipeline Testing Fixtures
+# --------------------------------------------------------------------------- #
+@pytest.fixture(scope="session")
+def temp_template_dir():
+    """
+    Create a temporary directory that lives for the whole test session.
+    The directory is automatically deleted at the end.
+    """
+    import shutil
+    dir_path = Path(tempfile.mkdtemp(prefix="agentsmcp_templates_"))
+    yield dir_path
+    shutil.rmtree(str(dir_path), ignore_errors=True)
+
+
+@pytest.fixture(scope="session")
+def hello_world_template(temp_template_dir):
+    """
+    A minimal valid pipeline template that renders to a YAML
+    representation of a pipeline with basic stages.
+    """
+    content = """
+name: "{{ pipeline_name | default('hello-world') }}-pipeline"
+description: >
+  A simple test pipeline with basic stages.
+version: "1.0.0"
+
+defaults:
+  timeout_seconds: 300
+  retries: 1
+  on_failure: retry
+
+stages:
+  - name: setup
+    description: Setup stage
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: setup_project
+        payload:
+          message: "{{ message | default('Hello World') }}"
+        timeout_seconds: 300
+
+notifications:
+  on_success:
+    - type: slack
+      channel: "#ci-success"
+      message: "✅ Pipeline {{ pipeline_name | default('hello-world') }} completed"
+  on_failure:
+    - type: slack
+      channel: "#ci-failure"
+      message: "❌ Pipeline {{ pipeline_name | default('hello-world') }} failed"
+    """
+    file_path = temp_template_dir / "hello_world.yaml"
+    file_path.write_text(content.strip())
+    return file_path
+
+
+@pytest.fixture(scope="session")
+def invalid_template(temp_template_dir):
+    """
+    A template that deliberately produces invalid YAML after rendering.
+    This is used to test validation failures.
+    """
+    content = """
+name: "{{ pipeline_name }}-pipeline"
+description: "Invalid template"
+version: "1.0.0"
+
+stages:
+  - name: bad-stage
+    description: "This will fail"
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: {{ undefined_variable }}  # <-- Jinja2 will raise an error
+        payload: {}
+    """
+    file_path = temp_template_dir / "invalid.yaml"
+    file_path.write_text(content.strip())
+    return file_path
+
+
+@pytest.fixture
+def template_manager(hello_world_template, invalid_template, temp_template_dir):
+    """
+    Returns a fresh TemplateManager instance pointing at the temporary
+    template directory.
+    """
+    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+    from agentsmcp.templates.manager import TemplateManager
+
+    manager = TemplateManager(builtin_dir=temp_template_dir)
+    return manager
+
+
 # Pytest markers for multi-turn test categorization
 def pytest_configure(config):
     """Configure custom pytest markers."""
@@ -244,3 +341,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "regression: Regression tests to prevent breaking changes")
     config.addinivalue_line("markers", "multiturn: Multi-turn tool execution tests")
     config.addinivalue_line("markers", "slow: Tests that take longer to run")
+    config.addinivalue_line("markers", "pipeline: Pipeline system tests")
+    config.addinivalue_line("markers", "template: Template management tests")
+    config.addinivalue_line("markers", "ui: User interface tests")
+    config.addinivalue_line("markers", "async: Asynchronous tests")

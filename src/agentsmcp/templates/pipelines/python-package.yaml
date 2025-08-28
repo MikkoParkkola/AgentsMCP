@@ -1,0 +1,120 @@
+# AgentsMCP Python Package Pipeline Template
+name: "{{ repository | default('python-package') }}-pipeline"
+description: >
+  Complete CI pipeline for Python packages with testing, linting, security scanning,
+  type checking, and optional publishing to PyPI.
+version: "1.0.0"
+
+defaults:
+  timeout_seconds: 300
+  retries: 2
+  on_failure: retry
+
+stages:
+  - name: install-deps
+    description: Install Python dependencies
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: install_requirements
+        payload:
+          requirements_file: "requirements.txt"
+          dev_requirements: "requirements-dev.txt"
+        timeout_seconds: 600
+        retries: 2
+
+  - name: lint
+    description: Run linting and code style checks
+    parallel: true
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_flake8
+        payload:
+          src_path: "src"
+          config_file: ".flake8"
+        timeout_seconds: 180
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_black
+        payload:
+          src_path: "src"
+          check_only: true
+        timeout_seconds: 120
+
+  - name: type-check
+    description: Run static type checking
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_mypy
+        payload:
+          src_path: "src"
+          config_file: "mypy.ini"
+        timeout_seconds: 240
+
+  - name: security-scan
+    description: Security vulnerability scanning
+    parallel: false
+    agents:
+      - type: claude
+        model: claude-3.5-sonnet
+        task: run_bandit
+        payload:
+          src_path: "src"
+          config_file: ".bandit"
+        timeout_seconds: 300
+
+  - name: unit-tests
+    description: Run unit tests with coverage
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_pytest
+        payload:
+          test_path: "tests"
+          coverage: true
+          coverage_min: "{{ coverage_min | default('80') }}"
+        timeout_seconds: 900
+        retries: 1
+
+  - name: build
+    description: Build Python package
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: build_wheel
+        payload:
+          source_dir: "."
+          output_dir: "dist"
+        timeout_seconds: 300
+
+  - name: publish
+    description: Publish to PyPI (if enabled)
+    parallel: false
+    agents:
+      - type: codex
+        model: codex
+        task: publish_pypi
+        payload:
+          package_name: "{{ package_name | default('my_package') }}"
+          version: "{{ version | default('1.0.0') }}"
+          pypi_token: "{{ pypi_token | default('') }}"
+          test_pypi: "{{ test_pypi | default(false) }}"
+        timeout_seconds: 300
+        retries: 3
+    depends_on: ["build"]
+
+notifications:
+  on_success:
+    - type: slack
+      channel: "#ci-success"
+      message: "✅ Python package {{ package_name | default('my_package') }} pipeline completed successfully"
+  on_failure:
+    - type: slack
+      channel: "#ci-failure"
+      message: "❌ Python package {{ package_name | default('my_package') }} pipeline failed"

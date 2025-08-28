@@ -1,0 +1,57 @@
+pipeline:
+  name: python-ci
+  version: 0.1.0
+  description: Standard Python CI (lint, test, analysis)
+  defaults:
+    timeout_seconds: 600
+    retries: 1
+    on_failure: retry
+
+  stages:
+    - name: build
+      description: Lint and type-check
+      parallel: true
+      agents:
+        - type: ollama-turbo
+          model: gpt-oss:120b
+          task: run_ruff
+          payload:
+            cmd: "ruff check ."
+            cwd: "."
+        - type: ollama-turbo
+          model: gpt-oss:120b
+          task: run_mypy
+          payload:
+            cmd: "mypy src/"
+            cwd: "."
+
+    - name: test
+      description: Run unit tests with coverage
+      parallel: false
+      agents:
+        - type: claude
+          model: claude-3-5-sonnet
+          task: run_pytest
+          payload:
+            cmd: "pytest -q --maxfail=1 --disable-warnings --cov=src --cov-report=term-missing"
+            cwd: "."
+          retries: 1
+          on_failure: retry
+
+    - name: analysis
+      description: Security and quality analysis
+      parallel: true
+      agents:
+        - type: codex
+          model: gpt-4.1
+          task: run_bandit
+          payload:
+            cmd: "bandit -q -r src -ll"
+            cwd: "."
+        - type: codex
+          model: gpt-4.1
+          task: run_pip_audit
+          payload:
+            cmd: "pip-audit -r requirements.txt || true"
+            cwd: "."
+

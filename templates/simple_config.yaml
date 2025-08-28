@@ -1,0 +1,78 @@
+# AgentsMCP Simple Configuration Template
+# This demonstrates the user-configurable model preferences system
+
+# Simple orchestration mode (default) - single main loop with intelligent model routing
+# Set to 'complex' only for enterprise use cases requiring distributed orchestration
+orchestrator_mode: simple
+
+# Model preferences for different roles (user configurable)
+model_preferences:
+  # Workhorse: High-volume, cost-sensitive tasks
+  workhorse:
+    primary_model: ollama          # Default: ollama (local, $0 cost)
+    fallback_models: [codex, claude]
+    cost_threshold: 0.01           # Very cost sensitive
+  
+  # Orchestrator: Main loop coordination, conversation continuity  
+  orchestrator:
+    primary_model: claude          # Default: claude (large context)
+    fallback_models: [codex, ollama]
+    cost_threshold: 0.05
+  
+  # Specialist: Complex reasoning, architecture tasks
+  specialist:
+    primary_model: codex           # Default: codex (superior intelligence)
+    fallback_models: [claude]
+    cost_threshold: 0.10           # Allow higher cost for complex tasks
+
+# Task complexity routing (automatic based on content analysis)
+task_routing:
+  simple_threshold: 1000          # tokens
+  complex_threshold: 50000        # tokens
+  cost_sensitive_default: false   # prefer quality over cost by default
+
+# Standard AgentsMCP configuration below
+agents:
+  claude:
+    type: claude
+    model: claude-3-5-sonnet-20241022
+    provider: anthropic
+    tools: ["mcp"]
+
+  codex:
+    type: codex  
+    model: gpt-4o
+    provider: openai
+    tools: ["mcp"]
+
+  ollama:
+    type: ollama
+    model: gpt-oss:20b
+    provider: ollama
+    tools: ["mcp"]
+
+providers:
+  openai:
+    name: openai
+    api_key: ${OPENAI_API_KEY}
+    api_base: null
+    
+  anthropic:
+    name: anthropic
+    api_key: ${ANTHROPIC_API_KEY}
+    api_base: null
+    
+  ollama:
+    name: ollama
+    api_key: null
+    api_base: http://localhost:11434
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+  cors_origins: ["*"]
+
+storage:
+  type: memory
+
+ui_enabled: true

@@ -1,20 +1,24 @@
-73 INFO: PyInstaller: 6.15.0, contrib hooks: 2025.8
-73 INFO: Python: 3.10.9
-79 INFO: Platform: macOS-15.6-arm64-arm-64bit
-79 INFO: Python environment: /Users/mikko/.pyenv/versions/3.10.9
-79 INFO: wrote /Users/mikko/github/AgentsMCP/agentsmcp.spec
-82 INFO: Module search paths (PYTHONPATH):
-['/Users/mikko/.pyenv/versions/3.10.9/lib/python310.zip',
+74 INFO: PyInstaller: 6.15.0, contrib hooks: 2025.8
+74 INFO: Python: 3.10.9
+80 INFO: Platform: macOS-15.6-arm64-arm-64bit
+80 INFO: Python environment: /Users/mikko/.pyenv/versions/3.10.9
+84 INFO: Removing temporary files and cleaning cache in /Users/mikko/github/AgentsMCP/.build/pyinstaller_cfg/pyinstaller
+84 INFO: Module search paths (PYTHONPATH):
+['/Users/mikko/github/AgentsMCP',
+ '/Users/mikko/.pyenv/versions/3.10.9/lib/python310.zip',
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10',
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/lib-dynload',
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages',
  '/Users/mikko/github/AgentsMCP/src',
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/setuptools/_vendor',
+ '/Users/mikko/github/AgentsMCP/src',
  '/Users/mikko/github/AgentsMCP/src']
 Traceback (most recent call last):
-  File "/Users/mikko/.pyenv/versions/3.10.9/bin/pyinstaller", line 7, in <module>
-    sys.exit(_console_script_run())
-  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/__main__.py", line 231, in _console_script_run
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/__main__.py", line 321, in <module>
     run()
   File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/__main__.py", line 215, in run
     run_build(pyi_config, spec_file, **vars(args))
@@ -24,7 +28,7 @@ Traceback (most recent call last):
     build(specfile, distpath, workpath, clean_build)
   File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/build_main.py", line 1220, in build
     exec(code, spec_namespace)
-  File "/Users/mikko/github/AgentsMCP/agentsmcp.spec", line 4, in <module>
+  File "agentsmcp.spec", line 9, in <module>
     a = Analysis(
   File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/build_main.py", line 533, in __init__
     self.hookspath += discover_hook_directories()

@@ -1,0 +1,157 @@
+# AgentsMCP Node.js Application Pipeline Template
+name: "{{ repository | default('node-app') }}-pipeline"
+description: >
+  Modern Node.js application CI pipeline with TypeScript, testing, security audit,
+  Docker build, and optional Kubernetes deployment.
+version: "1.0.0"
+
+defaults:
+  timeout_seconds: 300
+  retries: 2
+  on_failure: retry
+
+stages:
+  - name: setup
+    description: Setup Node.js environment and install dependencies
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: setup_node
+        payload:
+          node_version: "{{ node_version | default('20') }}"
+        timeout_seconds: 300
+      - type: codex
+        model: codex
+        task: install_node_deps
+        payload:
+          package_manager: "{{ package_manager | default('npm') }}"
+          lockfile: "{{ lockfile | default('package-lock.json') }}"
+        timeout_seconds: 600
+        retries: 3
+
+  - name: lint
+    description: Run ESLint and Prettier checks
+    parallel: true
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_eslint
+        payload:
+          src_path: "src"
+          config_file: ".eslintrc.js"
+        timeout_seconds: 240
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_prettier
+        payload:
+          src_path: "src"
+          check_only: true
+        timeout_seconds: 120
+
+  - name: type-check
+    description: TypeScript type checking
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_tsc
+        payload:
+          config_file: "tsconfig.json"
+          no_emit: true
+        timeout_seconds: 300
+
+  - name: security-audit
+    description: Security dependency audit
+    parallel: false
+    agents:
+      - type: claude
+        model: claude-3.5-sonnet
+        task: run_npm_audit
+        payload:
+          fix_issues: false
+          audit_level: "moderate"
+        timeout_seconds: 300
+
+  - name: unit-tests
+    description: Run Jest unit tests
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: run_jest
+        payload:
+          config_file: "jest.config.js"
+          coverage: true
+          coverage_threshold: "{{ coverage_threshold | default('80') }}"
+        timeout_seconds: 600
+        retries: 1
+
+  - name: build
+    description: Build application
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: build_app
+        payload:
+          build_script: "build"
+          output_dir: "dist"
+        timeout_seconds: 600
+
+  - name: docker-build
+    description: Build Docker image
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: docker_build
+        payload:
+          context: "."
+          dockerfile: "Dockerfile"
+          image_name: "{{ image_name | default('my-app') }}"
+          image_tag: "{{ image_tag | default('latest') }}"
+        timeout_seconds: 900
+        retries: 1
+    depends_on: ["build"]
+
+  - name: docker-push
+    description: Push Docker image to registry
+    parallel: false
+    agents:
+      - type: ollama-turbo
+        model: gpt-oss:120b
+        task: docker_push
+        payload:
+          image_name: "{{ image_name | default('my-app') }}"
+          image_tag: "{{ image_tag | default('latest') }}"
+          registry: "{{ registry | default('') }}"
+        timeout_seconds: 600
+        retries: 3
+    depends_on: ["docker-build"]
+
+  - name: deploy
+    description: Deploy to Kubernetes (if enabled)
+    parallel: false
+    agents:
+      - type: claude
+        model: claude-3.5-sonnet
+        task: kubernetes_deploy
+        payload:
+          namespace: "{{ k8s_namespace | default('default') }}"
+          manifest_dir: "k8s"
+          image_name: "{{ image_name | default('my-app') }}"
+          image_tag: "{{ image_tag | default('latest') }}"
+        timeout_seconds: 600
+        retries: 2
+    depends_on: ["docker-push"]
+
+notifications:
+  on_success:
+    - type: slack
+      channel: "#node-ci-success"
+      message: "✅ Node.js app {{ repository | default('my-app') }} deployed successfully"
+  on_failure:
+    - type: slack
+      channel: "#node-ci-failure"
+      message: "❌ Node.js app {{ repository | default('my-app') }} pipeline failed"

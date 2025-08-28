@@ -1,0 +1,11 @@
+{
+  "name": "auth.validate_token",
+  "purpose": "Validate and decode JWT",
+  "inputs": {"jwt": "string", "aud": "string"},
+  "outputs": {"sub": "string", "roles": ["string"], "exp": "int"},
+  "errors": ["ExpiredToken", "InvalidSignature", "WrongAudience"],
+  "perf": {"p95_ms": 5},
+  "security": ["constant-time compare", "no secrets in logs"],
+  "version": "1.0.0"
+}
+

@@ -71,7 +71,7 @@ try:
     from .components.chat_history import ChatHistoryDisplay
     from .components.realtime_input import RealTimeInputField
     from .keyboard_input import KeyboardInput, KeyCode
-except Exception:  # pragma: no cover
+except Exception as e:  # pragma: no cover
     # If the components cannot be imported we fall back to the legacy
     # input & history handling.  
     EnhancedChatInput = None   # type: ignore
@@ -203,6 +203,31 @@ class ModernTUI:
         self._max_errors_per_section = 3  # Max errors before fallback
         self._error_suppression = {}  # Track suppressed errors
         self._last_error_log_time = {}  # Rate limit error logging
+        
+        # Initialize console early for RealTimeInputField
+        if Console is not None:
+            try:
+                self._console = Console(force_terminal=True)
+            except Exception:
+                self._console = None
+        else:
+            self._console = None
+        
+        # Initialize RealTimeInputField now that console is available
+        if RealTimeInputField is not None and self._console is not None:
+            try:
+                self.realtime_input = RealTimeInputField(
+                    console=self._console,
+                    prompt=">>> ",
+                    max_width=None,
+                    max_height=3
+                )
+                self._connect_input_events()
+            except Exception:
+                # Fallback gracefully if initialization fails
+                self.realtime_input = None
+        else:
+            self.realtime_input = None
 
     # ------------------------------------------------------------------- #
     # Public API
@@ -233,19 +258,19 @@ class ModernTUI:
             return
             
         # ------------------------------------------------------------------- #
-        # 2️⃣  Initialise Rich console & layout
+        # 2️⃣  Initialise Rich console & layout (if not already done)
         # ------------------------------------------------------------------- #
-        try:
-            # Check if theme_manager has rich_theme method, otherwise use default
-            if hasattr(self.theme_manager, 'rich_theme'):
-                console_theme = self.theme_manager.rich_theme()
-            else:
-                console_theme = None
-            
-            self._console = Console(force_terminal=True, theme=console_theme)
-        except Exception:
-            self._console = Console(force_terminal=True)
-            
+        if self._console is None:
+            try:
+                # Check if theme_manager has rich_theme method, otherwise use default
+                if hasattr(self.theme_manager, 'rich_theme'):
+                    console_theme = self.theme_manager.rich_theme()
+                else:
+                    console_theme = None
+                
+                self._console = Console(force_terminal=True, theme=console_theme)
+            except Exception:
+                self._console = Console(force_terminal=True)
         # Initialize enhanced chat components now that console is ready
         if EnhancedChatInput is not None and ChatHistoryDisplay is not None:
             try:
@@ -267,21 +292,7 @@ class ModernTUI:
                     self._print_system_message("Running in non-interactive mode - using line-based input")
             except Exception:
                 self._keyboard_input = None
-                
-        # Initialize real-time input field
-        if RealTimeInputField is not None:
-            try:
-                self.realtime_input = RealTimeInputField(
-                    console=self._console,
-                    prompt=">>> ",
-                    max_width=None,  # No width constraint to match other panels
-                    max_height=3
-                )
-                self._connect_input_events()
-            except Exception:
-                # Fallback to legacy input
-                self.realtime_input = None
-            
+        
         self._layout = self._build_layout()
         self._running = True
 
@@ -334,10 +345,10 @@ class ModernTUI:
                     if input_received:
                         self.mark_dirty("content")  # Input processing affects chat history
                     
-                    # Handle refresh requests (with debouncing)
+                    # Handle refresh requests (with minimal debouncing for responsiveness)
                     if self._should_refresh():
-                        # Small debounce to batch rapid changes
-                        await asyncio.sleep(0.03)
+                        # Minimal debounce to batch rapid changes while keeping input responsive
+                        await asyncio.sleep(0.01)  # Reduced from 0.03 to 0.01 seconds
                         
                         # Update UI only if still dirty after debounce
                         if self._should_refresh():
@@ -387,14 +398,18 @@ class ModernTUI:
         elif section in self._cache_version:
             self._cache_version[section] += 1
         
-        # Add debouncing to prevent excessive refreshes
+        # Add debouncing to prevent excessive refreshes, but use shorter debounce for input
         if not hasattr(self, '_last_dirty_time'):
             self._last_dirty_time = 0.0
         
         import time
         now = time.time()
-        # Only trigger refresh if enough time has passed (100ms debounce)
-        if now - self._last_dirty_time > 0.1:
+        
+        # Use shorter debounce for footer (input field) to enable real-time typing
+        debounce_time = 0.02 if section == "footer" else 0.1  # 20ms for input, 100ms for others
+        
+        # Only trigger refresh if enough time has passed
+        if now - self._last_dirty_time > debounce_time:
             self._refresh_event.set()
             self._last_dirty_time = now
     
@@ -573,13 +588,18 @@ class ModernTUI:
         if not self.realtime_input:
             return
             
-        # Only connect submit events - removed on_change to prevent excessive refresh
+        # Connect both submit and change events for real-time feedback
         async def on_input_submit(text: str) -> None:
             await self._input_queue.put(text)
             self.realtime_input.clear_input()  # Clear after submission
-            self.mark_dirty("footer")  # Only refresh input area on submit
+            self.mark_dirty("footer")  # Refresh input area on submit
+            
+        async def on_input_change(text: str) -> None:
+            # Trigger real-time visual updates for typing feedback
+            self.mark_dirty("footer")
             
         self.realtime_input.on_submit(on_input_submit)
+        self.realtime_input.on_change(on_input_change)
 
     def _render_welcome(self) -> None:
         """Display a brief welcome message."""
@@ -1596,8 +1616,8 @@ class ModernTUI:
                 if self.realtime_input is not None:
                     handled = await self.realtime_input.handle_key(key_str)
                     if handled:
-                        # Trigger UI refresh to show updated input
-                        self.mark_dirty("footer")
+                        # Input handled successfully - no need to trigger refresh here
+                        # The RealTimeInputField will trigger change events automatically
                         continue
                 
                 # Handle special keys that create complete input

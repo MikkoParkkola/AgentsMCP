@@ -292,3 +292,5 @@ See [docs/deployment.md](docs/deployment.md) for comprehensive deployment guidan
 ## License
 
 See [LICENSE](LICENSE) file for details.
+# Recommended for TUI input handling on iTerm2/Terminal.app
+pip install prompt_toolkit

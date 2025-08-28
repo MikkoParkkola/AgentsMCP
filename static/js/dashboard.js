@@ -31,6 +31,43 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 /* -----------------------------------------------------------------
+   0️⃣.1  READINESS BANNER HELPERS
+   ----------------------------------------------------------------- */
+function showBanner(msg, level = "warning") {
+  const el = $("#globalBanner");
+  if (!el) return;
+  el.classList.remove("d-none", "alert-warning", "alert-danger", "alert-info", "alert-success");
+  el.classList.add(`alert-${level}`);
+  el.textContent = msg;
+}
+
+function hideBanner() {
+  const el = $("#globalBanner");
+  if (!el) return;
+  el.classList.add("d-none");
+}
+
+async function waitForReadiness(maxWaitMs = 10000) {
+  const start = Date.now();
+  const msg = "System not ready yet. Retrying connection...";
+  showBanner(msg, "warning");
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const resp = await fetch(`${API_BASE}/health/ready`, { cache: "no-store" });
+      if (resp.ok) {
+        hideBanner();
+        return true;
+      }
+    } catch (e) {
+      // ignore and retry with backoff
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  showBanner("Service unavailable. Some features may be disabled.", "danger");
+  return false;
+}
+
+/* -----------------------------------------------------------------
    1️⃣  JWT TOKEN MANAGEMENT
    ----------------------------------------------------------------- */
 const tokenStore = {
@@ -227,6 +264,18 @@ function initAgentChart() {
     },
   });
 }
+
+/* -----------------------------------------------------------------
+   9️⃣  BOOTSTRAP – on DOM ready, gate by readiness, then init SSE/UI
+   ----------------------------------------------------------------- */
+document.addEventListener("DOMContentLoaded", async () => {
+  const ready = await waitForReadiness(8000);
+  // Initialize charts/UI regardless, but only start SSE if ready
+  initAgentChart();
+  if (ready) {
+    startAgentsSSE();
+  }
+});
 
 /** Update the chart with a fresh count object {online, idle, busy, offline}. */
 function updateAgentChart(counts) {

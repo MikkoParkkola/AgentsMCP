@@ -75,15 +75,10 @@ except Exception:  # pragma: no cover
     _HAS_FASTAPI = False
     raise ImportError("FastAPI is required for the web server")
 
-# Pydantic for configuration and validation
+# Pydantic for configuration and validation (v2)
 try:
-    from pydantic import BaseModel, Field
-    try:
-        # Try new pydantic-settings package first (v2+)
-        from pydantic_settings import BaseSettings
-    except ImportError:
-        # Fallback to old import (v1)
-        from pydantic import BaseSettings
+    from pydantic import BaseModel, Field, ConfigDict
+    from pydantic_settings import BaseSettings
     _HAS_PYDANTIC = True
 except Exception:  # pragma: no cover
     _HAS_PYDANTIC = False
@@ -211,10 +206,11 @@ class Settings(BaseSettings):
         description="Import path for RaftCluster"
     )
 
-    class Config:
-        env_file = ".env"
-        env_prefix = "AGENTSMCP_"
-        case_sensitive = False
+    model_config = ConfigDict(
+        env_file=".env",
+        env_prefix="AGENTSMCP_",
+        case_sensitive=False
+    )
 
 
 settings = Settings()  # Singleton instance used throughout the module
@@ -782,6 +778,13 @@ def create_app() -> FastAPI:
     app.include_router(agent_router, prefix="/agents", tags=["agents"])
     app.include_router(task_router, prefix="/tasks", tags=["tasks"])
     app.include_router(system_router, prefix="/system", tags=["system"])
+    # HITL approval UI/API
+    try:
+        from agentsmcp.web.approval_ui import router as hitl_router
+        app.include_router(hitl_router)
+        log.info("hitl_router_registered")
+    except Exception as exc:  # pragma: no cover
+        log.error("hitl_router_registration_failed", exc_info=exc)
     app.include_router(event_router, prefix="/events", tags=["events"])
 
     return app
@@ -900,15 +903,27 @@ async def update_agent(
     return AgentInfo(**updated)
 
 
+from agentsmcp.security.hitl import hitl_required
+
+
+@hitl_required(operation="delete_agent", risk_level="high", priority=10)
+async def _delete_agent_op(agent_id: str, _current_user: str) -> None:
+    success = await run_in_threadpool(lambda: _agent_registry.remove_agent(agent_id))
+    if not success:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+
 @agent_router.delete(
     "/{agent_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete an agent",
 )
-async def delete_agent(agent_id: str = Path(..., description="Agent identifier")) -> Response:
-    success = await run_in_threadpool(lambda: _agent_registry.remove_agent(agent_id))
-    if not success:
-        raise HTTPException(status_code=404, detail="Agent not found")
+async def delete_agent(
+    agent_id: str = Path(..., description="Agent identifier"),
+    _current_user: str = Depends(get_current_user),
+) -> Response:
+    # Route enforces HITL via decorated internal operation
+    await _delete_agent_op(agent_id=agent_id, _current_user=_current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1326,6 +1341,13 @@ async def on_startup() -> None:
              has_sse=_HAS_SSE,
              has_websocket=_HAS_WEBSOCKET,
              has_jwt=_HAS_JOSE)
+    # Start HITL subsystem
+    try:
+        from agentsmcp.security.hitl import start_hitl
+        await start_hitl()
+        log.info("hitl_started")
+    except Exception as exc:  # pragma: no cover
+        log.error("hitl_start_failed", exc_info=exc)
 
 
 @app.on_event("shutdown")
@@ -1355,6 +1377,12 @@ async def on_shutdown() -> None:
         pass
 
     log.info("agentsmcp_web_server_shutdown_complete")
+    # Stop HITL subsystem
+    try:
+        from agentsmcp.security.hitl import stop_hitl
+        await stop_hitl()
+    except Exception:
+        pass
 
 
 # Root redirect to docs

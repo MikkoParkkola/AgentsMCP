@@ -1,0 +1,38 @@
+pipeline:
+  name: node-ci
+  version: 0.1.0
+  description: Standard Node.js CI (install, lint, test)
+  defaults:
+    timeout_seconds: 900
+    retries: 1
+    on_failure: retry
+
+  stages:
+    - name: build
+      description: Install dependencies and lint
+      parallel: false
+      agents:
+        - type: ollama-turbo
+          model: gpt-oss:120b
+          task: run_npm_ci
+          payload:
+            cmd: "npm ci"
+            cwd: "."
+        - type: ollama-turbo
+          model: gpt-oss:120b
+          task: run_eslint
+          payload:
+            cmd: "npx eslint ."
+            cwd: "."
+
+    - name: test
+      description: Run unit tests
+      parallel: false
+      agents:
+        - type: claude
+          model: claude-3-5-sonnet
+          task: run_jest
+          payload:
+            cmd: "npx jest --ci --reporters=default"
+            cwd: "."
+

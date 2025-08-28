@@ -79,5 +79,19 @@ Template:
 - **From:** automated agent
 - **To:** contributors
 - **Type:** instruction
-- **Message:** Completed fresh architecture/code analysis using Claude’s prior analysis as input; created synthesis and updated logs.
+- **Message:** Completed fresh architecture/code analysis using Claude's prior analysis as input; created synthesis and updated logs.
 - **Follow-up:** Implement Phase 1 items: use single AgentManager in API, fix job cleanup time math, consolidate EventBus, add basic metrics. Prepare tests and PRs accordingly.
+
+## 2025-08-27 (Current Session)
+- **From:** automated agent
+- **To:** contributors
+- **Type:** implementation
+- **Message:** Completed P1-P5 of AGENTS.md v2 multi-agent orchestration system. Implemented role-based agent system, versioned envelopes, two-tier architecture, golden tests, and full CLI integration.
+- **Follow-up:** P6-P10 remaining. Updated backlog to make RAG optional based on best practices feedback.
+
+## 2025-08-27 Best Practices Update
+- **From:** user
+- **To:** contributors
+- **Type:** architectural guidance
+- **Message:** RAG pipeline should be optional (disabled by default) as it can easily get out of date. Some practitioners strongly advise against RAG unless fresh data can be guaranteed.
+- **Follow-up:** Updated product-details.md to reflect RAG as optional. Created agent-architecture-best-practices.md documenting this and other key architectural decisions.

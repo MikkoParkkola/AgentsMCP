@@ -18,10 +18,11 @@ dependencies = [
     "openai>=1.0.0,<2.0.0",
     "python-json-logger",
     # Metrics/discovery/security moved to extras to keep minimal install light
+    "prompt_toolkit>=3.0.0",
 ]
 
 [project.scripts]
-agentsmcp = "agentsmcp.cli:main"
+agentsmcp = "agentsmcp.cli_minimal:main"
 
 [project.optional-dependencies]
 dev = [
@@ -53,6 +54,13 @@ security = [
 ]
 metrics = [
     "prometheus-fastapi-instrumentator",
+    "opentelemetry-api>=1.20.0,<2.0.0",
+    "opentelemetry-sdk>=1.20.0,<2.0.0",
+    "opentelemetry-instrumentation-fastapi>=0.41.0,<1.0.0",
+    "opentelemetry-exporter-jaeger-thrift>=1.20.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0,<2.0.0",
+    "opentelemetry-exporter-prometheus>=1.12.0,<2.0.0",
+    "prometheus-client>=0.17.0,<1.0.0",
 ]
 bench = [
     # placeholder for future benchmarking deps

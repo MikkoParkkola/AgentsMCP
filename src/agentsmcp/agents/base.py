@@ -165,8 +165,14 @@ class BaseAgent(ABC):
         try:
             self.logger.info(f"Executing task with {self.agent_config.type} agent")
 
-            # Run the agent with the task
-            result = await Runner.run(self.openai_agent, task)
+            # Optional rate limiting + circuit breaker per provider (env-gated)
+            try:
+                from ..rate_limiter import guard_provider_call
+                provider_name = getattr(getattr(self.agent_config, "provider", None), "value", None) or "openai"
+                result = await guard_provider_call(provider_name, Runner.run(self.openai_agent, task))
+            except Exception:
+                # Fallback without guards if anything goes wrong
+                result = await Runner.run(self.openai_agent, task)
 
             # Extract the final output
             output = getattr(result, "final_output", str(result))

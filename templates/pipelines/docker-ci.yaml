@@ -1,0 +1,45 @@
+pipeline:
+  name: docker-ci
+  version: 0.1.0
+  description: Build and scan Docker image
+  defaults:
+    timeout_seconds: 1200
+    retries: 1
+    on_failure: abort
+
+  stages:
+    - name: build
+      description: Build Docker image
+      parallel: false
+      agents:
+        - type: ollama-turbo
+          model: gpt-oss:120b
+          task: docker_build
+          payload:
+            cmd: "docker build -t myapp:ci ."
+            cwd: "."
+
+    - name: analysis
+      description: Scan built image with Trivy
+      parallel: false
+      agents:
+        - type: codex
+          model: gpt-4.1
+          task: trivy_scan
+          payload:
+            cmd: "trivy image --exit-code 0 --severity HIGH,CRITICAL myapp:ci"
+            cwd: "."
+
+    # Example deploy stage guarded by HITL (requires approvals enabled)
+    - name: deploy
+      description: Deploy to staging (HITL approval)
+      parallel: false
+      agents:
+        - type: claude
+          model: claude-3-5-sonnet
+          task: deploy_staging
+          payload:
+            cmd: "./scripts/deploy_staging.sh"
+            cwd: "."
+          on_failure: abort
+
