@@ -434,6 +434,143 @@ class DisplayRenderer:
             'content_hash': region.content_hash
         }
     
+    def format_status_bar(self, content: str, width: int = 80) -> str:
+        """Format content as a status bar with borders."""
+        if width < 10:
+            return content[:width] if content else ""
+        
+        # Create bordered status bar
+        top_border = "┌" + "─" * (width - 2) + "┐"
+        content_line = f"│ {content:<{width - 4}} │"
+        bottom_border = "└" + "─" * (width - 2) + "┘"
+        
+        return "\n".join([top_border, content_line, bottom_border])
+    
+    def format_section_header(self, title: str, width: int = 80, style: str = "double") -> str:
+        """Format a section header with borders."""
+        if width < len(title) + 4:
+            return title
+        
+        if style == "double":
+            # Double line style for main sections
+            top = "╔" + "═" * (width - 2) + "╗"
+            middle = f"║ {title:^{width - 4}} ║"
+            bottom = "╚" + "═" * (width - 2) + "╝"
+        elif style == "single":
+            # Single line style for subsections  
+            top = "┌" + "─" * (width - 2) + "┐"
+            middle = f"│ {title:^{width - 4}} │"
+            bottom = "└" + "─" * (width - 2) + "┘"
+        else:
+            # Simple style
+            line = "─" * width
+            middle = f" {title} "
+            return f"{line}\n{middle}\n{line}"
+        
+        return "\n".join([top, middle, bottom])
+    
+    def format_message_box(self, content: str, width: int = 80, box_type: str = "info") -> str:
+        """Format content in a message box with appropriate styling."""
+        if width < 10:
+            return content
+        
+        # Choose box styling based on type
+        if box_type == "error":
+            icon = "❌"
+            border_char = "═"
+            corner_tl, corner_tr = "╔", "╗"
+            corner_bl, corner_br = "╚", "╝"
+            side_char = "║"
+        elif box_type == "warning":
+            icon = "⚠️"
+            border_char = "─"
+            corner_tl, corner_tr = "┌", "┐"
+            corner_bl, corner_br = "└", "┘"
+            side_char = "│"
+        elif box_type == "success":
+            icon = "✅"
+            border_char = "─"
+            corner_tl, corner_tr = "┌", "┐"
+            corner_bl, corner_br = "└", "┘"
+            side_char = "│"
+        else:  # info
+            icon = "ℹ️"
+            border_char = "─"
+            corner_tl, corner_tr = "┌", "┐"
+            corner_bl, corner_br = "└", "┘"
+            side_char = "│"
+        
+        # Split content into lines and wrap if needed
+        lines = []
+        for line in content.split('\n'):
+            if len(line) <= width - 6:  # Account for icon, borders, and padding
+                lines.append(line)
+            else:
+                # Simple word wrapping
+                words = line.split()
+                current_line = ""
+                for word in words:
+                    if len(current_line + word + 1) <= width - 6:
+                        current_line += word + " " if current_line else word
+                    else:
+                        if current_line:
+                            lines.append(current_line)
+                        current_line = word
+                if current_line:
+                    lines.append(current_line)
+        
+        # Build the box
+        result_lines = []
+        
+        # Top border
+        result_lines.append(corner_tl + border_char * (width - 2) + corner_tr)
+        
+        # Content lines with icon on first line
+        for i, line in enumerate(lines):
+            if i == 0:
+                content_text = f"{icon} {line}"
+            else:
+                content_text = f"  {line}"
+            
+            padded_content = f"{side_char} {content_text:<{width - 4}} {side_char}"
+            result_lines.append(padded_content)
+        
+        # Bottom border
+        result_lines.append(corner_bl + border_char * (width - 2) + corner_br)
+        
+        return "\n".join(result_lines)
+    
+    def format_list_items(self, items: List[str], width: int = 80, bullet: str = "•") -> str:
+        """Format a list of items with consistent indentation."""
+        if not items:
+            return ""
+        
+        formatted_lines = []
+        for item in items:
+            if len(item) <= width - 4:
+                formatted_lines.append(f"  {bullet} {item}")
+            else:
+                # Wrap long items
+                words = item.split()
+                current_line = ""
+                for word in words:
+                    if len(current_line + word + 1) <= width - 6:
+                        current_line += word + " " if current_line else word
+                    else:
+                        if current_line:
+                            if not formatted_lines or not formatted_lines[-1].startswith(f"  {bullet}"):
+                                formatted_lines.append(f"  {bullet} {current_line}")
+                            else:
+                                formatted_lines.append(f"    {current_line}")
+                        current_line = word
+                if current_line:
+                    if not formatted_lines:
+                        formatted_lines.append(f"  {bullet} {current_line}")
+                    else:
+                        formatted_lines.append(f"    {current_line}")
+        
+        return "\n".join(formatted_lines)
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get renderer statistics."""
         return {

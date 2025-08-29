@@ -19,7 +19,7 @@ from .input_handler import InputHandler
 from .keyboard_processor import KeyboardProcessor
 from .layout_engine import LayoutEngine
 from .components.chat_input import ChatInput, ChatInputEvent, create_chat_input
-from .components.chat_history import ChatHistory, ChatMessage, MessageRole, create_chat_history
+from .components.chat_history import ChatHistory, ChatMessage, MessageRole, MessageStatus, create_chat_history
 
 logger = logging.getLogger(__name__)
 
@@ -389,11 +389,20 @@ Start typing to begin..."""
                     await self.chat_history.add_message(response, MessageRole.SYSTEM)
                 else:
                     error = result.get("error", "Unknown command")
-                    await self.chat_history.add_message(f"❌ {error}", MessageRole.ERROR)
+                    await self._display_error_with_recovery("Command Error", error, [
+                        "1. Check the command spelling and try again",
+                        "2. Use /help to see all available commands",
+                        "3. Try the command without arguments for usage info"
+                    ])
                     
         except Exception as e:
             logger.error(f"Error handling command '{cmd}': {e}")
-            await self.chat_history.add_message(f"❌ Error executing command: {e}", MessageRole.ERROR)
+            await self._display_error_with_recovery("Command Execution Error", str(e), [
+                "1. Check system status with /status command",
+                "2. Try restarting the application with /restart",
+                "3. Report the issue if it persists",
+                "4. Use /debug for detailed system information"
+            ])
     
     async def _handle_quit_command(self):
         """Handle quit command."""
@@ -402,35 +411,112 @@ Start typing to begin..."""
         await self.app_controller.shutdown(graceful=True)
     
     async def _handle_help_command(self):
-        """Handle help command."""
-        help_text = """📖 **Chat Interface Help**
-
-**Basic Commands:**
-• `/quit` or `/exit` - Exit the application
-• `/clear` - Clear chat history
-• `/help` - Show this help message
-• `/status` - Show system status
-• `/search <query>` - Search chat history
-
-**Input Controls:**
-• `Enter` - Send message
-• `Shift+Enter` - Multi-line input
-• `↑/↓` - Navigate input history
-• `Ctrl+C` - Cancel/clear input
-• `Ctrl+L` - Clear chat history
-• `Ctrl+F` - Search history
-• `Page Up/Down` - Scroll history
-
-**Natural Language:**
-Just type naturally! You can ask questions like:
-• "What's the system status?"
-• "Show me available models"
-• "Help me with configuration"
-• "Analyze the current project"
-
-The AI will understand your intent and help accordingly."""
+        """Handle help command with enhanced categorized help system."""
+        # Use display renderer formatting if available
+        width = 80
+        if self.display_renderer and self.display_renderer.terminal_manager:
+            try:
+                caps = self.display_renderer.terminal_manager.detect_capabilities()
+                width = min(caps.width, 100)  # Max width for readability
+            except:
+                pass
         
-        await self.chat_history.add_message(help_text, MessageRole.SYSTEM)
+        help_sections = []
+        
+        # Header
+        help_sections.append(self.display_renderer.format_section_header(
+            "AgentsMCP TUI v2 - Help System", width, "double"
+        ))
+        
+        # Commands section
+        command_items = [
+            "🚀 /quit or /exit - Exit the application gracefully",
+            "🚀 /clear or /cls - Clear chat history and start fresh", 
+            "🚀 /help or /h - Show this comprehensive help system",
+            "🚀 /status - Display detailed system status and diagnostics",
+            "🚀 /search <query> - Search through chat history",
+            "🚀 /restart - Restart the application",
+            "🚀 /debug - Show debug information for troubleshooting"
+        ]
+        
+        help_sections.append("\n" + self.display_renderer.format_section_header(
+            "🚀 Commands", width, "single"
+        ))
+        help_sections.append(self.display_renderer.format_list_items(command_items, width))
+        
+        # AI Interaction section  
+        ai_items = [
+            "💬 Chat naturally - Ask questions in plain English",
+            "💬 Multi-turn conversations - Context is maintained",
+            "💬 Ask for explanations, code help, or analysis",
+            "💬 Request system information or configuration help",
+            "💬 Get assistance with AgentsMCP features and usage"
+        ]
+        
+        help_sections.append("\n" + self.display_renderer.format_section_header(
+            "🤖 AI Interaction", width, "single"  
+        ))
+        help_sections.append(self.display_renderer.format_list_items(ai_items, width))
+        
+        # Shortcuts section
+        shortcut_items = [
+            "⌨️ Enter - Send message or execute command",
+            "⌨️ Shift+Enter - Multi-line input mode",
+            "⌨️ ↑/↓ arrows - Navigate through input history", 
+            "⌨️ Ctrl+C - Graceful exit or cancel current operation",
+            "⌨️ Ctrl+D - Quick exit",
+            "⌨️ Ctrl+L - Clear chat history instantly",
+            "⌨️ Ctrl+F - Search chat history",
+            "⌨️ Page Up/Down - Scroll through chat history",
+            "⌨️ F1 - Show this help system"
+        ]
+        
+        help_sections.append("\n" + self.display_renderer.format_section_header(
+            "⚙️ Keyboard Shortcuts", width, "single"
+        ))
+        help_sections.append(self.display_renderer.format_list_items(shortcut_items, width))
+        
+        # System section
+        system_items = [
+            "📊 Status bar shows current system state with icons",
+            "📊 Context information displays active agent and model",
+            "📊 Error messages include recovery steps and guidance",
+            "📊 All operations are logged for debugging purposes",
+            "📊 Terminal compatibility mode adapts to your environment"
+        ]
+        
+        help_sections.append("\n" + self.display_renderer.format_section_header(
+            "📊 System Information", width, "single"
+        ))
+        help_sections.append(self.display_renderer.format_list_items(system_items, width))
+        
+        # Usage examples
+        example_queries = [
+            "\"What's the current system status?\"",
+            "\"Show me the available models and agents\"", 
+            "\"Help me configure AgentsMCP for my project\"",
+            "\"Analyze the errors in the current conversation\"",
+            "\"What are the best practices for using this system?\"",
+            "\"Explain how the MCP protocol works\""
+        ]
+        
+        help_sections.append("\n" + self.display_renderer.format_section_header(
+            "💡 Example Queries", width, "single"
+        ))
+        help_sections.append(self.display_renderer.format_list_items(example_queries, width))
+        
+        # Footer with tips
+        tips_box = self.display_renderer.format_message_box(
+            "💡 TIP: Start typing to begin a conversation, or use /help <topic> for specific help sections. "
+            "The system will adapt to your terminal's capabilities automatically.",
+            width, "info"
+        )
+        help_sections.append("\n" + tips_box)
+        
+        # Combine all sections
+        complete_help = "\n".join(help_sections)
+        
+        await self.chat_history.add_message(complete_help, MessageRole.SYSTEM)
     
     async def _handle_clear_command(self):
         """Handle clear command."""
@@ -481,9 +567,15 @@ The AI will understand your intent and help accordingly."""
     async def _process_chat_message(self, text: str, user_msg_id: str):
         """Process a regular chat message."""
         if not self.conversation_manager:
-            await self.chat_history.add_message(
-                "❌ Chat backend not available. Only commands are supported.",
-                MessageRole.ERROR
+            await self._display_error_with_recovery(
+                "Backend Connection Error",
+                "The chat backend is not available. AI conversation features are currently unavailable.",
+                [
+                    "1. Check system status with /status command",
+                    "2. Restart the application with /restart",
+                    "3. Use commands (starting with /) for basic functionality",
+                    "4. Verify network connectivity if using remote services"
+                ]
             )
             return
         
@@ -524,8 +616,19 @@ The AI will understand your intent and help accordingly."""
             except asyncio.TimeoutError:
                 await self.chat_history.update_message(
                     ai_msg_id,
-                    content="⏰ Response timed out. Please try again.",
+                    content="Response processing timed out.",
                     status=MessageStatus.ERROR
+                )
+                
+                await self._display_error_with_recovery(
+                    "Processing Timeout",
+                    f"The AI response took longer than {self.config.typing_timeout} seconds to process.",
+                    [
+                        "1. Try asking a simpler or shorter question",
+                        "2. Check system status with /status",
+                        "3. Verify network connectivity for remote models",
+                        "4. Consider restarting with /restart if timeouts persist"
+                    ]
                 )
                 
                 self.state = ChatState.ERROR
@@ -537,11 +640,22 @@ The AI will understand your intent and help accordingly."""
             if self.current_message_id:
                 await self.chat_history.update_message(
                     self.current_message_id,
-                    content=f"❌ Error: {str(e)}",
+                    content="An error occurred while processing your request.",
                     status=MessageStatus.ERROR
                 )
-            else:
-                await self.chat_history.add_message(f"❌ Error: {str(e)}", MessageRole.ERROR)
+            
+            # Provide detailed error information with recovery steps
+            await self._display_error_with_recovery(
+                "Chat Processing Error",
+                f"An unexpected error occurred: {str(e)}",
+                [
+                    "1. Check if the error persists with a different question",
+                    "2. Use /status to check system health",
+                    "3. Try restarting the application with /restart",
+                    "4. Review system logs with /debug",
+                    "5. Report persistent errors to support"
+                ]
+            )
             
             self.state = ChatState.ERROR
             await self._update_status(f"Error: {str(e)}")
@@ -588,6 +702,90 @@ The AI will understand your intent and help accordingly."""
             MessageRole.SYSTEM
         )
         return True
+    
+    async def _display_error_with_recovery(self, title: str, error_message: str, recovery_steps: List[str]):
+        """Display professional error message with recovery guidance."""
+        # Get terminal width for formatting
+        width = 80
+        if self.display_renderer and self.display_renderer.terminal_manager:
+            try:
+                caps = self.display_renderer.terminal_manager.detect_capabilities()
+                width = min(caps.width, 90)
+            except:
+                pass
+        
+        # Format the error message
+        error_sections = []
+        
+        # Error header
+        error_sections.append(self.display_renderer.format_section_header(
+            f"❌ {title}", width, "single"
+        ))
+        
+        # Error description
+        error_box = self.display_renderer.format_message_box(
+            error_message, width, "error"
+        )
+        error_sections.append(error_box)
+        
+        # Recovery steps
+        if recovery_steps:
+            error_sections.append("\n" + self.display_renderer.format_section_header(
+                "🔧 Recovery Steps", width, "single"
+            ))
+            error_sections.append(self.display_renderer.format_list_items(recovery_steps, width, "→"))
+        
+        # Support information
+        support_box = self.display_renderer.format_message_box(
+            "Need additional help? Use '/status' for system diagnostics or '/help' for comprehensive guidance.",
+            width, "info"
+        )
+        error_sections.append("\n" + support_box)
+        
+        # Combine and send
+        complete_error = "\n".join(error_sections)
+        await self.chat_history.add_message(complete_error, MessageRole.ERROR)
+    
+    async def _display_system_check_failure(self, component: str, details: str):
+        """Display system check failure with diagnostic guidance."""
+        width = 80
+        if self.display_renderer and self.display_renderer.terminal_manager:
+            try:
+                caps = self.display_renderer.terminal_manager.detect_capabilities()  
+                width = min(caps.width, 90)
+            except:
+                pass
+        
+        check_sections = []
+        
+        # Header
+        check_sections.append(self.display_renderer.format_section_header(
+            f"⚠️ System Check - {component} Issue", width, "single"
+        ))
+        
+        # Problem description
+        problem_box = self.display_renderer.format_message_box(
+            f"Issue detected with {component}: {details}", width, "warning"
+        )
+        check_sections.append(problem_box)
+        
+        # System diagnostics
+        diagnostic_steps = [
+            "1. Check system status: /status",
+            "2. Verify system resources and connectivity",
+            "3. Review recent error logs: /debug", 
+            "4. Restart affected components: /restart",
+            "5. Contact support if issue persists"
+        ]
+        
+        check_sections.append("\n" + self.display_renderer.format_section_header(
+            "🔍 Diagnostic Steps", width, "single"
+        ))
+        check_sections.append(self.display_renderer.format_list_items(diagnostic_steps, width, "▶"))
+        
+        # Send to chat
+        complete_check = "\n".join(check_sections)
+        await self.chat_history.add_message(complete_check, MessageRole.ERROR)
     
     async def _update_status(self, message: str):
         """Update status message."""

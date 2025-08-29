@@ -20,6 +20,7 @@ from .display_renderer import DisplayRenderer
 from .input_handler import InputHandler
 from .component_registry import ComponentRegistry
 from .keyboard_processor import KeyboardProcessor
+from .status_manager import StatusManager, SystemState
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ class ApplicationController:
         self.input_handler: Optional[InputHandler] = None
         self.component_registry: Optional[ComponentRegistry] = None
         self.keyboard_processor: Optional[KeyboardProcessor] = None
+        self.status_manager: Optional[StatusManager] = None
         
         # Application state
         self._state = ApplicationState.STOPPED
@@ -150,17 +152,33 @@ class ApplicationController:
             # Start event system
             await self.event_system.start()
             
-            # Initialize core components
-            self.display_renderer = DisplayRenderer(self.terminal_manager)
-            if not await self.display_renderer.initialize():
-                logger.error("Failed to initialize display renderer")
+            # Initialize status manager first for tracking
+            self.status_manager = StatusManager(self.event_system)
+            if not await self.status_manager.initialize():
+                logger.error("Failed to initialize status manager")
                 self._state = ApplicationState.ERROR
                 await self._cleanup_on_error()
                 return False
             
+            await self.status_manager.set_status(SystemState.STARTING, "Initializing display system...")
+            
+            # Initialize core components
+            self.display_renderer = DisplayRenderer(self.terminal_manager)
+            if not await self.display_renderer.initialize():
+                logger.error("Failed to initialize display renderer")
+                await self.status_manager.set_error("Display renderer initialization failed")
+                self._state = ApplicationState.ERROR
+                await self._cleanup_on_error()
+                return False
+            
+            await self.status_manager.set_status(SystemState.STARTING, "Initializing input system...")
+            
             self.input_handler = InputHandler()
             if not self.input_handler.is_available():
                 logger.warning("Input handler has limited capabilities")
+                await self.status_manager.set_warning("Input handler has limited capabilities")
+            
+            await self.status_manager.set_status(SystemState.STARTING, "Setting up components...")
             
             self.component_registry = ComponentRegistry(
                 self.event_system,
@@ -172,9 +190,17 @@ class ApplicationController:
                 self.event_system
             )
             
+            await self.status_manager.set_status(SystemState.STARTING, "Configuring keyboard shortcuts...")
+            
             # Configure keyboard processor with application commands
             await self.keyboard_processor.initialize()
             self._setup_keyboard_shortcuts()
+            
+            # Update context information
+            self.status_manager.update_context(
+                agent_name="AgentsMCP",
+                connection_status="Local"
+            )
             
             # Emit startup event
             startup_event = Event(
@@ -188,6 +214,7 @@ class ApplicationController:
             
             self._state = ApplicationState.RUNNING
             self._running = True
+            await self.status_manager.set_status(SystemState.READY, "System ready for use")
             logger.info("Application started successfully")
             return True
             
@@ -557,29 +584,185 @@ class ApplicationController:
         return "Shutting down..."
     
     def _cmd_help(self, *args) -> str:
-        """Handle help command."""
+        """Handle help command with enhanced formatting."""
         if args and args[0] in self._commands:
             # Help for specific command
             return f"Help for command: {args[0]}"
         
-        # General help
-        commands = sorted(self._commands.keys())
-        return "Available commands:\n" + "\n".join(f"  {cmd}" for cmd in commands)
+        # Get terminal width for formatting
+        width = 80
+        if self.display_renderer and self.display_renderer.terminal_manager:
+            try:
+                caps = self.display_renderer.terminal_manager.detect_capabilities()
+                width = min(caps.width, 90)
+            except:
+                pass
+        
+        help_sections = []
+        
+        # Header
+        if self.display_renderer:
+            help_sections.append(self.display_renderer.format_section_header(
+                "AgentsMCP System Commands", width, "double"
+            ))
+        else:
+            help_sections.append("=== AgentsMCP System Commands ===")
+        
+        # Available commands with descriptions
+        command_descriptions = {
+            'quit': '🚪 Exit the application gracefully',
+            'exit': '🚪 Exit the application gracefully (alias for quit)',
+            'help': '❓ Show this help information', 
+            'status': '📊 Display detailed system status and diagnostics',
+            'debug': '🐛 Show debug information for troubleshooting',
+            'clear': '🧹 Clear the display and reset interface',
+            'restart': '🔄 Restart the application system'
+        }
+        
+        command_items = []
+        for cmd in sorted(self._commands.keys()):
+            description = command_descriptions.get(cmd, f"Execute {cmd} command")
+            command_items.append(f"{description}")
+        
+        if self.display_renderer:
+            help_sections.append(self.display_renderer.format_list_items(command_items, width, "▶"))
+        else:
+            help_sections.append("\n".join(f"  • {item}" for item in command_items))
+        
+        # Quick shortcuts
+        if self.display_renderer:
+            help_sections.append("\n" + self.display_renderer.format_section_header(
+                "⌨️ Quick Shortcuts", width, "single"
+            ))
+            
+            shortcut_items = [
+                "Ctrl+C - Graceful shutdown",
+                "Ctrl+D - Quick exit", 
+                "F1 - Show help system"
+            ]
+            
+            help_sections.append(self.display_renderer.format_list_items(shortcut_items, width, "⌨️"))
+        
+        # Footer
+        if self.display_renderer:
+            footer_box = self.display_renderer.format_message_box(
+                "💡 TIP: Use specific command names for detailed help. "
+                "For full chat interface help, switch to chat mode.",
+                width, "info"
+            )
+            help_sections.append("\n" + footer_box)
+        else:
+            help_sections.append("\nTIP: Use specific command names for detailed help.")
+        
+        return "\n".join(help_sections)
     
     def _cmd_status(self, *args) -> str:
-        """Handle status command."""
-        uptime = datetime.now() - self._startup_time if self._startup_time else "Unknown"
-        components = []
+        """Handle status command with enhanced formatting."""
+        # Get terminal width for formatting
+        width = 80
+        if self.display_renderer and self.display_renderer.terminal_manager:
+            try:
+                caps = self.display_renderer.terminal_manager.detect_capabilities()
+                width = min(caps.width, 100)
+            except:
+                pass
         
+        status_sections = []
+        
+        # Header
+        if self.display_renderer:
+            status_sections.append(self.display_renderer.format_section_header(
+                "📊 System Status Report", width, "double"
+            ))
+        else:
+            status_sections.append("=== System Status Report ===")
+        
+        # Application status
+        uptime = self.status_manager.get_uptime() if self.status_manager else "Unknown"
+        app_status_items = [
+            f"🔧 State: {self._state.value}",
+            f"⏱️ Uptime: {uptime}",
+            f"👁️ Current View: {self._current_view or 'None'}",
+            f"⚠️ Error Count: {self._error_count}"
+        ]
+        
+        if self.display_renderer:
+            status_sections.append("\n" + self.display_renderer.format_section_header(
+                "🏠 Application Status", width, "single"
+            ))
+            status_sections.append(self.display_renderer.format_list_items(app_status_items, width, "▶"))
+        else:
+            status_sections.append("\nApplication Status:")
+            status_sections.append("\n".join(f"  {item}" for item in app_status_items))
+        
+        # Component status
+        components = []
         if self.component_registry:
             components = list(self.component_registry.get_registered_components().keys())
         
-        return f"""Application Status:
-State: {self._state.value}
-Uptime: {uptime}
-Current View: {self._current_view or 'None'}
-Components: {len(components)}
-Error Count: {self._error_count}"""
+        component_items = [
+            f"🎛️ Display Renderer: {'✅ Active' if self.display_renderer else '❌ Not Available'}",
+            f"⌨️ Input Handler: {'✅ Active' if self.input_handler and self.input_handler.is_available() else '❌ Limited'}",
+            f"📋 Component Registry: {'✅ Active' if self.component_registry else '❌ Not Available'}",
+            f"🔤 Keyboard Processor: {'✅ Active' if self.keyboard_processor else '❌ Not Available'}",
+            f"📊 Status Manager: {'✅ Active' if self.status_manager else '❌ Not Available'}",
+            f"📦 Total Components: {len(components)}"
+        ]
+        
+        if self.display_renderer:
+            status_sections.append("\n" + self.display_renderer.format_section_header(
+                "🧩 Component Status", width, "single"  
+            ))
+            status_sections.append(self.display_renderer.format_list_items(component_items, width, "▶"))
+        else:
+            status_sections.append("\nComponent Status:")
+            status_sections.append("\n".join(f"  {item}" for item in component_items))
+        
+        # Status manager details
+        if self.status_manager:
+            stats = self.status_manager.get_stats()
+            status_items = [
+                f"🎯 Current Status: {stats['current_state']} - {stats['current_message']}",
+                f"❌ Errors: {stats['error_count']} | ⚠️ Warnings: {stats['warning_count']}",
+                f"🔄 Updates: {stats['update_count']} | 📊 Subscribers: {stats['status_subscribers']}",
+                f"📈 History Size: {stats['history_size']}"
+            ]
+            
+            if self.display_renderer:
+                status_sections.append("\n" + self.display_renderer.format_section_header(
+                    "📊 Status Manager Details", width, "single"
+                ))
+                status_sections.append(self.display_renderer.format_list_items(status_items, width, "▶"))
+            else:
+                status_sections.append("\nStatus Manager Details:")
+                status_sections.append("\n".join(f"  {item}" for item in status_items))
+        
+        # Memory and performance info
+        import psutil
+        import os
+        try:
+            process = psutil.Process(os.getpid())
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            cpu_percent = process.cpu_percent()
+            
+            perf_items = [
+                f"💾 Memory Usage: {memory_mb:.1f} MB",
+                f"🖥️ CPU Usage: {cpu_percent:.1f}%",
+                f"🔗 Open Files: {process.num_fds() if hasattr(process, 'num_fds') else 'N/A'}"
+            ]
+            
+            if self.display_renderer:
+                status_sections.append("\n" + self.display_renderer.format_section_header(
+                    "⚡ Performance Metrics", width, "single"
+                ))
+                status_sections.append(self.display_renderer.format_list_items(perf_items, width, "▶"))
+        except ImportError:
+            # psutil not available
+            pass
+        except Exception as e:
+            logger.warning(f"Could not get performance metrics: {e}")
+        
+        return "\n".join(status_sections)
     
     def _cmd_debug(self, *args) -> str:
         """Handle debug command."""
