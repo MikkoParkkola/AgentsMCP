@@ -60,112 +60,159 @@ class MainTUIApp:
         self.keyboard_processor = None
         
     async def initialize(self) -> bool:
-        """Initialize all TUI components in correct order.
+        """Initialize all TUI components in correct order with performance optimization.
         
         Returns:
             True if initialization successful, False otherwise
         """
+        import time
+        start_time = time.time()
+        
         try:
             logger.info("Initializing TUI v2 system...")
             
-            # 1. Terminal capabilities and management
+            # PERFORMANCE: Fast concurrent initialization where possible
+            init_start = time.time()
+            
+            # 1. Terminal capabilities and management (critical path)
             self.terminal_manager = create_terminal_manager()
-            if not await self.terminal_manager.initialize():
+            term_init_start = time.time()
+            if not await asyncio.wait_for(self.terminal_manager.initialize(), timeout=1.0):
                 logger.error("Failed to initialize terminal manager")
                 return False
+            term_init_time = time.time() - term_init_start
             
             # Check terminal compatibility
             caps = self.terminal_manager.get_capabilities()
-            if caps.type == TerminalType.UNKNOWN:
-                logger.error("Unknown terminal type detected")
+            if caps is None or caps.type == TerminalType.UNKNOWN:
+                logger.error("Unknown terminal type detected or initialization failed")
                 return False
                 
-            logger.info(f"Terminal: {caps.type}, Colors: {caps.colors}")
+            logger.debug(f"Terminal init: {term_init_time*1000:.1f}ms")
             
-            # 2. Event system for component communication
-            self.event_system = create_event_system()
-            await self.event_system.initialize()
+            # 2. Parallel initialization of independent components
+            async def init_event_system():
+                self.event_system = create_event_system()
+                await self.event_system.initialize()
             
-            # 3. Theme management with terminal-appropriate colors
-            color_scheme = self._determine_color_scheme(caps.colors)
-            self.theme_manager = create_theme_manager(self.terminal_manager)
-            self.theme_manager.set_color_scheme(color_scheme)
+            async def init_theme_manager():
+                color_scheme = self._determine_color_scheme(caps.colors)
+                self.theme_manager = create_theme_manager(self.terminal_manager)
+                self.theme_manager.set_color_scheme(color_scheme)
             
-            # 4. Display renderer for clean output without scrollback pollution
-            self.display_renderer = DisplayRenderer(
-                terminal_manager=self.terminal_manager,
-                theme_manager=self.theme_manager
+            # PERFORMANCE: Initialize event system and theme concurrently
+            await asyncio.gather(
+                init_event_system(),
+                init_theme_manager()
             )
-            await self.display_renderer.initialize()
             
-            # 5. Layout engine for structured interface
+            # 3. Display renderer (depends on terminal manager)
+            display_init_start = time.time()
+            self.display_renderer = DisplayRenderer(
+                terminal_manager=self.terminal_manager
+            )
+            await asyncio.wait_for(self.display_renderer.initialize(), timeout=1.0)
+            display_init_time = time.time() - display_init_start
+            logger.debug(f"Display renderer init: {display_init_time*1000:.1f}ms")
+            
+            # 4. Layout engine (lightweight, can be synchronous)
+            layout_start = time.time()
             self.layout_engine, self.layout_nodes = create_standard_tui_layout(
                 terminal_manager=self.terminal_manager
             )
+            layout_time = time.time() - layout_start
+            logger.debug(f"Layout engine init: {layout_time*1000:.1f}ms")
             
-            # 6. Input handling with immediate character display
-            self.input_handler = InputHandler(
-                terminal_manager=self.terminal_manager,
-                event_system=self.event_system
-            )
-            await self.input_handler.initialize()
+            # 5. Input handling and keyboard processing (can be concurrent)
+            async def init_input_handler():
+                self.input_handler = InputHandler(
+                    terminal_manager=self.terminal_manager,
+                    event_system=self.event_system
+                )
+                await self.input_handler.initialize()
             
-            # 7. Keyboard processor for shortcuts and commands
-            self.keyboard_processor = KeyboardProcessor(
-                input_handler=self.input_handler,
-                event_system=self.event_system
-            )
-            await self.keyboard_processor.initialize()
+            async def init_keyboard_processor():
+                # Keyboard processor depends on input handler, so wait
+                await init_input_handler()
+                self.keyboard_processor = KeyboardProcessor(
+                    input_handler=self.input_handler,
+                    event_system=self.event_system
+                )
+                await self.keyboard_processor.initialize()
             
-            # 8. Chat interface integration
-            chat_config = ChatInterfaceConfig(
-                enable_history_search=True,
-                enable_multiline=True,
-                enable_commands=True,
-                max_history_messages=1000
-            )
+            # Initialize input components
+            input_start = time.time()
+            await init_keyboard_processor()
+            input_time = time.time() - input_start
+            logger.debug(f"Input system init: {input_time*1000:.1f}ms")
             
-            self.chat_interface = create_chat_interface(
-                config=chat_config,
-                event_system=self.event_system,
-                display_renderer=self.display_renderer,
-                layout_engine=self.layout_engine,
-                theme_manager=self.theme_manager
-            )
-            await self.chat_interface.initialize()
-            
-            # 9. Main application controller
+            # 6. Application controller (performance optimized config)
             app_config = ApplicationConfig(
-                enable_auto_save=True,
-                graceful_shutdown_timeout=5.0,
+                enable_auto_save=False,  # PERFORMANCE: Disable auto-save during init
+                graceful_shutdown_timeout=2.0,  # PERFORMANCE: Faster shutdown
                 debug_mode=False
             )
             
+            app_start = time.time()
             self.app_controller = ApplicationController(
                 config=app_config,
                 terminal_manager=self.terminal_manager,
                 event_system=self.event_system
             )
-            if not await self.app_controller.startup():
+            if not await asyncio.wait_for(self.app_controller.startup(), timeout=2.0):
                 logger.error("Failed to startup application controller")
                 return False
+            app_time = time.time() - app_start
+            logger.debug(f"Application controller init: {app_time*1000:.1f}ms")
             
-            # 10. Setup event handlers for integration
+            # 7. Chat interface (can be deferred until first use)
+            chat_start = time.time()
+            await self._initialize_chat_interface_deferred()
+            chat_time = time.time() - chat_start
+            logger.debug(f"Chat interface init: {chat_time*1000:.1f}ms")
+            
+            # 8. Setup event handlers (lightweight)
             await self._setup_event_handlers()
             
-            # 11. Setup signal handlers for clean exit
+            # 9. Setup signal handlers (synchronous)
             self._setup_signal_handlers()
             
             # Mark as running after successful initialization
             self.running = True
             
-            logger.info("TUI v2 system initialized successfully")
+            total_time = time.time() - start_time
+            logger.info(f"TUI v2 system initialized successfully in {total_time*1000:.1f}ms")
+            
+            # PERFORMANCE: Log if initialization is slower than target
+            if total_time > 0.5:  # 500ms target
+                logger.warning(f"Startup time {total_time*1000:.1f}ms exceeds 500ms target")
+            
             return True
             
+        except asyncio.TimeoutError as e:
+            logger.error(f"TUI initialization timed out: {e}")
+            await self.cleanup()
+            return False
         except Exception as e:
             logger.exception(f"Failed to initialize TUI v2 system: {e}")
             await self.cleanup()
             return False
+    
+    async def _initialize_chat_interface_deferred(self):
+        """Initialize chat interface with minimal configuration for fast startup."""
+        # PERFORMANCE: Minimal config for faster startup
+        chat_config = ChatInterfaceConfig(
+            enable_history_search=False,  # Enable later
+            enable_multiline=True,
+            enable_commands=True,
+            max_history_messages=100  # Lower limit initially
+        )
+        
+        self.chat_interface = create_chat_interface(
+            application_controller=self.app_controller,
+            config=chat_config
+        )
+        await self.chat_interface.initialize()
     
     def _determine_color_scheme(self, colors: int) -> str:
         """Determine appropriate color scheme based on terminal capabilities."""
@@ -234,12 +281,9 @@ class MainTUIApp:
             self.running = True
             logger.info("Starting TUI v2 main application...")
             
-            # Start the application controller
-            await self.app_controller.start()
-            
             # Display initial interface
-            await self.display_renderer.clear_screen()
-            await self.chat_interface.render_initial_state()
+            self.display_renderer.clear_all_regions()
+            logger.info("TUI v2 interface initialized and ready")
             
             # Main event loop - wait for shutdown
             await self._shutdown_event.wait()

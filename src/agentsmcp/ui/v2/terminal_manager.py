@@ -50,6 +50,44 @@ class TerminalManager:
         """Initialize the terminal manager."""
         self._capabilities: Optional[TerminalCapabilities] = None
         self._cache_valid = False
+        self._initialized = False
+        
+    async def initialize(self) -> bool:
+        """Initialize the terminal manager asynchronously.
+        
+        Performs initial terminal capability detection and validation.
+        
+        Returns:
+            True if initialization successful, False otherwise
+        """
+        try:
+            # Detect initial capabilities
+            self._capabilities = self.detect_capabilities()
+            
+            # Validate basic terminal functionality
+            if self._capabilities.type == TerminalType.UNKNOWN:
+                return False
+            
+            # Mark as initialized
+            self._initialized = True
+            return True
+            
+        except Exception as e:
+            # Log error but don't raise - return False to indicate failure
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to initialize terminal manager: {e}")
+            return False
+    
+    def get_capabilities(self) -> Optional[TerminalCapabilities]:
+        """Get current terminal capabilities.
+        
+        Returns:
+            TerminalCapabilities object if initialized, None otherwise
+        """
+        if not self._initialized:
+            return None
+        return self._capabilities
         
     def detect_capabilities(self, force_refresh: bool = False) -> TerminalCapabilities:
         """
@@ -326,6 +364,21 @@ class TerminalManager:
         print("\nStreams:")
         for key, value in info['streams'].items():
             print(f"  {key}: {value}")
+    
+    async def cleanup(self):
+        """Cleanup terminal manager resources.
+        
+        Resets terminal state and clears cached capabilities.
+        """
+        try:
+            self._capabilities = None
+            self._cache_valid = False
+            self._initialized = False
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error during terminal manager cleanup: {e}")
 
 
 # Convenience function

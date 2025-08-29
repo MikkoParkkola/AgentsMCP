@@ -10,6 +10,9 @@ import sys
 import os
 import hashlib
 import logging
+import asyncio
+import threading
+import time
 from typing import Dict, List, Optional, Tuple, Any, NamedTuple
 from dataclasses import dataclass
 from enum import Enum
@@ -79,34 +82,67 @@ class DisplayRenderer:
             'last_render_time': 0.0
         }
     
-    def initialize(self) -> bool:
+    async def initialize(self) -> bool:
         """
-        Initialize the display renderer.
+        Initialize the display renderer with race condition protection.
         
         Returns:
             True if initialization successful
         """
-        if self._initialized:
-            return True
+        # THREAT: Race condition during initialization
+        # MITIGATION: Use asyncio Lock for atomic initialization
+        if not hasattr(self, '_init_lock'):
+            self._init_lock = asyncio.Lock()
         
-        try:
-            caps = self.terminal_manager.detect_capabilities()
-            self._render_mode = self._determine_render_mode(caps)
+        async with self._init_lock:
+            if self._initialized:
+                return True
             
-            if self._render_mode in (RenderMode.FULL_SCREEN, RenderMode.IN_PLACE):
-                self._setup_terminal_control()
-            
-            self._initialized = True
-            logger.debug(f"Display renderer initialized in {self._render_mode.value} mode")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize display renderer: {e}")
-            self._render_mode = RenderMode.FALLBACK
-            return False
+            try:
+                # SECURITY: Validate terminal manager before use
+                if not self.terminal_manager:
+                    logger.error("Terminal manager not available")
+                    return False
+                
+                # Ensure terminal manager is initialized with timeout
+                if hasattr(self.terminal_manager, 'initialize') and hasattr(self.terminal_manager, '_initialized'):
+                    if not self.terminal_manager._initialized:
+                        try:
+                            init_result = await asyncio.wait_for(
+                                self.terminal_manager.initialize(), 
+                                timeout=2.0  # PERFORMANCE: 2s timeout for initialization
+                            )
+                            if not init_result:
+                                logger.error("Terminal manager initialization failed")
+                                return False
+                        except asyncio.TimeoutError:
+                            logger.error("Terminal manager initialization timed out")
+                            return False
+                
+                # SECURITY: Validate capabilities before proceeding
+                caps = self.terminal_manager.detect_capabilities()
+                if not caps:
+                    logger.error("Unable to detect terminal capabilities")
+                    return False
+                
+                self._render_mode = self._determine_render_mode(caps)
+                
+                if self._render_mode in (RenderMode.FULL_SCREEN, RenderMode.IN_PLACE):
+                    self._setup_terminal_control()
+                
+                self._initialized = True
+                logger.debug(f"Display renderer initialized in {self._render_mode.value} mode")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Failed to initialize display renderer: {e}")
+                self._render_mode = RenderMode.FALLBACK
+                # SECURITY: Clear partial state on failure
+                self._initialized = False
+                return False
     
-    def cleanup(self):
-        """Clean up terminal state."""
+    def cleanup_sync(self):
+        """Synchronous cleanup - for context managers and immediate cleanup."""
         if not self._initialized:
             return
             
@@ -180,7 +216,8 @@ class DisplayRenderer:
     
     def _hash_content(self, content: str) -> str:
         """Generate hash for content change detection."""
-        return hashlib.md5(content.encode('utf-8')).hexdigest()[:8]
+        # PERFORMANCE: Use faster hash algorithm for real-time updates
+        return str(hash(content))[:8]
     
     def define_region(self, name: str, x: int, y: int, width: int, height: int) -> bool:
         """
@@ -219,7 +256,7 @@ class DisplayRenderer:
     
     def update_region(self, name: str, content: str, force: bool = False) -> bool:
         """
-        Update content in a region with change detection.
+        Update content in a region with change detection and performance monitoring.
         
         Args:
             name: Region name
@@ -237,8 +274,19 @@ class DisplayRenderer:
             logger.warning(f"Region {name} not defined")
             return False
         
-        # Change detection
+        # PERFORMANCE: Early exit for empty content updates
+        if not content and not region.last_content:
+            return False
+        
+        # SECURITY: Validate content size to prevent memory exhaustion
+        if len(content) > 1024 * 1024:  # 1MB limit
+            logger.warning(f"Content too large for region {name}: {len(content)} bytes")
+            return False
+        
+        # Change detection with performance tracking
+        start_time = time.time()
         content_hash = self._hash_content(content)
+        
         if not force and content_hash == region.content_hash:
             self._stats['renders_skipped'] += 1
             return False
@@ -248,7 +296,14 @@ class DisplayRenderer:
         region.last_content = content
         region.dirty = True
         
-        return self._render_region(region, content)
+        result = self._render_region(region, content)
+        
+        # PERFORMANCE: Track hash computation time
+        hash_time = time.time() - start_time
+        if hash_time > 0.001:  # Log if hashing takes >1ms
+            logger.debug(f"Slow content hashing for {name}: {hash_time*1000:.1f}ms")
+        
+        return result
     
     def _render_region(self, region: RenderRegion, content: str) -> bool:
         """Render content to a specific region."""
@@ -404,10 +459,49 @@ class DisplayRenderer:
         logger.debug("Handled terminal resize")
     
     def __enter__(self):
-        """Context manager entry."""
-        self.initialize()
-        return self
+        """Context manager entry - synchronous wrapper."""
+        # THREAT: Event loop conflicts
+        # MITIGATION: Check for existing event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # If there's a running loop, we can't use asyncio.run()
+            raise RuntimeError("DisplayRenderer context manager cannot be used with active event loop")
+        except RuntimeError as e:
+            if "no running event loop" not in str(e):
+                raise
+            # No running loop, safe to proceed
+            result = asyncio.run(self.initialize())
+            if not result:
+                raise RuntimeError("Failed to initialize DisplayRenderer")
+            return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.cleanup()
+        """Context manager exit - synchronous cleanup."""
+        # THREAT: Event loop conflicts in cleanup
+        # MITIGATION: Use synchronous cleanup method
+        self.cleanup_sync()
+    
+    async def cleanup(self):
+        """
+        Async cleanup the display renderer.
+        
+        Restores terminal state and clears all regions.
+        """
+        try:
+            if not self._initialized:
+                return
+            
+            # Clear all regions first  
+            self.clear_all_regions()
+            
+            # Use synchronous cleanup for terminal operations
+            self.cleanup_sync()
+            
+            # Reset additional state
+            self._regions.clear()
+            self._last_terminal_state = None
+            
+            logger.debug("Display renderer async cleanup completed")
+            
+        except Exception as e:
+            logger.warning(f"Error during display renderer cleanup: {e}")

@@ -87,7 +87,31 @@ class AsyncEventSystem:
             'handler_timeouts': 0,
             'handler_errors': 0
         }
+        self._initialized = False
         
+    async def initialize(self) -> bool:
+        """
+        Initialize the event system asynchronously.
+        
+        Starts the event worker loop and prepares the system for handling events.
+        
+        Returns:
+            True if initialization successful, False otherwise
+        """
+        try:
+            # Start the event system
+            await self.start()
+            
+            # Mark as initialized
+            self._initialized = True
+            
+            logger.debug("Event system initialized successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize event system: {e}")
+            return False
+    
     def add_handler(self, event_type: EventType, handler: EventHandler):
         """
         Add an event handler for a specific event type.
@@ -102,6 +126,34 @@ class AsyncEventSystem:
         # Use weak reference to prevent memory leaks
         self._handlers[event_type].append(weakref.ref(handler))
         logger.debug(f"Added handler {handler.name} for {event_type.value}")
+    
+    async def subscribe(self, event_type: EventType, handler_func: Callable):
+        """
+        Subscribe a function to handle events of a specific type.
+        
+        Args:
+            event_type: Type of events to handle
+            handler_func: Async function to call for events
+        """
+        # Create a simple event handler wrapper
+        class FunctionEventHandler(EventHandler):
+            def __init__(self, func, name=None):
+                super().__init__(name or func.__name__)
+                self.func = func
+            
+            async def handle_event(self, event: Event) -> bool:
+                try:
+                    if inspect.iscoroutinefunction(self.func):
+                        await self.func(event)
+                    else:
+                        self.func(event)
+                    return True
+                except Exception as e:
+                    logger.error(f"Error in subscribed handler {self.name}: {e}")
+                    return False
+        
+        handler = FunctionEventHandler(handler_func)
+        self.add_handler(event_type, handler)
     
     def remove_handler(self, event_type: EventType, handler: EventHandler):
         """
@@ -279,6 +331,33 @@ class AsyncEventSystem:
                 break
         
         logger.debug("Event system stopped")
+    
+    async def cleanup(self):
+        """
+        Cleanup the event system.
+        
+        Stops the event system and clears all handlers.
+        """
+        try:
+            # Stop the event system
+            await self.stop()
+            
+            # Clear all handlers
+            self._handlers.clear()
+            
+            # Reset stats
+            self._stats = {
+                'events_processed': 0,
+                'events_dropped': 0,
+                'handler_timeouts': 0,
+                'handler_errors': 0
+            }
+            
+            self._initialized = False
+            logger.debug("Event system cleanup completed")
+            
+        except Exception as e:
+            logger.warning(f"Error during event system cleanup: {e}")
     
     def get_stats(self) -> Dict[str, Any]:
         """Get event system statistics."""

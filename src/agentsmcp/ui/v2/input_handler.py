@@ -56,8 +56,13 @@ class InputHandler:
     that works in real TTY environments.
     """
     
-    def __init__(self):
-        """Initialize the input handler."""
+    def __init__(self, terminal_manager=None, event_system=None):
+        """Initialize the input handler.
+        
+        Args:
+            terminal_manager: Terminal manager instance (optional)
+            event_system: Event system instance (optional)
+        """
         self.available = _HAS_PROMPT_TOOLKIT
         self._app: Optional[Application] = None
         self._input = None
@@ -65,6 +70,11 @@ class InputHandler:
         self._callbacks = {}
         self._running = False
         self._echo_enabled = True
+        self._initialized = False
+        
+        # Store references for integration
+        self.terminal_manager = terminal_manager
+        self.event_system = event_system
         
         if self.available:
             self._initialize_prompt_toolkit()
@@ -77,6 +87,53 @@ class InputHandler:
         except Exception as e:
             # Fallback if prompt_toolkit initialization fails
             self.available = False
+    
+    async def initialize(self) -> bool:
+        """
+        Initialize the input handler asynchronously.
+        
+        Returns:
+            True if initialization successful, False otherwise
+        """
+        try:
+            if self._initialized:
+                return True
+            
+            # Perform any async initialization here
+            if self.available:
+                self._initialized = True
+                return True
+            else:
+                # Fallback mode - still consider it successful
+                self._initialized = True
+                return True
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to initialize input handler: {e}")
+            return False
+    
+    async def cleanup(self):
+        """
+        Cleanup the input handler.
+        
+        Stops any running input processing and cleans up resources.
+        """
+        try:
+            self._running = False
+            
+            if self._app:
+                self._app.exit()
+                self._app = None
+            
+            self._callbacks.clear()
+            self._initialized = False
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error during input handler cleanup: {e}")
             
     def set_echo(self, enabled: bool):
         """Enable or disable character echo."""
