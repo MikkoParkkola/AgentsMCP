@@ -371,26 +371,40 @@ class CLIApp:
         await self.statistics_display.start_display()
 
     async def _run_modern_tui(self):
-        """Start the new ModernTUI.
+        """Start the new TUI - v2 with v1 fallback.
 
-        This method extracts the UI-specific arguments (e.g. ``theme`` and
-        ``no_welcome``) from the config and forwards them to the TUI
-        constructor. ``ModernTUI.run()`` is expected to be an async coroutine
-        that drives the whole UI lifecycle.
+        This method first attempts to launch the new v2 TUI system which fixes
+        the typing and scrollback issues. If that fails, it falls back to the
+        v1 ModernTUI for compatibility.
         """
-        # Pull known arguments from config
-        theme = self.config.theme_mode
-        no_welcome = not self.config.show_welcome
+        try:
+            # Try v2 TUI first - the new and improved system
+            from .v2 import launch_main_tui
+            print("🚀 Starting TUI v2...")
+            exit_code = await launch_main_tui(self.config)
+            if exit_code != 0:
+                raise RuntimeError(f"TUI v2 failed with exit code: {exit_code}")
+        except Exception as v2_error:
+            print(f"⚠️  TUI v2 failed: {v2_error}")
+            print("🔄 Falling back to TUI v1...")
+            
+            # Fallback to v1 TUI (ModernTUI)
+            if ModernTUI is None:
+                raise RuntimeError("Both TUI v2 and v1 are not available")
 
-        tui = ModernTUI(
-            config=self.config,
-            theme_manager=self.theme_manager,
-            conversation_manager=self.command_interface.conversation_manager,
-            orchestration_manager=self.orchestration_manager,
-            theme=theme,
-            no_welcome=no_welcome,
-        )
-        await tui.run()
+            # Pull known arguments from config
+            theme = self.config.theme_mode
+            no_welcome = not self.config.show_welcome
+
+            tui = ModernTUI(
+                config=self.config,
+                theme_manager=self.theme_manager,
+                conversation_manager=self.command_interface.conversation_manager,
+                orchestration_manager=self.orchestration_manager,
+                theme=theme,
+                no_welcome=no_welcome,
+            )
+            await tui.run()
     
     async def _show_error(self, error_message: str):
         """Display error message beautifully"""
