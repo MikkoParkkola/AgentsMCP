@@ -48,8 +48,14 @@ class ProgressiveDisclosureGroup(click.Group):
             # Run original command
             result = ctx.invoke(cmd.callback, *args, **kwargs)
             
-            # Show feature discovery hint in simple mode
-            if not advanced and not ctx.resilient_parsing:
+            # Show feature discovery hint in simple mode (unless explicitly suppressed)
+            try:
+                import os as _os
+                suppress = _os.getenv("AGENTS_TUI_SUPPRESS_TIPS", "0") == "1"
+            except Exception:
+                suppress = False
+
+            if not advanced and not ctx.resilient_parsing and not suppress:
                 click.echo(
                     click.style(
                         "\n💡 Tip: Use --advanced (-A) to see more options and power-user features.",

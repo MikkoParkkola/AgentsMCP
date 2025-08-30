@@ -2,18 +2,425 @@
 """
 AgentsMCP executable wrapper
 This wrapper runs the AgentsMCP CLI with all latest fixes included.
+Enhanced with convenient TUI access and improved user experience.
 """
 import sys
 import os
 from pathlib import Path
+import subprocess
+from typing import List, Optional, Tuple
 
 # Add src directory to Python path to ensure we use the latest code
 repo_root = Path(__file__).parent
 src_dir = repo_root / "src"
 sys.path.insert(0, str(src_dir))
 
-# Import and run the CLI
-from agentsmcp.cli import main
+def check_python_version() -> bool:
+    """Check if Python version meets minimum requirements."""
+    if sys.version_info < (3, 8):
+        print("❌ AgentsMCP requires Python 3.8 or higher")
+        print(f"   Current version: {sys.version}")
+        print("   Please upgrade Python to continue.")
+        return False
+    return True
+
+def check_terminal_capabilities() -> Tuple[bool, List[str]]:
+    """Check terminal capabilities for TUI functionality."""
+    warnings = []
+    
+    # Check if running in TTY
+    if not sys.stdin.isatty():
+        warnings.append("Not running in a terminal (TTY)")
+    
+    # Check terminal size
+    try:
+        import shutil
+        cols, rows = shutil.get_terminal_size()
+        if cols < 80 or rows < 24:
+            warnings.append(f"Small terminal size ({cols}x{rows}), recommend 80x24+")
+    except Exception:
+        warnings.append("Could not determine terminal size")
+    
+    # Check for color support
+    if os.environ.get('TERM', '').lower() in ('dumb', ''):
+        warnings.append("Limited color support detected")
+    
+    return len(warnings) == 0, warnings
+
+def show_tui_help():
+    """Display TUI-specific help information."""
+    print("🎨 AgentsMCP TUI - Modern Terminal User Interface")
+    print("=" * 60)
+    print()
+    print("USAGE:")
+    print("  ./agentsmcp tui [OPTIONS]          Start TUI with default settings")
+    print("  ./agentsmcp ui [OPTIONS]           Alias for 'tui'")
+    print()
+    print("TUI OPTIONS:")
+    print("  --theme {auto|light|dark}          Set color theme (default: auto)")
+    print("  --no-welcome                       Skip welcome screen")
+    print("  --debug                           Enable debug output")
+    print("  --refresh-interval SECONDS        Auto-refresh rate (default: 2.0)")
+    print("  --orchestrator-model MODEL        Set orchestrator model")
+    print("  --agent AGENT                     Set default AI agent")
+    print("  --help                            Show this help")
+    print()
+    print("AVAILABLE THEMES:")
+    print("  auto     - Detect system theme preference")
+    print("  light    - Light theme with dark text")
+    print("  dark     - Dark theme with light text")
+    print()
+    print("COMMON AGENTS:")
+    print("  ollama-turbo-coding    - Local Ollama for coding tasks")
+    print("  ollama-turbo-general   - Local Ollama for general tasks")
+    print("  codex                  - Remote Codex agent")
+    print("  claude                 - Remote Claude agent")
+    print("  ollama                 - Basic Ollama agent")
+    print()
+    print("EXAMPLES:")
+    print("  ./agentsmcp tui                          # Start with auto theme")
+    print("  ./agentsmcp ui --theme dark              # Dark theme")
+    print("  ./agentsmcp tui --debug                  # Debug mode")
+    print("  ./agentsmcp tui --no-welcome             # Skip intro")
+    print("  ./agentsmcp tui --agent codex            # Use Codex agent")
+    print("  ./agentsmcp ui --orchestrator-model o1   # Set orchestrator model")
+    print()
+    print("KEYBOARD SHORTCUTS:")
+    print("  Ctrl+C     - Exit TUI")
+    print("  /quit      - Exit command")
+    print("  /help      - Show TUI help")
+    print("  /clear     - Clear chat history")
+    print()
+    print("TROUBLESHOOTING:")
+    print("  • Ensure terminal is at least 80x24 characters")
+    print("  • Use a terminal with color support")
+    print("  • Run with --debug for detailed error output")
+    print("  • Check Python version >= 3.8")
+    print("  • For legacy mode: ./agentsmcp run interactive --legacy")
+
+def handle_tui_command(args: List[str]) -> int:
+    """Handle TUI-specific command processing."""
+    # Ensure v2 sane defaults when invoking TUI via wrapper
+    try:
+        os.environ.setdefault("AGENTS_TUI_ENABLE_V2", "1")
+        os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "1")
+        os.environ.setdefault("AGENTS_TUI_V2_BACKEND", "1")
+        os.environ.setdefault("AGENTS_TUI_V2_BACKEND_PREWARM", "1")
+        os.environ.setdefault("AGENTS_TUI_SUPPRESS_TIPS", "1")
+    except Exception:
+        pass
+
+    # Check for help first — delegate to Click for consistent formatting
+    if "--help" in args or "-h" in args:
+        try:
+            from agentsmcp.cli import main as cli_main
+            cli_main()
+            return 0
+        except SystemExit as e:
+            return e.code if e.code else 0
+        except Exception:
+            show_tui_help()
+            return 0
+    
+    # System checks
+    if not check_python_version():
+        return 1
+    
+    terminal_ok, warnings = check_terminal_capabilities()
+    
+    # Show warnings but don't block startup
+    if warnings:
+        print("⚠️  Terminal compatibility warnings:")
+        for warning in warnings:
+            print(f"   • {warning}")
+        print("   TUI may not display correctly, consider using a better terminal")
+        print()
+    
+    # Parse TUI arguments and convert to CLI format for ui.cli_app.main()
+    cli_args = []  # Start with empty args for the flat CLI structure
+    
+    i = 1  # Skip 'tui' command
+    while i < len(args):
+        arg = args[i]
+        
+        if arg == "--theme":
+            if i + 1 < len(args):
+                theme = args[i + 1]
+                if theme in ["auto", "light", "dark"]:
+                    cli_args.extend(["--theme", theme])
+                    i += 1
+                else:
+                    print(f"❌ Invalid theme: {theme}")
+                    print("   Valid themes: auto, light, dark")
+                    return 1
+            else:
+                print("❌ --theme requires a value")
+                return 1
+                
+        elif arg == "--no-welcome":
+            cli_args.append("--no-welcome")
+            
+        elif arg == "--debug":
+            cli_args.append("--debug")
+            
+        elif arg == "--refresh-interval":
+            if i + 1 < len(args):
+                try:
+                    float(args[i + 1])  # Validate it's a number
+                    cli_args.extend(["--refresh-interval", args[i + 1]])
+                    i += 1
+                except ValueError:
+                    print(f"❌ Invalid refresh interval: {args[i + 1]}")
+                    return 1
+            else:
+                print("❌ --refresh-interval requires a value")
+                return 1
+                
+        elif arg == "--orchestrator-model":
+            # This option might not be supported in the flat CLI
+            if i + 1 < len(args):
+                print(f"⚠️  --orchestrator-model option may not be supported in TUI mode")
+                i += 1
+            else:
+                print("❌ --orchestrator-model requires a value")
+                return 1
+                
+        elif arg == "--agent":
+            # This option might not be supported in the flat CLI
+            if i + 1 < len(args):
+                print(f"⚠️  --agent option may not be supported in TUI mode")
+                i += 1
+            else:
+                print("❌ --agent requires a value")
+                return 1
+                
+        elif arg.startswith("--"):
+            print(f"❌ Unknown TUI option: {arg}")
+            print("   Use --help to see available options")
+            return 1
+        else:
+            print(f"❌ Unexpected argument: {arg}")
+            return 1
+            
+        i += 1
+    
+    try:
+        # Import and run the TUI with processed arguments
+        if "--debug" in args:
+            print(f"🔧 Debug: Starting Modern TUI with arguments: {cli_args}")
+        
+        # Convert CLI args to config and run the TUI
+        from agentsmcp.ui.cli_app import CLIApp, CLIConfig
+        import asyncio
+        
+        # Build config from CLI args
+        config = CLIConfig()
+        
+        # Parse the processed CLI args
+        i = 0
+        while i < len(cli_args):
+            arg = cli_args[i]
+            if arg == "--theme" and i + 1 < len(cli_args):
+                config.theme_mode = cli_args[i + 1]
+                i += 1
+            elif arg == "--no-welcome":
+                config.show_welcome = False
+            elif arg == "--debug":
+                config.debug_mode = True
+            elif arg == "--refresh-interval" and i + 1 < len(cli_args):
+                try:
+                    config.refresh_interval = float(cli_args[i + 1])
+                    i += 1
+                except ValueError:
+                    pass
+            i += 1
+        
+        # Create CLI app in TUI mode
+        app = CLIApp(config, mode="tui")
+        result = asyncio.run(app.start())
+        
+        if config.debug_mode:
+            print(f"🔧 Debug: TUI session result: {result}")
+        
+        return 0
+    except KeyboardInterrupt:
+        print("\n👋 TUI stopped by user")
+        return 0
+    except Exception as e:
+        print(f"❌ TUI failed to start: {e}")
+        print()
+        print("TROUBLESHOOTING STEPS:")
+        print("1. Check Python version: python3 --version")
+        print("2. Verify terminal size and capabilities")
+        print("3. Try running with --debug for more details")
+        print("4. Use legacy mode: ./agentsmcp run interactive --legacy")
+        return 1
+
+def show_system_status() -> int:
+    """Show system readiness for AgentsMCP TUI."""
+    print("🔍 AgentsMCP System Status Check")
+    print("=" * 40)
+    print()
+    
+    # Python version check
+    python_ok = check_python_version()
+    if python_ok:
+        print("✅ Python version: OK")
+    else:
+        print("❌ Python version: FAILED")
+    
+    # Terminal capabilities check
+    terminal_ok, warnings = check_terminal_capabilities()
+    if terminal_ok:
+        print("✅ Terminal capabilities: OK")
+    else:
+        print("⚠️  Terminal capabilities: Issues detected")
+        for warning in warnings:
+            print(f"   • {warning}")
+    
+    # Try to import core modules
+    try:
+        from agentsmcp import __version__
+        print(f"✅ AgentsMCP version: {__version__}")
+        core_ok = True
+    except ImportError as e:
+        print(f"❌ AgentsMCP core: Import failed ({e})")
+        core_ok = False
+    
+    # Try to import TUI modules
+    try:
+        from agentsmcp.ui.cli_app import CLIApp
+        from agentsmcp.ui.v2.main_app import MainTUIApp
+        print("✅ TUI system: Available")
+        tui_ok = True
+    except ImportError as e:
+        print(f"❌ TUI system: Import failed ({e})")
+        tui_ok = False
+    
+    print()
+    
+    # Overall status
+    overall_ok = python_ok and core_ok and tui_ok
+    if overall_ok:
+        print("🎉 Overall Status: READY")
+        print("   You can start the TUI with: ./agentsmcp tui")
+        if warnings:
+            print("   Note: Terminal warnings may affect TUI display quality")
+    else:
+        print("❌ Overall Status: NOT READY")
+        print("   Please fix the issues above before using TUI")
+        
+        # Provide specific guidance
+        if not python_ok:
+            print("   → Upgrade Python to 3.8+")
+        if not core_ok:
+            print("   → Check AgentsMCP installation")
+        if not tui_ok:
+            print("   → TUI dependencies may be missing")
+    
+    print()
+    return 0 if overall_ok else 1
+
+def show_main_help():
+    """Show enhanced help with TUI prominently featured."""
+    print("🚀 AgentsMCP - Revolutionary Multi-Agent Orchestration Platform")
+    print("=" * 70)
+    print()
+    print("QUICK START:")
+    print("  ./agentsmcp tui                   🎨 Launch modern TUI (recommended)")
+    print("  ./agentsmcp ui                    🎨 Alias for TUI")
+    print("  ./agentsmcp status                🔍 Check system readiness")
+    print("  ./agentsmcp init setup            🛠️  First-time setup wizard")
+    print()
+    print("MAIN COMMANDS:")
+    print("  tui, ui                          Modern terminal interface")
+    print("  init                            Getting started & configuration")
+    print("  run                             Core execution workflows")
+    print("  monitor                         Cost tracking & observability")
+    print("  knowledge                       Knowledge base & model management")
+    print("  server                          Server lifecycle & integration")
+    print("  config                          Configuration management")
+    print()
+    print("TUI EXAMPLES:")
+    print("  ./agentsmcp tui --theme dark     Dark theme")
+    print("  ./agentsmcp ui --no-welcome      Skip welcome screen")
+    print("  ./agentsmcp tui --debug          Debug mode")
+    print()
+    print("OTHER EXAMPLES:")
+    print("  ./agentsmcp init setup           Interactive setup")
+    print("  ./agentsmcp run simple \"task\"    Execute a task")
+    print("  ./agentsmcp monitor costs        Show cost breakdown")
+    print()
+    print("For detailed help on any command: ./agentsmcp COMMAND --help")
+    print("For TUI-specific help: ./agentsmcp tui --help")
+
+def main():
+    """Enhanced main wrapper with TUI convenience and error handling."""
+    args = sys.argv[1:]
+    
+    # Handle no arguments - delegate to Click help for robust formatting
+    if not args:
+        try:
+            from agentsmcp.cli import main as cli_main
+            cli_main()
+            return 0
+        except SystemExit as e:
+            return e.code if e.code else 0
+        except Exception:
+            show_main_help()
+            return 0
+    
+    command = args[0].lower()
+    
+    # Handle TUI commands directly for better UX
+    if command in ["tui", "ui"]:
+        return handle_tui_command(args)
+    
+    # Handle help requests anywhere on the command line: delegate to Click
+    if any(a in ("--help", "-h") for a in args):
+        try:
+            from agentsmcp.cli import main as cli_main
+            cli_main()
+            return 0
+        except SystemExit as e:
+            return e.code if e.code else 0
+        except Exception:
+            # Fallback to simple help if delegation fails
+            show_main_help()
+            return 0
+    
+    # Handle status check
+    if command in ["status", "check"]:
+        return show_system_status()
+    
+    # Handle version requests  
+    if command in ["version", "--version", "-v"]:
+        try:
+            from agentsmcp import __version__
+            print(f"AgentsMCP version {__version__}")
+            return 0
+        except ImportError:
+            print("AgentsMCP version unknown")
+            return 1
+    
+    # For all other commands, delegate to the main CLI
+    try:
+        from agentsmcp.cli import main as cli_main
+        cli_main()
+        return 0
+    except KeyboardInterrupt:
+        print("\n👋 Goodbye!")
+        return 0
+    except SystemExit as e:
+        return e.code if e.code else 0
+    except Exception as e:
+        print(f"❌ Command failed: {e}")
+        print()
+        print("TROUBLESHOOTING:")
+        print("• Run with --debug for detailed error information")
+        print("• Check configuration: ./agentsmcp config validate")
+        print("• Try setup wizard: ./agentsmcp init setup")
+        return 1
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

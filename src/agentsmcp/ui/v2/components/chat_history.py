@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 from collections import deque
+import re
+import textwrap
 
 from ..event_system import AsyncEventSystem, Event, EventType, EventHandler
 from ..display_renderer import DisplayRenderer
@@ -492,7 +494,7 @@ class ChatHistory:
     
     def _render_message(self, message: ChatMessage) -> List[str]:
         """Render a single message to display lines."""
-        lines = []
+        lines: List[str] = []
         
         # Choose prefix based on role
         if message.role == MessageRole.USER:
@@ -510,20 +512,63 @@ class ChatHistory:
             prefix = f"[{timestamp}] {prefix}"
         
         # Handle streaming status
-        content = message.content
+        content = message.content or ""
         if message.status == MessageStatus.STREAMING:
-            content += "▊"  # Streaming cursor
+            content += "▊"
         elif message.status == MessageStatus.PENDING:
-            content = "..."  # Pending indicator
-        
-        # Word wrap the content
-        max_width = self.max_line_length
-        if self.display_region:
-            max_width = self.display_region.width - 2  # Leave margin
-        
-        wrapped_lines = self._word_wrap(prefix + content, max_width)
-        lines.extend(wrapped_lines)
-        
+            content = "..."
+
+        # Markdown++ with ANSI styling
+        BOLD = "\x1b[1m"
+        ITALIC = "\x1b[3m"
+        CYAN = "\x1b[36m"
+        YELLOW = "\x1b[33m"
+        MAGENTA = "\x1b[35m"
+        RESET = "\x1b[0m"
+
+        def style_inline(s: str) -> str:
+            # Inline code first
+            s = re.sub(r"`([^`]+)`", lambda m: f"{CYAN}{m.group(1)}{RESET}", s)
+            # Bold **...**
+            s = re.sub(r"\*\*(.+?)\*\*", lambda m: f"{BOLD}{m.group(1)}{RESET}", s)
+            # Italic *...* or _..._
+            s = re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", lambda m: f"{ITALIC}{m.group(1)}{RESET}", s)
+            s = re.sub(r"_(?!\s)(.+?)(?<!\s)_", lambda m: f"{ITALIC}{m.group(1)}{RESET}", s)
+            return s
+
+        avail = self.display_region.width - len(prefix) if self.display_region else max(20, self.max_line_length)
+        in_code = False
+        first_phys = True
+        for raw in (content.split('\n') if content else [""]):
+            if raw.strip().startswith("```"):
+                in_code = not in_code
+                continue
+            # Bullets
+            bullet = ""
+            line = raw
+            if not in_code and re.match(r"^\s*[-*]\s+", line):
+                line = re.sub(r"^\s*[-*]\s+", "", line)
+                bullet = f"{MAGENTA}•{RESET} "
+            if in_code:
+                # No rewrap in code block; color and cut
+                shown = f"{CYAN}{line}{RESET}"
+                phys = [shown[:avail]] if len(shown) > avail else [shown]
+            else:
+                # Headings
+                m = re.match(r"^(\s*#+)\s*(.+)$", line)
+                if m:
+                    line = f"{BOLD}{YELLOW}{m.group(2)}{RESET}"
+                else:
+                    line = style_inline(line)
+                wrap_src = f"{bullet}{line}" if bullet else line
+                phys = textwrap.wrap(wrap_src, width=max(1, avail)) or [""]
+            for idx, seg in enumerate(phys):
+                if first_phys and idx == 0:
+                    lines.append(prefix + seg)
+                else:
+                    lines.append(" " * len(prefix) + seg)
+                first_phys = False
+
         return lines
     
     def _word_wrap(self, text: str, width: int) -> List[str]:

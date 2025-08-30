@@ -1,0 +1,93 @@
+{
+  "problem": "AgentsMCP's sophisticated multi-agent orchestration needs revolutionary UX that makes complex CLI operations feel natural and delightful for both novice and expert users",
+  "users": [
+    {
+      "name": "CLI Newcomer",
+      "needs": "Natural language commands, guided setup, visual feedback, confidence building",
+      "contexts": ["First-time setup", "Learning mode", "Occasional usage"]
+    },
+    {
+      "name": "Developer",
+      "needs": "Efficient workflows, keyboard shortcuts, debugging tools, customization",
+      "contexts": ["Daily development", "Troubleshooting", "Agent configuration"]
+    },
+    {
+      "name": "DevOps Engineer",
+      "needs": "System monitoring, batch operations, automation scripts, performance metrics",
+      "contexts": ["Production monitoring", "Multi-agent orchestration", "CI/CD integration"]
+    }
+  ],
+  "jtbd": [
+    "When I first use AgentsMCP, I want intuitive setup, so I can be productive immediately",
+    "When I orchestrate multiple agents, I want visual coordination, so I can monitor harmony and resolve conflicts",
+    "When I need complex commands, I want natural language input, so I can focus on intent not syntax",
+    "When I'm an expert user, I want efficient shortcuts, so I can work at full speed",
+    "When errors occur, I want smart recovery, so I can fix issues without deep debugging"
+  ],
+  "kano": {
+    "must_be": [
+      "Fast startup (<3 seconds)",
+      "Reliable command execution",
+      "Clear error messages",
+      "Cross-platform compatibility",
+      "Keyboard accessibility"
+    ],
+    "performance": [
+      "Progressive disclosure based on skill level",
+      "Smart command completion",
+      "Real-time agent status updates",
+      "Customizable interface themes",
+      "Efficient expert shortcuts"
+    ],
+    "delighters": [
+      {
+        "idea": "AI Command Composer - natural language to command translation with live preview",
+        "why_unique": "First CLI to offer real-time natural language processing with visual command building",
+        "risk": "Medium - requires robust NLP integration",
+        "test_plan": "A/B test natural language vs traditional commands with 50 users over 2 weeks"
+      },
+      {
+        "idea": "Symphony Harmony Scoring - visual representation of agent coordination quality",
+        "why_unique": "Novel visualization of multi-agent system health in terminal interface",
+        "risk": "Low - pure presentation layer enhancement",
+        "test_plan": "Monitor user engagement with harmony metrics vs plain status display"
+      },
+      {
+        "idea": "Contextual Learning Mode - interface adapts and teaches based on user patterns",
+        "why_unique": "Self-improving CLI that becomes more helpful over time",
+        "risk": "High - complex ML requirements and privacy considerations",
+        "test_plan": "Track improvement in task completion rates over 30-day period"
+      }
+    ]
+  },
+  "flows": [
+    "Onboarding: Welcome screen → Experience detection → Setup wizard → First success → Feature discovery",
+    "Command Discovery: Natural input → Intent recognition → Command preview → Parameter guidance → Execution → Feedback",
+    "Symphony Mode: Agent grid → Task flows → Harmony metrics → Conflict resolution → Performance insights",
+    "Error Recovery: Error detection → Context analysis → Solution suggestions → Guided fixes → Knowledge capture"
+  ],
+  "states": [
+    "empty": "Clean welcome with clear next steps",
+    "loading": "Progressive loading with helpful tips",
+    "ideal": "Rich interface with all data flowing",
+    "error": "Constructive error with recovery paths",
+    "expert": "Dense information with shortcuts",
+    "beginner": "Simplified with guidance",
+    "offline": "Graceful degradation with local features"
+  ],
+  "acceptance": {
+    "ttfv_seconds_max": 60,
+    "first_click_success_pct_min": 0.9,
+    "task_success_pct_min": 0.95,
+    "sus_min": 90
+  },
+  "metrics": {
+    "events": [
+      {"name": "onboarding_completed", "when": "Setup wizard finished", "props": ["duration", "skill_level"]},
+      {"name": "command_natural_language_used", "when": "NL command processed", "props": ["intent", "success", "corrections"]},
+      {"name": "symphony_mode_entered", "when": "Multi-agent dashboard opened", "props": ["agent_count", "duration"]},
+      {"name": "expert_shortcut_used", "when": "Keyboard shortcut executed", "props": ["shortcut", "context"]},
+      {"name": "error_recovered", "when": "User successfully fixes error", "props": ["error_type", "recovery_method", "time_to_fix"]}
+    ]
+  }
+}

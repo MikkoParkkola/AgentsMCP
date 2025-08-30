@@ -36,6 +36,7 @@ class ChatInputState:
     history_position: int = -1
     show_cursor: bool = True
     command_prefix: str = "/"
+    multiline_mode: bool = False
 
 
 @dataclass
@@ -78,14 +79,16 @@ class ChatInput:
         self.prompt_text = "> "
         self.multiline_prompt = "... "
         self.max_history = 100
-        self.cursor_char = "|"
+        import os as _os
+        self.cursor_char = _os.getenv("AGENTS_TUI_V2_CARET_CHAR", "█") or "█"
         self.cursor_blink_interval = 0.5
         self._cursor_visible = True
         self._cursor_task: Optional[asyncio.Task] = None
         
-        # Real-time echo settings - THIS IS CRITICAL
-        self._echo_enabled = True
-        self._immediate_display = True
+        # Real-time echo settings
+        # We render via ChatInterface/DisplayRenderer, not direct stdout
+        self._echo_enabled = False
+        self._immediate_display = False
     
     async def initialize(self) -> bool:
         """Initialize the chat input component."""
@@ -95,7 +98,8 @@ class ChatInput:
         try:
             # Enable immediate character echo for real-time display
             if self.input_handler and self.input_handler.is_available():
-                self.input_handler.set_echo(True)  # CRITICAL: Enable echo
+                # Render via DisplayRenderer, do not echo to stdout
+                self.input_handler.set_echo(False)
                 self._setup_input_handlers()
                 logger.info("Chat input initialized with real-time character display")
             else:
@@ -126,13 +130,18 @@ class ChatInput:
         
         # Handle special keys
         self.input_handler.add_key_handler('enter', self._handle_enter_key)
+        self.input_handler.add_key_handler('c-j', self._handle_ctrl_j)
         self.input_handler.add_key_handler('backspace', self._handle_backspace)
         self.input_handler.add_key_handler('left', self._handle_cursor_left)
         self.input_handler.add_key_handler('right', self._handle_cursor_right)
+        self.input_handler.add_key_handler('home', self._handle_home)
+        self.input_handler.add_key_handler('end', self._handle_end)
         self.input_handler.add_key_handler('up', self._handle_history_up)
         self.input_handler.add_key_handler('down', self._handle_history_down)
         self.input_handler.add_key_handler('c-c', self._handle_ctrl_c)
         self.input_handler.add_key_handler('c-d', self._handle_ctrl_d)
+        self.input_handler.add_key_handler('c-u', self._handle_ctrl_u)
+        self.input_handler.add_key_handler('c-k', self._handle_ctrl_k)
         
         # Handle Shift+Enter for multiline
         self.input_handler.add_key_handler('s-enter', self._handle_shift_enter)
@@ -172,6 +181,14 @@ class ChatInput:
             self._handle_tab_completion,
             ShortcutContext.INPUT,
             "Tab completion"
+        )
+
+        # F2 to toggle multiline mode
+        self.keyboard_processor.add_shortcut(
+            KeySequence(['f2']),
+            self._toggle_multiline_mode,
+            ShortcutContext.INPUT,
+            "Toggle multiline mode"
         )
     
     async def _start_cursor_blinking(self):
@@ -230,50 +247,52 @@ class ChatInput:
         self.state.text = text[:pos] + char + text[pos:]
         self.state.cursor_position += 1
         
-        # CRITICAL: Immediate display update
-        if self._immediate_display:
-            asyncio.create_task(self._display_current_line())
-        
-        # Emit text change event
+        # Emit text change event (ChatInterface will render input line)
         asyncio.create_task(self._emit_text_change_event())
         
         logger.debug(f"Character input: '{char}', new text: '{self.state.text}'")
     
     def _handle_enter_key(self, event: InputEvent):
-        """Handle Enter key - submit input or new line."""
+        """Handle Enter key - either submit or insert newline in multiline mode."""
         if not self._active:
             return
-        
-        # Check if this is multiline mode or we should enter multiline
-        if self.state.mode == InputMode.MULTI_LINE:
-            # Add line to multiline buffer and continue
-            self.state.multiline_buffer.append(self.state.text)
-            self.state.text = ""
-            self.state.cursor_position = 0
-            asyncio.create_task(self._display_current_line())
-            return
-        
-        # Single line mode - submit input
-        text = self.state.text.strip()
-        if text:
-            asyncio.create_task(self._submit_input(text))
+        if self.state.multiline_mode:
+            # Insert newline
+            t = self.state.text
+            pos = self.state.cursor_position
+            self.state.text = t[:pos] + "\n" + t[pos:]
+            self.state.cursor_position = pos + 1
+            asyncio.create_task(self._emit_text_change_event())
+        else:
+            text = self.state.text.strip()
+            if text:
+                asyncio.create_task(self._submit_input(text))
     
     def _handle_shift_enter(self, event: InputEvent):
-        """Handle Shift+Enter for multiline input."""
+        """Handle Shift+Enter by inserting a newline at cursor."""
         if not self._active:
             return
-        
-        # Enter multiline mode
-        if self.state.mode == InputMode.SINGLE_LINE:
-            self.state.mode = InputMode.MULTI_LINE
-            asyncio.create_task(self._emit_mode_change_event())
-        
-        # Add current line to buffer
-        self.state.multiline_buffer.append(self.state.text)
-        self.state.text = ""
-        self.state.cursor_position = 0
-        
-        asyncio.create_task(self._display_current_line())
+        t = self.state.text
+        pos = self.state.cursor_position
+        self.state.text = t[:pos] + "\n" + t[pos:]
+        self.state.cursor_position = pos + 1
+        asyncio.create_task(self._emit_text_change_event())
+
+    def _handle_ctrl_j(self, event: InputEvent):
+        """Ctrl+J: in multiline mode submit, otherwise insert newline as fallback."""
+        if not self._active:
+            return
+        if self.state.multiline_mode:
+            text = self.state.text.strip()
+            if text:
+                asyncio.create_task(self._submit_input(text))
+        else:
+            # Insert newline when not in multiline mode as a fallback
+            t = self.state.text
+            pos = self.state.cursor_position
+            self.state.text = t[:pos] + "\n" + t[pos:]
+            self.state.cursor_position = pos + 1
+            asyncio.create_task(self._emit_text_change_event())
     
     def _handle_backspace(self, event: InputEvent):
         """Handle backspace key."""
@@ -306,6 +325,22 @@ class ChatInput:
         
         self.state.cursor_position += 1
         asyncio.create_task(self._display_current_line())
+
+    def _handle_home(self, event: InputEvent):
+        """Move cursor to start of line."""
+        if not self._active:
+            return
+        # Move to beginning
+        # If multiline, move to beginning of entire buffer for simplicity
+        self.state.cursor_position = 0
+        asyncio.create_task(self._display_current_line())
+
+    def _handle_end(self, event: InputEvent):
+        """Move cursor to end of line."""
+        if not self._active:
+            return
+        self.state.cursor_position = len(self.state.text)
+        asyncio.create_task(self._display_current_line())
     
     def _handle_history_up(self, event: InputEvent):
         """Handle up arrow - navigate command history."""
@@ -333,6 +368,27 @@ class ChatInput:
             self.state.text = ""
             self.state.cursor_position = 0
             asyncio.create_task(self._display_current_line())
+
+    def _handle_ctrl_u(self, event: InputEvent):
+        """Clear from start to cursor."""
+        if not self._active:
+            return
+        t = self.state.text
+        pos = self.state.cursor_position
+        self.state.text = t[pos:]
+        self.state.cursor_position = 0
+        asyncio.create_task(self._display_current_line())
+        asyncio.create_task(self._emit_text_change_event())
+
+    def _handle_ctrl_k(self, event: InputEvent):
+        """Clear from cursor to end."""
+        if not self._active:
+            return
+        t = self.state.text
+        pos = self.state.cursor_position
+        self.state.text = t[:pos]
+        asyncio.create_task(self._display_current_line())
+        asyncio.create_task(self._emit_text_change_event())
     
     def _handle_ctrl_c(self, event: InputEvent):
         """Handle Ctrl+C - cancel current input."""
@@ -374,6 +430,12 @@ class ChatInput:
         """Handle tab completion (future feature)."""
         # TODO: Implement command/text completion
         return True
+
+    async def _toggle_multiline_mode(self, event: Optional[Event]) -> bool:
+        """Toggle multiline mode."""
+        self.state.multiline_mode = not self.state.multiline_mode
+        await self._emit_mode_change_event()
+        return True
     
     async def _submit_input(self, text: str):
         """Submit user input."""
@@ -400,8 +462,8 @@ class ChatInput:
         # Emit submit event
         await self._emit_submit_event(full_text, is_command)
         
-        # Update display
-        await self._display_current_line()
+        # Update display via renderer through text_change callback
+        await self._emit_text_change_event()
         
         logger.info(f"Input submitted: '{full_text}' (command: {is_command})")
     
@@ -423,12 +485,8 @@ class ChatInput:
         # Full line to display
         line = prompt + display_text
         
-        # This is where we would output to terminal - for now just log
-        # In a real implementation, this would write to the terminal
-        # without adding to scrollback history
-        if self._immediate_display:
-            # Move cursor to start of line, clear line, write new content
-            print(f"\r{line}", end="", flush=True)
+        # Rendering is handled by ChatInterface updating the DisplayRenderer region.
+        # This method intentionally performs no direct terminal output.
     
     async def _emit_submit_event(self, text: str, is_command: bool):
         """Emit input submit event."""

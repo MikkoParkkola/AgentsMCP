@@ -377,13 +377,29 @@ class CLIApp:
         the typing and scrollback issues. If that fails, it falls back to the
         v1 ModernTUI for compatibility.
         """
+        import os
+        # Default to v2; allow opt-out via env
+        # - AGENTS_TUI_ENABLE_V2: defaults to "1" (enabled)
+        # - AGENTS_TUI_DISABLE_V2: when set to "1", force v1 fallback
+        enable_v2 = (os.getenv("AGENTS_TUI_ENABLE_V2", "1") == "1") and (os.getenv("AGENTS_TUI_DISABLE_V2", "0") != "1")
         try:
-            # Try v2 TUI first - the new and improved system
-            from .v2 import launch_main_tui
-            print("🚀 Starting TUI v2...")
-            exit_code = await launch_main_tui(self.config)
-            if exit_code != 0:
-                raise RuntimeError(f"TUI v2 failed with exit code: {exit_code}")
+            if enable_v2:
+                # Ensure sane defaults for v2 behavior when launched via ./agentsmcp tui
+                try:
+                    os.environ.setdefault("AGENTS_TUI_SUPPRESS_TIPS", "1")  # keep exit clean
+                    os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "1")     # stable raw path by default
+                    os.environ.setdefault("AGENTS_TUI_V2_BACKEND", "1")     # connect backend by default
+                    os.environ.setdefault("AGENTS_TUI_V2_BACKEND_PREWARM", "1")
+                except Exception:
+                    pass
+                # Try v2 TUI first - the new and improved system
+                from .v2 import launch_main_tui
+                print("🚀 Starting TUI v2...")
+                exit_code = await launch_main_tui(self.config)
+                if exit_code != 0:
+                    raise RuntimeError(f"TUI v2 failed with exit code: {exit_code}")
+            else:
+                raise RuntimeError("TUI v2 disabled (default)")
         except Exception as v2_error:
             print(f"⚠️  TUI v2 failed: {v2_error}")
             print("🔄 Falling back to TUI v1...")

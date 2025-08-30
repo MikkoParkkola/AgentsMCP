@@ -22,10 +22,12 @@ the core framework.
 from __future__ import annotations
 
 import asyncio
+import os
 import contextlib
 import json
 import logging
 import sys
+import time
 import traceback
 from collections import deque
 from dataclasses import dataclass
@@ -65,7 +67,7 @@ except Exception:  # pragma: no cover – only hit when Rich is not installed.
     Columns = None  # type: ignore
     Rule = None  # type: ignore
     Table = None  # type: ignore
-    RenderableType = Any
+RenderableType = Any
 
 # --------------------------------------------------------------------------- #
 # Enhanced chat components imports
@@ -74,7 +76,7 @@ try:
     from .components.enhanced_chat import EnhancedChatInput
     from .components.chat_history import ChatHistoryDisplay
     from .components.realtime_input import RealTimeInputField
-    from .keyboard_input import KeyboardInput, KeyCode
+    from .keyboard_input import KeyboardInput, InputMode, KeyCode
 except Exception as e:  # pragma: no cover
     # If the components cannot be imported we fall back to the legacy
     # input & history handling.  
@@ -88,6 +90,11 @@ except Exception as e:  # pragma: no cover
 # --------------------------------------------------------------------------- #
 # Log integration for TUI
 # --------------------------------------------------------------------------- #
+logger = logging.getLogger(__name__)
+try:
+    logger.setLevel(logging.DEBUG)
+except Exception:
+    pass
 @dataclass
 class LogEntry:
     """A structured log entry for TUI display."""
@@ -262,6 +269,13 @@ class ModernTUI:
         # continue to work.
         self._console: Optional[Console] = None
         self._layout: Optional[Layout] = None
+        
+        # ACCESSIBILITY: Configurable accessibility options
+        self._accessibility_config = {
+            "high_contrast": False,  # Enable high contrast colors
+            "reduce_motion": False,  # Disable animations and blinking
+            "increase_spacing": False,  # Add more spacing between elements
+        }
 
         # Async helpers
         self._input_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -316,6 +330,9 @@ class ModernTUI:
         self._error_suppression = {}  # Track suppressed errors
         self._last_error_log_time = {}  # Rate limit error logging
         
+        # Track whether we're inside a Live() render context
+        self._in_live_context = False
+        
         # Initialize console early for RealTimeInputField
         if Console is not None:
             try:
@@ -328,6 +345,29 @@ class ModernTUI:
         # Track typing activity for smart refresh rates
         self._last_keypress_time = 0.0
         self._typing_timeout = 2.0  # Consider user stopped typing after 2 seconds
+        # Debug keys overlay
+        self._debug_keys = bool(os.getenv("AGENTS_TUI_DEBUG_KEYS"))
+        self._debug_last_key = ""
+        # Track input engine for diagnostics: 'native' or 'ptk'
+        self._input_engine = "native"
+        
+        # CRITICAL FIX: Initialize keyboard input BEFORE RealTimeInputField to avoid blocking
+        # Initialize keyboard input for per-key event handling
+        if KeyboardInput is not None:
+            try:
+                self._keyboard_input = KeyboardInput()
+                if not self._keyboard_input.is_interactive:
+                    # CRITICAL FIX: Don't force interactive mode if terminal access isn't available
+                    # Instead, enhance line-based input to be more responsive
+                    try:
+                        self._print_system_message("Running in line-based input mode - enhanced for better UX")
+                    except:
+                        pass  # _print_system_message may not be available yet
+                    
+                    # Add hybrid mode flag to enable special handling
+                    self._keyboard_input.hybrid_mode = True
+            except Exception:
+                self._keyboard_input = None
         
         # FIXED: Initialize RealTimeInputField now that console is available
         if RealTimeInputField is not None and self._console is not None:
@@ -335,6 +375,7 @@ class ModernTUI:
                 self.realtime_input = RealTimeInputField(
                     console=self._console,
                     prompt=">>> ",
+                    placeholder="Type your message here... (or try ? for help)",
                     max_width=None,
                     max_height=3
                 )
@@ -346,6 +387,20 @@ class ModernTUI:
                 self.realtime_input = None
         else:
             self.realtime_input = None
+
+    # ------------------------------------------------------------------- #
+    # Debug logging helper
+    # ------------------------------------------------------------------- #
+    def _debug_log(self, message: str) -> None:
+        """Consistent debug logging that integrates with the TUI log handler."""
+        # Debug logging disabled to prevent console flooding during TUI operation
+        # Temporarily enabled for input echo debugging
+        if "realtime_input" in message.lower() or "footer" in message.lower():
+            try:
+                import sys
+                print(f"DEBUG: {message}", file=sys.stderr, flush=True)
+            except:
+                pass
 
     # ------------------------------------------------------------------- #
     # Public API
@@ -402,25 +457,63 @@ class ModernTUI:
                 self.enhanced_input = None
                 self.chat_history = None
                 
-        # Initialize keyboard input for per-key event handling
-        if KeyboardInput is not None:
-            try:
-                self._keyboard_input = KeyboardInput()
-                if not self._keyboard_input.is_interactive:
-                    self._print_system_message("Running in non-interactive mode - using line-based input")
-            except Exception:
-                self._keyboard_input = None
+        # Keyboard input was already initialized earlier to avoid blocking issues
         
         self._layout = self._build_layout()
         self._running = True
         
-        # Install TUI log handler to capture log messages
+        # Initialize input mode tracking for auto-switch and health indicator
+        self._input_mode = "per_key" if (self._keyboard_input and self._keyboard_input.is_interactive) else "line"
+
+        # If key debugging is enabled but we're not in per-key mode, surface a helpful hint
+        if getattr(self, "_debug_keys", False) and self._input_mode != "per_key":
+            self._enqueue_tui_log(
+                "INFO",
+                "AGENTS_TUI_DEBUG_KEYS is set, but input is line-based (no TTY). "
+                "Per-key capture is unavailable; use a real terminal to see live key events."
+            )
+        
+        # Start input cursor blink if available
+        try:
+            if self.realtime_input is not None:
+                await self.realtime_input.start_cursor_blink()
+        except Exception:
+            pass
+
+        # Install TUI log handler to capture log messages (prevent console flooding)
+        # Attach to root and temporarily remove StreamHandlers (stdout/stderr) during TUI run.
         root_logger = logging.getLogger()
         root_logger.addHandler(self.log_handler)
+        self._removed_stream_handlers = []
+        self._removed_child_stream_handlers = {}
+        try:
+            for h in list(root_logger.handlers):
+                if h is self.log_handler:
+                    continue
+                if isinstance(h, logging.StreamHandler):
+                    self._removed_stream_handlers.append(h)
+                    root_logger.removeHandler(h)
+            # Also remove StreamHandlers from child loggers to stop mixed console output
+            for name, logger_obj in logging.Logger.manager.loggerDict.items():
+                try:
+                    if isinstance(logger_obj, logging.Logger):
+                        removed = []
+                        for h in list(logger_obj.handlers):
+                            if isinstance(h, logging.StreamHandler):
+                                logger_obj.removeHandler(h)
+                                removed.append(h)
+                        if removed:
+                            self._removed_child_stream_handlers[name] = removed
+                        # Ensure child loggers propagate up so our TUI handler receives logs
+                        logger_obj.propagate = True
+                except Exception:
+                    continue
+        except Exception:
+            # Non-fatal
+            self._removed_stream_handlers = []
 
-        # Show a short welcome unless the caller asked to silence it.
-        if not self._no_welcome:
-            self._render_welcome()
+        # Prepare welcome to render inside Live (avoid pre-Live scrollback flooding)
+        self._show_welcome = not self._no_welcome
 
         # ------------------------------------------------------------------- #
         # 3️⃣  Spin up the background tasks
@@ -435,54 +528,78 @@ class ModernTUI:
         # Start SSE listener for real-time status updates
         await self._start_sse_listener()
 
-        # Event-driven Live rendering with enhanced refresh rate for input responsiveness
-        # Set refresh_per_second to 15 FPS for immediate input feedback while maintaining performance
-        # Use auto_refresh=False to prevent concatenation issues and screen_clear=True for clean frames
-        with Live(self._render(), console=self._console, refresh_per_second=15, auto_refresh=False, screen=True) as live:
+        # Track console size and start a resize monitor to keep layout in sync
+        try:
+            self._last_console_size = getattr(self._console, 'size', None)
+        except Exception:
+            self._last_console_size = None
+        self._resize_task = asyncio.create_task(self._monitor_console_resize())
+
+        # Event-driven Live rendering with clean single-frame output
+        # Use alternate screen to prevent scrollback flooding; control refresh explicitly
+        self._in_live_context = True
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        
+        with Live(
+            self._render(), 
+            console=self._console, 
+            refresh_per_second=20,
+            auto_refresh=False,
+            screen=True,
+            transient=False
+        ) as live:
             try:
-                while self._running:
-                    # Wait for either user input OR a refresh request
-                    done, pending = await asyncio.wait(
-                        [
-                            asyncio.create_task(self._input_queue.get()),
-                            asyncio.create_task(self._refresh_event.wait())
-                        ],
-                        return_when=asyncio.FIRST_COMPLETED
-                    )
+                # Suppress stray prints from other subsystems (route to sink)
+                _stdout_sink = io.StringIO()
+                _stderr_sink = io.StringIO()
+                with redirect_stdout(_stdout_sink), redirect_stderr(_stderr_sink):
+                    while self._running:
+                        # Immediate footer fast path to eliminate 1-char lag
+                        if getattr(self, '_immediate_footer_refresh', False):
+                            self._immediate_footer_refresh = False
+                            async with self._render_lock:
+                                new_layout = self._render()
+                                live.update(new_layout)
+                                self._last_rendered_hash = self._get_layout_hash(new_layout)
+                                self._render_counter += 1
+                                self._last_frame_time = time.time()
+                            continue
+                        # Wait for either user input OR a refresh request
+                        get_task = asyncio.create_task(self._input_queue.get())
+                        refresh_task = asyncio.create_task(self._refresh_event.wait())
+                        done, pending = await asyncio.wait(
+                            [get_task, refresh_task],
+                            return_when=asyncio.FIRST_COMPLETED
+                        )
                     
                     # Cancel pending tasks to prevent resource leaks
                     for task in pending:
                         task.cancel()
                         
                     # Handle user input if received
-                    input_received = False
-                    for task in done:
-                        if hasattr(task, '_coro') and 'get' in str(task._coro):
-                            try:
-                                user_input = task.result()
-                                await self._handle_user_input(user_input)
-                                input_received = True
-                            except Exception:
-                                pass
-                                
-                    # Force refresh after input processing
-                    if input_received:
-                        self.mark_dirty("content")  # Input processing affects chat history
+                    if get_task in done:
+                        try:
+                            user_input = get_task.result()
+                            await self._handle_user_input(user_input)
+                        except Exception:
+                            pass
                     
                     # Handle refresh requests with frame deduplication
-                    if self._should_refresh():
+                    if self._should_refresh() or self._is_user_typing():
                         # CRITICAL FIX: Clear the refresh event BEFORE checking content to prevent feedback loops
                         self._refresh_event.clear()
                         
                         # Check for immediate footer refresh flag - bypass all debounce
                         immediate_refresh = getattr(self, '_immediate_footer_refresh', False)
                         if immediate_refresh:
-                            # Reset flag and skip debounce completely for immediate input feedback
+                            # Reset flag immediately to prevent duplicate processing
                             self._immediate_footer_refresh = False
-                        else:
-                            # Smart debounce - longer for idle periods, shorter for active typing
-                            debounce_time = 0.05 if self._is_user_typing() else 0.15
-                            await asyncio.sleep(debounce_time)
+                        
+                        # CRITICAL FIX: Single refresh path with minimal debounce for typing
+                        if not immediate_refresh and not self._is_user_typing():
+                            # Light debounce only for non-immediate refreshes
+                            await asyncio.sleep(0.02)
                         
                         # CRITICAL FIX: Synchronize rendering to prevent frame concatenation
                         async with self._render_lock:
@@ -492,22 +609,21 @@ class ModernTUI:
                                 new_layout = self._render()
                                 layout_hash = self._get_layout_hash(new_layout)
                                 
-                                # If immediate refresh was requested for typing, force update
-                                if immediate_refresh:
-                                    # Force a repaint now to show typed characters instantly
-                                    try:
-                                        live.update(new_layout, refresh=True)
-                                    except TypeError:
-                                        # Older Rich versions may not support refresh kwarg
-                                        live.update(new_layout)
-                                    self._last_rendered_hash = layout_hash
-                                    self._render_counter += 1
-                                else:
-                                    # Frame deduplication - only update if content changed
-                                    if layout_hash != self._last_rendered_hash:
+                                # CRITICAL FIX: Only update if content actually changed
+                                if layout_hash != self._last_rendered_hash:
+                                    # Enhanced scrollback prevention: minimize frame updates
+                                    # Allow immediate renders for typing/forced refresh to prevent 1-char lag
+                                    current_time = time.time()
+                                    min_frame_interval = 0.05
+                                    if immediate_refresh or self._is_user_typing():
+                                        min_frame_interval = 0.0
+
+                                    if (not hasattr(self, '_last_frame_time')) or ((current_time - self._last_frame_time) >= min_frame_interval):
                                         live.update(new_layout)
                                         self._last_rendered_hash = layout_hash
                                         self._render_counter += 1
+                                        self._last_frame_time = current_time
+                                    # If too recent, skip this update (content will be rendered on next cycle)
                             finally:
                                 self._currently_rendering = False
                             
@@ -518,13 +634,46 @@ class ModernTUI:
                 # Give the background task a chance to clean up.
                 with contextlib.suppress(asyncio.CancelledError):
                     await input_task
+                # Stop cursor blink when leaving TUI
+                try:
+                    if self.realtime_input is not None:
+                        self.realtime_input.stop_cursor_blink()
+                except Exception:
+                    pass
                 
                 # Stop SSE listener
                 await self._stop_sse_listener()
                 
-                # Remove TUI log handler
+                # Stop resize monitor
+                try:
+                    if getattr(self, '_resize_task', None):
+                        self._resize_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await self._resize_task
+                except Exception:
+                    pass
+
+                # Restore logging handlers to previous state
                 root_logger = logging.getLogger()
-                root_logger.removeHandler(self.log_handler)
+                if hasattr(self, "_removed_stream_handlers"):
+                    for h in self._removed_stream_handlers:
+                        root_logger.addHandler(h)
+                    self._removed_stream_handlers.clear()
+                # Restore child logger handlers
+                if hasattr(self, "_removed_child_stream_handlers"):
+                    for name, handlers in list(self._removed_child_stream_handlers.items()):
+                        try:
+                            logger_obj = logging.getLogger(name)
+                            for h in handlers:
+                                logger_obj.addHandler(h)
+                        except Exception:
+                            pass
+                    self._removed_child_stream_handlers.clear()
+                try:
+                    root_logger.removeHandler(self.log_handler)
+                except Exception:
+                    pass
+                self._in_live_context = False
 
         # Persist UI state for next launch.
         try:
@@ -539,6 +688,28 @@ class ModernTUI:
         except Exception:
             pass  # Graceful failure if persistence isn't available
 
+    async def _monitor_console_resize(self) -> None:
+        """Monitor terminal size and trigger layout refresh on change."""
+        try:
+            while self._running:
+                try:
+                    size = getattr(self._console, 'size', None)
+                    if size and getattr(self, '_last_console_size', None):
+                        if (size.width != self._last_console_size.width) or (size.height != self._last_console_size.height):
+                            self._last_console_size = size
+                            # Invalidate all sections and request refresh
+                            for sec in ("header", "content", "footer", "sidebar"):
+                                if sec in self._cache_version:
+                                    self._cache_version[sec] += 1
+                            self._refresh_event.set()
+                    elif size:
+                        self._last_console_size = size
+                except Exception:
+                    pass
+                await asyncio.sleep(0.2)
+        except asyncio.CancelledError:
+            return
+
     # ------------------------------------------------------------------- #
     # Event-driven refresh API
     # ------------------------------------------------------------------- #
@@ -548,10 +719,7 @@ class ModernTUI:
         Args:
             section: Which section to invalidate ("header", "content", "footer", "all")
         """
-        # CRITICAL FIX: Prevent feedback loops during rendering
-        if getattr(self, '_currently_rendering', False):
-            return  # Skip marking dirty while we're already rendering
-            
+        # Always coalesce requests, even if rendering, so we don't miss fast events
         # CRITICAL FIX: Use async task for coalescing to avoid blocking
         asyncio.create_task(self._coalesce_mark_dirty(section))
     
@@ -816,11 +984,8 @@ class ModernTUI:
             now = time.time()
             last_log = self._last_error_log_time.get(section_name, 0)
             if now - last_log > 5.0:
-                # Log error details for debugging
-                if self._console:
-                    self._console.print(f"[red]Render error in {section_name}:[/red] {e}", file=sys.stderr)
-                else:
-                    print(f"Render error in {section_name}: {e}", file=sys.stderr)
+                # Log error details to TUI logs panel instead of console
+                self._enqueue_tui_log("ERROR", f"Render error in {section_name}: {e}")
                 self._last_error_log_time[section_name] = now
             
             # Return fallback panel
@@ -841,11 +1006,27 @@ class ModernTUI:
         error_key = f"{section_name}:{type(error).__name__}:{str(error)}"
         if error_key not in self._error_suppression:
             self._error_suppression[error_key] = 0
-            if self._console:
-                self._console.print(f"[red]First occurrence of error in {section_name}:[/red] {error}", file=sys.stderr)
-            else:
-                print(f"First occurrence of error in {section_name}: {error}", file=sys.stderr)
+            self._enqueue_tui_log("ERROR", f"First occurrence of error in {section_name}: {error}")
         self._error_suppression[error_key] += 1
+
+    def _enqueue_tui_log(self, level: str, message: str) -> None:
+        """Append a log entry to the TUI logs panel without writing to console."""
+        try:
+            if not hasattr(self, 'log_handler') or self.log_handler is None:
+                return
+            entry = LogEntry(
+                timestamp=datetime.now(),
+                level=level.upper(),
+                logger_name="agentsmcp.tui",
+                message=message,
+            )
+            self.log_handler.log_entries.append(entry)
+            # If logs page is visible, refresh content; otherwise leave for later
+            if getattr(self, '_current_page', None) == SidebarPage.LOGS:
+                self.mark_dirty("content")
+        except Exception:
+            # Never fail due to logging issues
+            pass
         
     def _connect_input_events(self) -> None:
         """Connect RealTimeInputField events to the TUI's refresh and input system."""
@@ -857,6 +1038,9 @@ class ModernTUI:
             await self._input_queue.put(text)
             self.realtime_input.clear_input()  # Clear after submission
             self.mark_dirty("footer")  # Refresh input area on submit
+            
+            # Show brief "Sent!" feedback to user
+            self._print_system_message("✅ Message sent!")
             
         async def on_input_change(text: str) -> None:
             # CRITICAL FIX: Force immediate visual updates for typing feedback 
@@ -885,9 +1069,15 @@ class ModernTUI:
     def _render_welcome(self) -> None:
         """Display a brief welcome message."""
         if self._console:
+            # Customize welcome message based on input mode
+            if self._keyboard_input and self._keyboard_input.is_interactive:
+                input_info = "Type directly - characters appear as you type. Press Enter to send."
+            else:
+                input_info = "Type your message and press Enter to send.\n[dim yellow]Note: In line-based mode, text appears when you press Enter.[/dim yellow]"
+            
             welcome_panel = Panel(
-                Text("Welcome to AgentsMCP Modern TUI!\nType your message or '/help' for commands.", 
-                     style="dim", justify="center"),
+                Text(f"Welcome to AgentsMCP Modern TUI!\n\n{input_info}\n\nCommands: '/help' for help, '/quit' to exit.", 
+                     justify="center"),
                 title="🚀 AgentsMCP",
                 border_style="blue"
             )
@@ -895,6 +1085,29 @@ class ModernTUI:
             self._console.print()  # Empty line
 
     # ------------------------------------------------------------------- #
+    def set_accessibility_option(self, option: str, value: bool) -> None:
+        """Configure accessibility options for the TUI."""
+        if option in self._accessibility_config:
+            self._accessibility_config[option] = value
+            
+            # Apply immediate changes if needed
+            if option == "reduce_motion" and self.realtime_input:
+                # Update cursor blinking based on motion preference
+                if value:
+                    # Disable cursor blinking for motion sensitivity
+                    self.realtime_input.stop_cursor_blink()
+                    self.realtime_input._cursor_visible = True  # Keep cursor always visible
+                else:
+                    # Re-enable cursor blinking
+                    import asyncio
+                    try:
+                        asyncio.create_task(self.realtime_input.start_cursor_blink())
+                    except RuntimeError:
+                        pass  # No event loop running
+                        
+            # Refresh display to apply color changes
+            self.mark_dirty("all")
+
     # 4️⃣  Public helpers – mode switching & introspection
     # ------------------------------------------------------------------- #
     @property
@@ -1008,7 +1221,9 @@ class ModernTUI:
         
         if self._sidebar_collapsed:
             # Clean zen mode - just the main content pane
-            main_area.update(Layout(name="content"))
+            # CRITICAL FIX: Don't create a separate content layout in collapsed mode
+            # The main_area itself serves as the content area when collapsed
+            pass  # main_area is already the content area
         else:
             # Split main area: sidebar | content
             main_area.split_row(
@@ -1017,6 +1232,53 @@ class ModernTUI:
             )
             
         return base
+
+    def _normalize_emoji_spacing(self, text: str) -> str:
+        """Normalize emoji spacing for consistent alignment."""
+        import re
+        
+        # Common wide emojis that may cause alignment issues
+        emoji_fixes = {
+            '⌨️': '⌨ ',   # Keyboard - add space after
+            '📝': '📝 ',  # Memo - add space after
+            '⚙️': '⚙ ',   # Gear - add space after
+            '🤖': '🤖 ',  # Robot - add space after
+            '💰': '💰 ',  # Money bag - add space after
+        }
+        
+        # Apply fixes
+        for emoji, replacement in emoji_fixes.items():
+            if emoji in text and not text.endswith(' '):
+                text = text.replace(emoji, replacement)
+        
+        return text
+        
+    def _get_accessible_color(self, color: str, context: str = "default") -> str:
+        """Get accessibility-friendly color based on current settings."""
+        if not self._accessibility_config["high_contrast"]:
+            return color
+            
+        # High contrast color mapping
+        high_contrast_colors = {
+            "green": "bright_green",
+            "red": "bright_red", 
+            "yellow": "bright_yellow",
+            "blue": "bright_blue",
+            "cyan": "bright_cyan",
+            "dim": "white",  # Replace dim with white for visibility
+        }
+        
+        return high_contrast_colors.get(color, color)
+        
+    def _get_motion_style(self, has_animation: bool = False) -> dict:
+        """Get style options considering motion sensitivity."""
+        style_options = {}
+        
+        if self._accessibility_config["reduce_motion"] and has_animation:
+            # Disable animations for motion-sensitive users
+            style_options["no_animation"] = True
+            
+        return style_options
 
     # ------------------------------------------------------------------- #
     # Hybrid TUI rendering - unified approach with sidebar support
@@ -1070,14 +1332,20 @@ class ModernTUI:
                 # Even the error panel failed - just pass silently to prevent infinite loops
                 pass
         finally:
-            # CRITICAL FIX: Clear render guard after rendering is complete
+            # CRITICAL FIX: Clear render guard and cycle-specific flags after rendering is complete
             self._currently_rendering = False
+            self._header_rendered_this_cycle = False
             
         return self._layout
         
     # ----------------- Hybrid TUI Component Renderers ----------------- #
     def _render_hybrid_header(self) -> None:
         """Render status header with real-time connection info and current page."""
+        # CRITICAL FIX: Prevent duplicate header rendering by checking if already rendered this cycle
+        if getattr(self, '_header_rendered_this_cycle', False):
+            return
+        self._header_rendered_this_cycle = True
+        
         def generate_header():
             import time
             from datetime import datetime
@@ -1088,13 +1356,29 @@ class ModernTUI:
             # Connection status with real-time indicator
             try:
                 # Check if orchestration manager is responsive
-                if hasattr(self.orchestration_manager, 'user_settings'):
-                    settings = self.orchestration_manager.user_settings()
-                    left_items.append("[green]●[/green] Ready")
+                settings_attr = getattr(self.orchestration_manager, 'user_settings', None)
+                settings = settings_attr() if callable(settings_attr) else settings_attr
+                if isinstance(settings, dict):
+                    color = self._get_accessible_color("green")
+                    left_items.append(f"[{color}]●[/{color}] Ready")
                 else:
-                    left_items.append("[yellow]●[/yellow] Limited")
+                    color = self._get_accessible_color("yellow")
+                    left_items.append(f"[{color}]●[/{color}] Limited")
             except Exception:
-                left_items.append("[red]●[/red] Disconnected")
+                color = self._get_accessible_color("red")
+                left_items.append(f"[{color}]●[/{color}] Disconnected")
+            
+            # CRITICAL FIX: Add input mode health indicator
+            input_mode = getattr(self, '_input_mode', 'unknown')
+            if input_mode == "per_key":
+                color = self._get_accessible_color("green")
+                left_items.append(f"[{color}]⌨️  Interactive[/{color}]")
+            elif input_mode == "line":
+                color = self._get_accessible_color("yellow")
+                left_items.append(f"[{color}]📝 Line Mode[/{color}]")
+            else:
+                color = self._get_accessible_color("dim")
+                left_items.append(f"[{color}]❓ Unknown[/{color}]")
             
             # Current page/mode indicator
             if not self._sidebar_collapsed:
@@ -1139,6 +1423,18 @@ class ModernTUI:
             
             # Web UI access method
             right_items.append("[dim]Web: agentsmcp dashboard --port 8000[/dim]")
+            # Debug status and last key indicator (if enabled)
+            if getattr(self, '_debug_keys', False):
+                # Always show current debug mode so it's visible even in line-based input
+                if getattr(self, '_input_mode', 'line') == 'per_key':
+                    mode_label = f"keys/{getattr(self, '_input_engine', 'native')}"
+                else:
+                    mode_label = 'line'
+                right_items.append(f"[magenta]Debug:[/] {mode_label}")
+                # Show last key when available (per-key mode)
+                last = getattr(self, '_debug_last_key', '')
+                if last:
+                    right_items.append(f"[magenta]Key:[/] {last!r}")
             
             # Memory usage (if available) - CRITICAL FIX: Cache memory info to reduce updates
             # Only update memory display every 30 seconds to prevent constant re-renders
@@ -1163,8 +1459,9 @@ class ModernTUI:
                 # Error getting memory info, skip
                 pass
             
-            left_text = " • ".join(left_items)
-            right_text = " • ".join(right_items)
+            # CRITICAL FIX: Normalize emoji spacing for better alignment
+            left_text = " • ".join(self._normalize_emoji_spacing(item) for item in left_items)
+            right_text = " • ".join(self._normalize_emoji_spacing(item) for item in right_items)
             
             # Create two-column layout using Rich Columns for proper alignment
             left_content = Text.from_markup(left_text)
@@ -1243,6 +1540,26 @@ class ModernTUI:
         
     def _render_main_content(self) -> None:
         """Render main content based on current page."""
+        # Render welcome inside Live once to avoid pre-Live scrollback flooding
+        if getattr(self, '_show_welcome', False):
+            try:
+                welcome_panel = Panel(
+                    Text(
+                        "Welcome to AgentsMCP Modern TUI!\n\n"
+                        "Type directly - characters appear as you type. Press Enter to send.\n\n"
+                        "Commands: '/help' for help, '/quit' to exit.",
+                        justify="center",
+                    ),
+                    title="🚀 AgentsMCP",
+                    border_style="blue",
+                )
+                content_layout = self._layout["main_area"] if self._sidebar_collapsed else self._layout["content"]
+                content_layout.update(welcome_panel)
+                self._show_welcome = False
+                return
+            except Exception:
+                self._show_welcome = False
+                # Fall through to normal rendering
         content_renderer = {
             SidebarPage.CHAT: self._render_chat_content,
             SidebarPage.JOBS: self._render_jobs_content,
@@ -1265,7 +1582,9 @@ class ModernTUI:
             if self.realtime_input is not None:
                 try:
                     # CRITICAL FIX: Always render realtime input to show typed characters
-                    return self.realtime_input.render()
+                    cur = self.realtime_input.get_current_input() if hasattr(self.realtime_input, 'get_current_input') else ''
+                    rendered = self.realtime_input.render()
+                    return rendered
                 except Exception as e:
                     # Log the error for debugging but fall back to static footer
                     import traceback
@@ -1339,10 +1658,11 @@ class ModernTUI:
                 title=focus_title,
             )
         
-        # Use error handling for footer rendering
+        # Use error handling for footer rendering; always update to ensure echo
         footer = self._render_with_fallback("footer", generate_footer, "Input hints unavailable")
         try:
-            self._update_section_if_changed("footer", footer)
+            # Always update footer; typing requires immediate visual feedback
+            self._layout["footer"].update(footer)
             self._reset_error_count("footer")  # Reset error count on success
         except Exception as e:
             self._log_suppressed_error("footer", e)
@@ -1644,9 +1964,12 @@ class ModernTUI:
         if self.realtime_input is not None:
             # Use real-time input field with live typing display
             try:
+                self._debug_log("_render_footer: calling realtime_input.render()")
                 footer = self.realtime_input.render()
                 self._layout["footer"].update(footer)
-            except Exception:
+                self._debug_log("_render_footer: updated footer layout with realtime input")
+            except Exception as e:
+                self._debug_log(f"_render_footer: realtime_input.render failed: {e}")
                 # Fall back to static footer if rendering fails
                 self._render_static_footer()
         else:
@@ -1795,10 +2118,15 @@ class ModernTUI:
         if self.realtime_input is not None:
             # Use real-time input field with live typing display
             try:
+                self._debug_log("_render_with_change_tracking: calling realtime_input.render()")
                 footer = self.realtime_input.render()
                 if self._update_section_if_changed("footer", footer):
                     changed.append("footer")
-            except Exception:
+                    self._debug_log("_render_with_change_tracking: footer changed=True")
+                else:
+                    self._debug_log("_render_with_change_tracking: footer changed=False")
+            except Exception as e:
+                self._debug_log(f"_render_with_change_tracking: realtime_input.render failed: {e}")
                 # Fall back to static footer if rendering fails
                 if self._render_static_footer_with_tracking():
                     changed.append("footer")
@@ -1898,23 +2226,75 @@ class ModernTUI:
     # ------------------------------------------------------------------- #
     async def _read_input(self) -> None:
         """
-        Fixed line-based input reading that works reliably.
-        Reads full lines from stdin and processes them correctly.
+        Enhanced line-based input reading that coordinates with Rich Live rendering.
+        Uses stdin reading without conflicting prompts to prevent scrollback pollution.
         """
+        # Native input engine
+        self._input_engine = "native"
         loop = asyncio.get_running_loop()
+        
+        # CRITICAL FIX: Use stdin.readline() instead of input() to avoid prompt conflicts
+        import sys
         
         while self._running:
             try:
-                # Read full line - this blocks until Enter but runs in executor
-                line = await loop.run_in_executor(None, sys.stdin.readline)
-                
-                if not line:  # EOF
+                # Read from stdin without creating conflicting prompts
+                try:
+                    # FIXED: Check if stdin has data available before trying to read
+                    import select
+                    import sys
+                    
+                    # Use select to check if stdin has data without blocking
+                    if sys.stdin.isatty():
+                        # For TTY, wait with a timeout to allow graceful shutdown
+                        ready, _, _ = select.select([sys.stdin], [], [], 0.5)
+                        if not ready:
+                            # No input available, continue the loop to check _running status
+                            continue
+                    
+                    # FIXED: Use input() with proper blocking to wait for real user input
+                    # This blocks until the user actually types something and presses Enter
+                    line = await loop.run_in_executor(None, input, "")
+                    if not line:  # Empty line (just Enter pressed)
+                        continue  # Continue waiting for real input
+                    line += '\n'  # Add newline to match readline() behavior
+                    
+                except EOFError:
+                    # EOF reached - user pressed Ctrl+D or similar
+                    # In interactive mode, this should only happen with explicit user action
                     self._running = False
                     break
-                    
+                except KeyboardInterrupt:
+                    # User pressed Ctrl+C
+                    self._running = False
+                    break
+                except OSError:
+                    # Handle cases where stdin is not available or select fails
+                    # Fall back to a simple blocking read with timeout
+                    try:
+                        line = await asyncio.wait_for(
+                            loop.run_in_executor(None, sys.stdin.readline),
+                            timeout=1.0
+                        )
+                        if not line:  # True EOF - only exit if we get multiple consecutive EOFs
+                            # Wait a bit and try again to distinguish between temporary EOF and real EOF
+                            await asyncio.sleep(0.1)
+                            continue
+                    except asyncio.TimeoutError:
+                        # Timeout waiting for input - continue the loop
+                        continue
+                    except Exception:
+                        # If all input methods fail, wait a bit and continue
+                        await asyncio.sleep(0.1)
+                        continue
+                
                 # Clean the input and submit it
-                clean_line = line.rstrip('\n')
+                clean_line = line.rstrip('\n\r')
                 if clean_line.strip():  # Only process non-empty lines
+                    # ENHANCED: Handle special commands in line-based mode
+                    if await self._handle_line_based_special_commands(clean_line):
+                        continue
+                    
                     # CRITICAL FIX: In line-based mode, set the input field content first so it's visible
                     if self.realtime_input is not None:
                         # Set the input to show what was typed
@@ -1922,7 +2302,7 @@ class ModernTUI:
                         # Force refresh to show the input
                         self._force_immediate_footer_refresh()
                         # Small delay so user can see what they typed
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.05)  # Reduced delay
                         # Now submit the input
                         await self.realtime_input.handle_submit(clean_line)
                     else:
@@ -1930,30 +2310,144 @@ class ModernTUI:
                         await self._input_queue.put(clean_line)
                         
             except Exception:
-                break
+                # If stdin is not available or there's a critical error, wait and retry
+                await asyncio.sleep(0.1)
+                continue
     
     async def _read_keyboard_input(self) -> None:
         """
         Per-key input reading for interactive terminals.
         Enables live typing, keyboard shortcuts, and real-time interaction.
         """
+        # Prefer our native raw-terminal reader by default to avoid event-loop blocking.
+        # You can explicitly enable prompt_toolkit by setting AGENTS_TUI_ENABLE_PTK=1.
+        use_ptk = os.getenv("AGENTS_TUI_ENABLE_PTK", "0") == "1"
+        if use_ptk:
+            self._input_engine = "ptk"
+            try:
+                from prompt_toolkit.input import create_input  # type: ignore
+                from prompt_toolkit.keys import Keys  # type: ignore
+                with create_input() as inp:
+                    while self._running:
+                        try:
+                            for kp in inp.read_keys():
+                                if not self._running:
+                                    break
+                                k = kp.key
+                                key_str = None
+                                if k == Keys.Up:
+                                    key_str = "up"
+                                elif k == Keys.Down:
+                                    key_str = "down"
+                                elif k == Keys.Left:
+                                    key_str = "left"
+                                elif k == Keys.Right:
+                                    key_str = "right"
+                                elif k == Keys.PageUp:
+                                    key_str = "page_up"
+                                elif k == Keys.PageDown:
+                                    key_str = "page_down"
+                                elif k == Keys.Home:
+                                    key_str = "home"
+                                elif k == Keys.End:
+                                    key_str = "end"
+                                elif k == Keys.Tab:
+                                    key_str = "tab"
+                                elif k == Keys.Backspace:
+                                    key_str = "backspace"
+                                elif k == Keys.Delete:
+                                    key_str = "delete"
+                                elif k == Keys.Escape:
+                                    key_str = "escape"
+                                elif k == Keys.Enter:
+                                    key_str = "enter"
+                                elif str(k).lower() in ("c-b", "control-b", "ctrl-b"):
+                                    key_str = "\x02"  # Ctrl+B
+                                else:
+                                    data = getattr(kp, 'data', None)
+                                    if data:
+                                        key_str = data
+                                    elif isinstance(k, str) and len(k) == 1:
+                                        key_str = k
+                                if not key_str:
+                                    continue
+                                # Update typing and debug
+                                try:
+                                    import time as _t
+                                    self._last_keypress_time = _t.time()
+                                except Exception:
+                                    pass
+                                if getattr(self, '_debug_keys', False):
+                                    try:
+                                        self._debug_last_key = key_str
+                                        self.mark_dirty("header")
+                                    except Exception:
+                                        pass
+                                # Immediate echo for '/'
+                                if key_str == "/" and self.realtime_input is not None:
+                                    handled = await self.realtime_input.handle_key(key_str)
+                                    if handled:
+                                        self._force_immediate_footer_refresh()
+                                        # Yield to allow immediate footer repaint
+                                        await asyncio.sleep(0)
+                                        continue
+                                # Hybrid/global shortcuts first
+                                if hasattr(self, '_handle_hybrid_keyboard_event') and self._handle_hybrid_keyboard_event(key_str):
+                                    continue
+                                # Forward to realtime input
+                                if self.realtime_input is not None:
+                                    handled = await self.realtime_input.handle_key(key_str)
+                                    if handled:
+                                        self._force_immediate_footer_refresh()
+                                        # Yield to allow immediate footer repaint
+                                        await asyncio.sleep(0)
+                                        continue
+                                # Enter submits
+                                if key_str == "enter" and self.realtime_input is not None:
+                                    # Ensure the last typed character is painted before clearing
+                                    self._force_immediate_footer_refresh()
+                                    await asyncio.sleep(0)
+                                    current_input = self.realtime_input.get_current_input().strip()
+                                    if current_input:
+                                        await self.realtime_input.handle_submit(current_input)
+                                        self.realtime_input.clear_input()
+                                    self.mark_dirty("footer")
+                        except Exception:
+                            await asyncio.sleep(0.01)
+                return
+            except Exception:
+                # Fall back to native reader below
+                pass
         loop = asyncio.get_running_loop()
         
         while self._running:
             try:
-                # FIXED: Reduced timeout for more responsive input
-                key_code, char = await loop.run_in_executor(
+                # FIXED: Reduced timeout for more responsive input with InputMode detection
+                key_code, char, input_mode = await loop.run_in_executor(
                     None, 
                     lambda: self._keyboard_input.get_key(timeout=0.05)  # Faster polling
                 )
+                
+                # CRITICAL FIX: Handle InputMode to detect fallback to line-based input
+                if input_mode == InputMode.LINE_BASED:
+                    # Auto-switch from per-key to line-based input mode
+                    try:
+                        self._print_system_message("⚠️  Switching to line-based input mode (terminal limitations)")
+                        self._print_system_message("💡 Type commands like: 'help', 'sidebar', or '/help' for assistance")
+                    except:
+                        pass
+                    # Cancel the per-key input task and switch to line-based
+                    self._input_mode = "line"  # Set flag for health indicator
+                    break  # Exit per-key loop to switch to line-based
                 
                 # Handle timeout (no input)
                 if key_code is None and char is None:
                     continue
                 
-                # Update typing activity timestamp
+                # CRITICAL FIX: Update typing activity timestamp FIRST
                 import time
                 self._last_keypress_time = time.time()
+                
                 
                 # Convert KeyCode to string for compatibility
                 key_str = None
@@ -1972,8 +2466,14 @@ class ModernTUI:
                         handled = await self.realtime_input.handle_key(key_str)
                         if handled:
                             self._force_immediate_footer_refresh()  # Force immediate refresh for slash
+                            # Yield to allow immediate footer repaint
+                            await asyncio.sleep(0)
                             continue
                     
+                # CRITICAL FIX: Handle TUI navigation keys first (before text input)
+                if await self._handle_tui_navigation(key_str, key_code):
+                    continue
+                
                 # Try hybrid keyboard handler first (shortcuts like Ctrl+B)
                 if hasattr(self, '_handle_hybrid_keyboard_event'):
                     handled = self._handle_hybrid_keyboard_event(key_str)
@@ -1986,12 +2486,23 @@ class ModernTUI:
                     if handled:
                         # CRITICAL FIX: Force immediate footer refresh for typing feedback
                         self._force_immediate_footer_refresh()
+                        # Yield to allow immediate footer repaint before next key is processed
+                        await asyncio.sleep(0)
                         continue
+                # Update debug state on any unhandled key
+                if getattr(self, '_debug_keys', False):
+                    try:
+                        self._debug_last_key = key_str
+                        self.mark_dirty("header")
+                    except Exception:
+                        pass
                 
-                # Handle special keys that create complete input
+                # Handle Enter with immediate paint before clearing
                 if key_code == KeyCode.ENTER:
-                    # Get current input and submit
                     if self.realtime_input is not None:
+                        # Force a repaint to show the final character
+                        self._force_immediate_footer_refresh()
+                        await asyncio.sleep(0)
                         current_input = self.realtime_input.get_current_input().strip()
                         if current_input:
                             await self.realtime_input.handle_submit(current_input)
@@ -2000,7 +2511,107 @@ class ModernTUI:
                             
             except Exception:
                 # On any keyboard error, fall back to line input
+                try:
+                    self._print_system_message("⚠️  Keyboard input error - switching to line-based mode")
+                except:
+                    pass
+                self._input_mode = "line"
                 break
+        
+        # CRITICAL FIX: If we exit the per-key loop, auto-switch to line-based input
+        if self._running and hasattr(self, '_input_mode') and self._input_mode == "line":
+            try:
+                self._print_system_message("🔄 Starting line-based input mode...")
+                await self._read_input()
+            except Exception:
+                pass
+    
+    async def _handle_line_based_special_commands(self, line: str) -> bool:
+        """
+        Handle special commands in line-based input mode.
+        Returns True if the command was handled and should not be processed as regular input.
+        """
+        line = line.strip()
+        
+        # Handle slash commands (command palette)
+        if line.startswith('/'):
+            # Remove the leading slash
+            command_part = line[1:].strip()
+            
+            # Show available commands if just "/" was typed
+            if not command_part:
+                self._show_command_help()
+                return True
+            
+            # Handle specific slash commands
+            if command_part.startswith('sidebar') or command_part.startswith('sb'):
+                self._toggle_sidebar()
+                return True
+            elif command_part.startswith('help') or command_part.startswith('h'):
+                self._show_command_help()
+                return True
+            elif command_part.startswith('clear') or command_part.startswith('c'):
+                if hasattr(self, 'clear_chat_history'):
+                    await self.clear_chat_history()
+                return True
+            elif command_part.lower() in ['quit', 'exit', 'q']:
+                self._running = False
+                # CRITICAL FIX: Shutdown command interface when TUI exits
+                asyncio.create_task(self._shutdown_command_interface())
+                return True
+            else:
+                # Let regular slash commands be processed as regular input
+                return False
+        
+        # Handle keyboard shortcuts as text commands
+        if line.lower() in ['ctrl+b', 'toggle sidebar', 'sidebar']:
+            self._toggle_sidebar()
+            return True
+        elif line.lower() in ['help', '?']:
+            self._show_command_help()
+            return True
+        elif line.lower() in ['clear', 'cls']:
+            if hasattr(self, 'clear_chat_history'):
+                await self.clear_chat_history()
+            return True
+        elif line.lower() in ['exit', 'quit', 'q']:
+            self._running = False
+            # CRITICAL FIX: Shutdown command interface when TUI exits
+            asyncio.create_task(self._shutdown_command_interface())
+            return True
+        
+        # Not a special command
+        return False
+    
+    def _show_command_help(self):
+        """Show available commands for line-based mode."""
+        help_text = """
+🎯 Available Commands & Shortcuts:
+
+📝 Text Commands:
+• Type your message and press Enter to send
+• /help or /h - Show this help
+• /sidebar or /sb - Toggle sidebar
+• /clear or /c - Clear chat history
+• exit, quit, q - Exit application
+
+⌨️  Keyboard Shortcuts:
+• ? - Quick help (this screen)
+• Ctrl+B - Toggle sidebar
+• Ctrl+Q - Quit application
+• Tab - Cycle focus between areas
+• Page Up/Down - Scroll chat history
+
+♿ Accessibility Shortcuts:
+• Alt+H - Toggle high contrast mode
+• Alt+M - Toggle motion reduction
+• Alt+S - Toggle increased spacing
+
+💡 Tip: You can also type regular messages and they'll be sent to the AI.
+        """.strip()
+        
+        # Show help in the system message area
+        self._print_system_message(help_text)
                 
     def _keycode_to_string(self, keycode: 'KeyCode') -> str:
         """Convert KeyCode enum to string representation."""
@@ -2025,34 +2636,73 @@ class ModernTUI:
         }
         return mapping.get(keycode, "")
     
+    async def _handle_tui_navigation(self, key_str: str, key_code) -> bool:
+        """Handle TUI navigation keys (arrow keys, tab, etc.) for page/mode navigation."""
+        if not key_code:
+            return False
+        
+        # Import KeyCode if available
+        if not hasattr(self, '_KeyCode'):
+            try:
+                from .keyboard_input import KeyCode
+                self._KeyCode = KeyCode
+            except ImportError:
+                return False
+        
+        # Handle TUI navigation (not text input)
+        current_input = ""
+        if self.realtime_input:
+            current_input = self.realtime_input.get_current_input().strip()
+        
+        # Only handle navigation when input field is empty (TUI navigation mode)
+        if current_input:
+            return False  # Let input field handle navigation within text
+        
+        if key_code == self._KeyCode.LEFT or key_code == self._KeyCode.RIGHT:
+            # Navigate between pages/modes
+            if hasattr(self, '_navigate_pages'):
+                direction = 1 if key_code == self._KeyCode.RIGHT else -1
+                self._navigate_pages(direction)
+                self.mark_dirty("all")
+                return True
+        
+        elif key_code == self._KeyCode.UP or key_code == self._KeyCode.DOWN:
+            # Navigate within current page/mode
+            if hasattr(self, '_navigate_within_page'):
+                direction = 1 if key_code == self._KeyCode.DOWN else -1
+                self._navigate_within_page(direction)
+                self.mark_dirty("content")
+                return True
+        
+        elif key_code == self._KeyCode.TAB:
+            # Tab navigation between UI elements
+            if hasattr(self, '_navigate_focus'):
+                self._navigate_focus()
+                self.mark_dirty("all")
+                return True
+        
+        return False
+    
     def _refresh_input_display(self) -> None:
         """Force UI refresh to show updated input state."""
         self.mark_dirty("footer")  # Input display refresh
         
     def _force_immediate_footer_refresh(self) -> None:
         """CRITICAL FIX: Force immediate footer refresh bypassing debounce for typing."""
-        # Clear ALL pending refresh sections to prevent interference
-        if hasattr(self, '_pending_refresh_sections'):
-            self._pending_refresh_sections.clear()
-        
-        # Reset debounce timestamps completely
-        if not hasattr(self, '_last_dirty_time'):
-            self._last_dirty_time = {}
-        
-        # Force timestamp reset for footer to bypass ALL debounce logic
-        self._last_dirty_time["footer"] = 0.0
-
-        # Bump footer cache version so layout hash changes and triggers Live.update
+        # Do not skip during rendering; flag immediate and let loop refresh once
+        # Bump footer cache version to ensure layout hash changes
         try:
             if "footer" in self._cache_version:
                 self._cache_version["footer"] += 1
         except Exception:
             pass
         
-        # Set special flag to indicate immediate refresh needed
+        # Set immediate refresh flag and trigger single refresh
         self._immediate_footer_refresh = True
         
-        # Trigger immediate refresh
+        # CRITICAL FIX: Also mark footer as dirty to ensure it gets updated
+        self.mark_dirty("footer")
+        
         self._refresh_event.set()
 
     # ------------------------------------------------------------------- #
@@ -2181,9 +2831,11 @@ class ModernTUI:
             if cmd == "mode":
                 await self._process_mode_command(arg)
                 self.mark_dirty("header")  # Mode change only affects header
-            elif cmd in {"quit", "exit"}:
+            elif cmd in {"quit", "exit", "q"}:
                 self._running = False
                 self._print_system_message("Shutting down...")
+                # CRITICAL FIX: Shutdown command interface when TUI exits
+                await self._shutdown_command_interface()
             elif cmd == "help":
                 # Use hybrid help if sidebar state variables exist (hybrid mode)
                 if hasattr(self, '_sidebar_collapsed'):
@@ -2379,6 +3031,8 @@ All commands must start with "/" character.
             return True
         elif key == '\x11':  # Ctrl+Q (ASCII 17) - alternative quit
             self._running = False
+            # CRITICAL FIX: Shutdown command interface when TUI exits
+            asyncio.create_task(self._shutdown_command_interface())
             return True
             
         # FIXED: Handle global shortcuts - but don't intercept "/" for command palette
@@ -2386,6 +3040,34 @@ All commands must start with "/" character.
         elif key == "escape" and self._command_palette_active:
             self._deactivate_command_palette()
             return True
+        elif key == "?":
+            # Show help overlay when "?" is pressed (discoverability improvement)
+            self._show_command_help()
+            return True
+        elif key.startswith("alt+"):
+            # Handle accessibility keyboard shortcuts
+            alt_key = key[4:]  # Remove "alt+" prefix
+            if alt_key == "h":
+                # Alt+H: Toggle high contrast mode
+                current = self._accessibility_config.get("high_contrast", False)
+                self.set_accessibility_option("high_contrast", not current)
+                contrast_status = "enabled" if not current else "disabled"
+                self._print_system_message(f"High contrast {contrast_status}")
+                return True
+            elif alt_key == "m":
+                # Alt+M: Toggle motion reduction
+                current = self._accessibility_config.get("reduce_motion", False)
+                self.set_accessibility_option("reduce_motion", not current)
+                motion_status = "reduced" if not current else "normal"
+                self._print_system_message(f"Motion sensitivity: {motion_status}")
+                return True
+            elif alt_key == "s":
+                # Alt+S: Toggle increased spacing
+                current = self._accessibility_config.get("increase_spacing", False)
+                self.set_accessibility_option("increase_spacing", not current)
+                spacing_status = "increased" if not current else "normal"
+                self._print_system_message(f"Spacing: {spacing_status}")
+                return True
         elif key == "tab":
             if not self._sidebar_collapsed:
                 self._cycle_focus()
@@ -2400,6 +3082,26 @@ All commands must start with "/" character.
             return True
         elif key in ["up", "down"] and self._current_focus == FocusRegion.SIDEBAR and not self._sidebar_collapsed:
             self._navigate_sidebar(key)
+            return True
+        elif key in ["up", "down"] and self._current_focus == FocusRegion.MAIN:
+            # Fine-grained scroll when focused on main content
+            delta = -1 if key == "up" else 1
+            self._scroll_chat_history(delta)
+            return True
+        elif key in ["left", "right"] and not self._sidebar_collapsed:
+            # Horizontal navigation switches focus between sidebar and main
+            if key == "left":
+                self._current_focus = FocusRegion.SIDEBAR
+            else:
+                self._current_focus = FocusRegion.MAIN
+            self._save_ui_state()
+            self.mark_dirty("footer")
+            return True
+        elif key == "enter" and self._current_focus == FocusRegion.SIDEBAR and not self._sidebar_collapsed:
+            # Selecting current sidebar page moves focus to main content
+            self._current_focus = FocusRegion.MAIN
+            self._save_ui_state()
+            self.mark_dirty("footer")
             return True
             
         return False
@@ -2465,7 +3167,7 @@ All commands must start with "/" character.
             self._chat_scroll_offset = max(0, min(max_scroll, self._chat_scroll_offset + delta))
         except Exception:
             self._chat_scroll_offset = max(0, self._chat_scroll_offset + delta)
-        self.mark_dirty("body")  # Re-render chat content
+        self.mark_dirty("content")  # Re-render chat content
     
     def _auto_scroll_to_bottom(self) -> None:
         """Auto-scroll to show the most recent messages (bottom of chat)."""
@@ -2497,7 +3199,38 @@ All commands must start with "/" character.
         self._save_ui_state()
             
         # Re-render sidebar and content
-        self.mark_dirty("body")
+        self.mark_dirty("sidebar")
+        self.mark_dirty("content")
+        
+    def _navigate_pages(self, direction: int) -> None:
+        """Navigate between pages/modes using left/right arrows."""
+        # If sidebar is visible, treat as hybrid page navigation; otherwise cycle modes
+        if not getattr(self, '_sidebar_collapsed', True):
+            pages = list(SidebarPage)
+            current_index = pages.index(self._current_page)
+            new_index = (current_index + direction) % len(pages)
+            self._current_page = pages[new_index]
+            self._save_ui_state()
+        else:
+            modes = list(TUIMode)
+            current_index = modes.index(self._current_mode)
+            new_index = (current_index + direction) % len(modes)
+            self._current_mode = modes[new_index]
+            self._save_ui_state()
+            
+    def _navigate_within_page(self, direction: int) -> None:
+        """Navigate within current page using up/down arrows."""
+        if hasattr(self, '_current_focus') and self._current_focus == FocusRegion.MAIN:
+            # Scroll chat history when main content is focused
+            self._scroll_chat_history(direction * 5)
+        elif hasattr(self, '_current_focus') and self._current_focus == FocusRegion.SIDEBAR:
+            # Navigate sidebar pages
+            self._navigate_sidebar("down" if direction > 0 else "up")
+            
+    def _navigate_focus(self) -> None:
+        """Navigate between UI focus regions using Tab."""
+        # Use existing cycle_focus method
+        self._cycle_focus()
         
     def _execute_command_palette_command(self, command: str) -> None:
         """Execute a command from the command palette."""
@@ -2529,6 +3262,24 @@ All commands must start with "/" character.
         else:
             # Regular chat message
             asyncio.create_task(self._send_chat_message(command))
+    
+    async def _handle_quit_command(self):
+        """Handle quit command for hybrid mode."""
+        self._running = False
+        self._print_system_message("Shutting down...")
+        # CRITICAL FIX: Shutdown command interface when TUI exits
+        await self._shutdown_command_interface()
+    
+    async def _shutdown_command_interface(self):
+        """Shutdown the command interface to prevent prompt flooding."""
+        try:
+            if hasattr(self, 'conversation_manager') and self.conversation_manager:
+                if hasattr(self.conversation_manager, 'command_interface') and self.conversation_manager.command_interface:
+                    # Signal the command interface to stop its conversational loop
+                    self.conversation_manager.command_interface.is_running = False
+                    logger.debug("Command interface shutdown signal sent")
+        except Exception as e:
+            logger.warning(f"Error shutting down command interface: {e}")
             
     def _show_hybrid_help(self) -> None:
         """Show help for hybrid TUI mode."""
@@ -2559,7 +3310,23 @@ All commands must start with "/" character.
     # Simple system‑message printer (works both with Rich and fallback).
     # ------------------------------------------------------------------- #
     def _print_system_message(self, message: str) -> None:
+        # During TUI, prefer in-UI delivery to avoid console leakage
+        if self._in_live_context and self.chat_history is not None:
+            try:
+                self.chat_history.add_message(str(message), "system")
+                self.mark_dirty("content")
+                return
+            except Exception:
+                pass
+        # Otherwise enqueue to TUI logs if available
+        if self._in_live_context:
+            self._enqueue_tui_log("INFO", str(message))
+            return
+        # Fallback for non-TUI (e.g., fallback CLI)
         if self._console:
-            self._console.print(f"[dim yellow]System: {message}[/dim yellow]")
+            try:
+                self._console.print(f"[dim yellow]System: {message}[/dim yellow]")
+            except Exception:
+                print(f"System: {message}")
         else:
             print(f"System: {message}")

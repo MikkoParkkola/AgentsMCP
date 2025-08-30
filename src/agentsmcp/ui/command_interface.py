@@ -532,6 +532,11 @@ class CommandInterface:
         """Start interactive command interface"""
         logger.info("🚀 Starting Revolutionary Command Interface")
         
+        # CRITICAL FIX: Check if we're in a truly interactive environment
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            logger.warning("Not in interactive environment - command interface will not start")
+            return
+        
         self.is_running = True
         
         # Show welcome message
@@ -550,6 +555,8 @@ class CommandInterface:
                         continue
                     
                     if not command_line:
+                        # CRITICAL FIX: Add delay to prevent tight loop when no input received
+                        await asyncio.sleep(0.1)  # Prevent prompt flooding
                         continue
                     
                     # Process command (conversational or direct)
@@ -686,6 +693,14 @@ job monitoring, and system health checks."""
         
         # Try bracketed paste mode first
         try:
+            # Check if stdin is interactive to prevent tight loops in non-interactive environments
+            if not sys.stdin.isatty():
+                # In non-interactive mode, use simple input to avoid tight loops
+                try:
+                    return input(prompt.strip() + " ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    return ""
+            
             # Enable bracketed paste mode for iTerm2
             sys.stdout.write('\033[?2004h')  # Enable bracketed paste
             sys.stdout.write(prompt)

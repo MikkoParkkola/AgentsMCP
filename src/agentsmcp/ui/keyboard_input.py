@@ -10,6 +10,12 @@ import os
 from typing import Optional, Tuple
 from enum import Enum
 
+class InputMode(Enum):
+    """Input mode indicators"""
+    PER_KEY = "per_key"  # Normal per-key input
+    LINE_BASED = "line_based"  # Only line-based input possible
+    TIMEOUT = "timeout"  # No input within timeout
+
 class KeyCode(Enum):
     """Enumeration of special key codes"""
     UP = "up"
@@ -35,6 +41,7 @@ class KeyboardInput:
         self.is_windows = sys.platform.startswith('win')
         self.is_unix = not self.is_windows
         self.is_interactive = self._detect_interactive_capability()
+        self.hybrid_mode = False  # Enable enhanced line-based mode
         
         # Platform-specific modules
         if self.is_windows:
@@ -57,39 +64,63 @@ class KeyboardInput:
     def _detect_interactive_capability(self) -> bool:
         """
         Detect if we can handle interactive keyboard input.
-        Only returns True if we can actually access terminal attributes for raw mode.
+        Checks both stdin TTY and /dev/tty availability for robust detection.
+        Enhanced to be more permissive and try multiple detection methods.
         """
-        # For Unix systems, only return True if we can actually access terminal attributes
+        # For Unix systems, check both stdin and /dev/tty availability
         if self.is_unix:
             try:
                 import termios
                 import tty
                 
-                # Must be a TTY
-                if not sys.stdin.isatty():
-                    return False
+                # ENHANCED: Try multiple detection methods
+                stdin_is_tty = sys.stdin.isatty()
+                stdout_is_tty = sys.stdout.isatty()
+                stderr_is_tty = sys.stderr.isatty()
+                dev_tty_available = False
                 
-                fd = sys.stdin.fileno()
-                # Try to get terminal attributes - if this works, we can do raw input
-                old_settings = termios.tcgetattr(fd)
-                return True
+                # Check if /dev/tty is available as fallback (works in many environments)
+                try:
+                    if os.path.exists('/dev/tty'):
+                        with open('/dev/tty', 'r') as tty_file:
+                            # Try to get terminal attributes to confirm it works
+                            termios.tcgetattr(tty_file.fileno())
+                            dev_tty_available = True
+                except (OSError, termios.error):
+                    dev_tty_available = False
                 
-            except (ImportError, OSError, termios.error):
-                # termios not available or terminal attributes inaccessible
+                # ENHANCED: Check for terminal environment variables as additional hints
+                terminal_env_hints = bool(
+                    os.getenv('TERM') and 
+                    os.getenv('TERM') != 'dumb' and
+                    (os.getenv('TERM_PROGRAM') or os.getenv('TERMINAL_EMULATOR'))
+                )
+                
+                # Be more permissive: consider interactive if ANY of these are true:
+                # 1. stdin is TTY, 2. stdout is TTY, 3. /dev/tty available + good env, 4. strong terminal env hints
+                # FALLBACK: If /dev/tty is available and we're in a terminal environment, assume interactive
+                return (stdin_is_tty or stdout_is_tty or 
+                       (dev_tty_available and terminal_env_hints) or 
+                       (terminal_env_hints and stderr_is_tty) or
+                       # Fallback for environments like Claude Code where streams aren't TTY but /dev/tty works
+                       (dev_tty_available and os.getenv('TERM') and os.getenv('TERM') != 'dumb'))
+                
+            except ImportError:
+                # termios/tty not available at all
                 return False
         
         # For Windows, check for console availability
         if self.is_windows:
             try:
                 import msvcrt
-                # Must be a TTY and have proper console access
-                return sys.stdin.isatty() and sys.stdout.isatty()
+                # Enhanced: accept if any of stdin/stdout is TTY
+                return sys.stdin.isatty() or sys.stdout.isatty()
             except ImportError:
                 return False
         
         return False
     
-    def get_key(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str]]:
+    def get_key(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str], InputMode]:
         """
         Get a single keypress from the terminal.
         
@@ -97,27 +128,28 @@ class KeyboardInput:
             timeout: Optional timeout in seconds. None for blocking wait.
             
         Returns:
-            Tuple of (KeyCode, character). One will be None.
-            - For special keys: (KeyCode.*, None)
-            - For regular characters: (None, character)
-            - For timeout/no input: (None, None)
+            Tuple of (KeyCode, character, mode). One of KeyCode/character will be None.
+            - For special keys: (KeyCode.*, None, PER_KEY)
+            - For regular characters: (None, character, PER_KEY)
+            - For timeout/no input: (None, None, TIMEOUT)
+            - For fallback to line-based: (None, None, LINE_BASED)
         """
         # Fallback for non-interactive environments
         if not self.is_interactive:
-            return self._get_key_fallback(timeout)
+            return None, None, InputMode.LINE_BASED
             
         if self.is_windows:
             return self._get_key_windows(timeout)
         else:
             return self._get_key_unix(timeout)
     
-    def _get_key_windows(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str]]:
+    def _get_key_windows(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str], InputMode]:
         """Windows implementation of get_key"""
         if timeout is not None:
             # Windows doesn't have easy timeout support for getch
             # For now, just do non-blocking check
             if not self.msvcrt.kbhit():
-                return None, None
+                return None, None, InputMode.TIMEOUT
         
         # Get first character
         ch = self.msvcrt.getch()
@@ -136,119 +168,91 @@ class KeyboardInput:
                 b'Q': KeyCode.PAGE_DOWN,
                 b'S': KeyCode.DELETE,
             }
-            return key_map.get(ch2), None
+            return key_map.get(ch2), None, InputMode.PER_KEY
         
         # Handle regular special characters
         if ch == b'\r' or ch == b'\n':
-            return KeyCode.ENTER, None
+            return KeyCode.ENTER, None, InputMode.PER_KEY
         elif ch == b'\x1b':  # ESC
-            return KeyCode.ESCAPE, None
+            return KeyCode.ESCAPE, None, InputMode.PER_KEY
         elif ch == b'\x08':  # Backspace
-            return KeyCode.BACKSPACE, None
+            return KeyCode.BACKSPACE, None, InputMode.PER_KEY
         elif ch == b'\t':    # Tab
-            return KeyCode.TAB, None
+            return KeyCode.TAB, None, InputMode.PER_KEY
         elif ch == b' ':     # Space
-            return KeyCode.SPACE, None
+            return KeyCode.SPACE, None, InputMode.PER_KEY
         else:
             # Regular character
             try:
-                return None, ch.decode('utf-8', errors='ignore')
+                return None, ch.decode('utf-8', errors='ignore'), InputMode.PER_KEY
             except:
-                return None, None
+                return None, None, InputMode.TIMEOUT
     
-    def _get_key_fallback(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str]]:
-        """Fallback implementation for non-interactive environments"""
-        # In non-interactive mode, simulate arrow key behavior with regular input
-        try:
-            line = input().strip()
-            if line.lower() in ['q', 'quit', 'exit']:
-                return KeyCode.ESCAPE, None
-            elif line.lower() in ['', 'enter']:
-                return KeyCode.ENTER, None
-            elif line.lower() in ['up', 'u']:
-                return KeyCode.UP, None
-            elif line.lower() in ['down', 'd']:
-                return KeyCode.DOWN, None
-            else:
-                return None, line
-        except (EOFError, KeyboardInterrupt):
-            return KeyCode.ESCAPE, None
+    # REMOVED: _get_key_fallback method that used blocking input()
+    # This was causing the "looks interactive but acts line-based" issue
     
-    def _get_key_lenient_fallback(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str]]:
-        """
-        Lenient fallback for environments where we believe we're in a terminal 
-        but can't access raw terminal attributes (e.g., containers, IDEs, certain shells).
-        
-        This provides better UX by giving clear instructions and handling common cases.
-        """
-        # Try to read a single character using standard input
-        # This won't work for arrow keys, but provides a better UX
-        try:
-            print("Navigation: [u]p, [d]own, [enter] to select, [q] to quit: ", end='', flush=True)
-            line = input().strip().lower()
-            
-            if line in ['q', 'quit', 'exit']:
-                return KeyCode.ESCAPE, None
-            elif line in ['', 'enter']:
-                return KeyCode.ENTER, None
-            elif line in ['up', 'u']:
-                return KeyCode.UP, None
-            elif line in ['down', 'd']:
-                return KeyCode.DOWN, None
-            elif line in ['left', 'l']:
-                return KeyCode.LEFT, None
-            elif line in ['right', 'r']:
-                return KeyCode.RIGHT, None
-            else:
-                # Treat other input as regular character input
-                return None, line
-                
-        except (EOFError, KeyboardInterrupt):
-            return KeyCode.ESCAPE, None
-    
-    def _get_key_unix(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str]]:
+    def _get_key_unix(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str], InputMode]:
         """Unix implementation of get_key"""
-        # Check if we can access terminal attributes
-        fd = sys.stdin.fileno()
+        # CRITICAL FIX: Try /dev/tty first if stdin fails, then fall back to stdin
+        input_file = None
+        fd = None
         old_settings = None
         
+        # Try /dev/tty first (works in subprocess environments)
         try:
-            old_settings = self.termios.tcgetattr(fd)
-        except (self.termios.error, OSError) as e:
-            # If we can't access terminal attributes, we're not actually interactive
-            # This should not happen if _detect_interactive_capability worked correctly
-            raise RuntimeError(
-                f"Cannot access terminal attributes despite detecting interactive capability: {e}\n"
-                "Please run this program in a proper terminal emulator."
-            )
+            if os.path.exists('/dev/tty'):
+                # Open TTY in binary for robust, exact key decoding (macOS/iTerm2 friendly)
+                input_file = open('/dev/tty', 'rb', buffering=0)
+                fd = input_file.fileno()
+                old_settings = self.termios.tcgetattr(fd)
+        except (self.termios.error, OSError, FileNotFoundError):
+            pass
+        
+        # Fall back to stdin if /dev/tty failed
+        if fd is None:
+            try:
+                fd = sys.stdin.fileno()
+                old_settings = self.termios.tcgetattr(fd)
+                # Use buffered binary reader on stdin as well
+                input_file = sys.stdin.buffer
+            except (self.termios.error, OSError) as e:
+                # CRITICAL FIX: If we can't access terminal attributes, signal line-based mode
+                return None, None, InputMode.LINE_BASED
         
         try:
             # Set terminal to raw mode
-            self.tty.setraw(sys.stdin.fileno())
+            self.tty.setraw(fd)
             
             # FIXED: Reduce timeout precision to prevent first character drops
             # Check for input availability with timeout
             if timeout is not None:
-                ready, _, _ = self.select.select([sys.stdin], [], [], timeout)
+                ready, _, _ = self.select.select([input_file], [], [], timeout)
                 if not ready:
-                    return None, None
+                    return None, None, InputMode.TIMEOUT
             
             # Read first character - this should be immediate
-            ch = sys.stdin.read(1)
+            ch_bytes = input_file.read(1)
+            if not ch_bytes:
+                return None, None, InputMode.TIMEOUT
+            # Decode single byte to text safely for processing
+            ch = ch_bytes.decode('utf-8', errors='ignore')
             
             # FIXED: Handle slash character immediately without delay
             if ch == '/':
-                return None, ch
+                return None, ch, InputMode.PER_KEY
             
             # Handle escape sequences
             if ch == '\x1b':  # ESC
                 # FIXED: Shorter timeout to prevent input lag
-                ready, _, _ = self.select.select([sys.stdin], [], [], 0.05)  # Reduced from 0.1
+                ready, _, _ = self.select.select([input_file], [], [], 0.05)  # Reduced from 0.1
                 if ready:
-                    ch2 = sys.stdin.read(1)
+                    ch2_b = input_file.read(1)
+                    if not ch2_b:
+                        return KeyCode.ESCAPE, None, InputMode.PER_KEY
+                    ch2 = ch2_b.decode('utf-8', errors='ignore')
                     if ch2 == '[':
                         # ANSI escape sequence
-                        ch3 = sys.stdin.read(1)
+                        ch3 = input_file.read(1).decode('utf-8', errors='ignore')
                         key_map = {
                             'A': KeyCode.UP,
                             'B': KeyCode.DOWN,
@@ -259,7 +263,7 @@ class KeyboardInput:
                         }
                         special_key = key_map.get(ch3)
                         if special_key:
-                            return special_key, None
+                            return special_key, None, InputMode.PER_KEY
                         
                         # Multi-character sequences (Page Up/Down, Delete, etc.)
                         if ch3 in '0123456789':
@@ -267,41 +271,50 @@ class KeyboardInput:
                             sequence = ch3
                             while True:
                                 # FIXED: Shorter timeout for sequence reading
-                                ready, _, _ = self.select.select([sys.stdin], [], [], 0.05)
+                                ready, _, _ = self.select.select([input_file], [], [], 0.05)
                                 if not ready:
                                     break
-                                next_ch = sys.stdin.read(1)
+                                next_ch_b = input_file.read(1)
+                                if not next_ch_b:
+                                    break
+                                next_ch = next_ch_b.decode('utf-8', errors='ignore')
                                 sequence += next_ch
                                 if next_ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ~':
                                     break
                             
                             # Map common sequences
                             if sequence == '5~':
-                                return KeyCode.PAGE_UP, None
+                                return KeyCode.PAGE_UP, None, InputMode.PER_KEY
                             elif sequence == '6~':
-                                return KeyCode.PAGE_DOWN, None
+                                return KeyCode.PAGE_DOWN, None, InputMode.PER_KEY
                             elif sequence == '3~':
-                                return KeyCode.DELETE, None
+                                return KeyCode.DELETE, None, InputMode.PER_KEY
                 
                 # Just ESC key
-                return KeyCode.ESCAPE, None
+                return KeyCode.ESCAPE, None, InputMode.PER_KEY
             
             # Handle other special characters
             elif ch == '\n' or ch == '\r':
-                return KeyCode.ENTER, None
+                return KeyCode.ENTER, None, InputMode.PER_KEY
             elif ch == '\x7f' or ch == '\x08':  # DEL or Backspace
-                return KeyCode.BACKSPACE, None
+                return KeyCode.BACKSPACE, None, InputMode.PER_KEY
             elif ch == '\t':
-                return KeyCode.TAB, None
+                return KeyCode.TAB, None, InputMode.PER_KEY
             elif ch == ' ':
-                return KeyCode.SPACE, None
+                return KeyCode.SPACE, None, InputMode.PER_KEY
             else:
                 # FIXED: Regular character - return immediately
-                return None, ch
+                return None, ch, InputMode.PER_KEY
                 
         finally:
             # Restore original terminal settings
             self.termios.tcsetattr(fd, self.termios.TCSADRAIN, old_settings)
+            # Close /dev/tty file if we opened it
+            if input_file and input_file != sys.stdin:
+                try:
+                    input_file.close()
+                except:
+                    pass
     
     def flush_input(self):
         """Clear any pending input from the buffer"""
@@ -367,7 +380,7 @@ class MenuSelector:
         self.keyboard.flush_input()
         
         # Get next keypress
-        key_code, char = self.keyboard.get_key()
+        key_code, char, input_mode = self.keyboard.get_key()
         
         if key_code == KeyCode.UP:
             selected_index = (selected_index - 1) % len(options)
@@ -403,7 +416,7 @@ class MenuSelector:
             - (False, "") if cancelled/escaped
         """
         while True:
-            key_code, char = self.keyboard.get_key()
+            key_code, char, input_mode = self.keyboard.get_key()
             
             if key_code == KeyCode.ESCAPE and allow_escape:
                 return False, ""

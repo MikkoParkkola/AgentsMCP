@@ -65,18 +65,20 @@ class ApplicationController:
     def __init__(self, 
                  event_system: Optional[AsyncEventSystem] = None,
                  terminal_manager: Optional[TerminalManager] = None,
-                 config: Optional[ApplicationConfig] = None):
+                 config: Optional[ApplicationConfig] = None,
+                 status_manager: Optional[StatusManager] = None):
         """Initialize the application controller."""
         self.event_system = event_system or AsyncEventSystem()
         self.terminal_manager = terminal_manager or TerminalManager()
         self.config = config or ApplicationConfig()
+        self._external_status_manager = status_manager
         
         # Core components
         self.display_renderer: Optional[DisplayRenderer] = None
         self.input_handler: Optional[InputHandler] = None
         self.component_registry: Optional[ComponentRegistry] = None
         self.keyboard_processor: Optional[KeyboardProcessor] = None
-        self.status_manager: Optional[StatusManager] = None
+        self.status_manager: Optional[StatusManager] = self._external_status_manager
         
         # Application state
         self._state = ApplicationState.STOPPED

@@ -114,8 +114,18 @@ class AgentsMCPProgressiveGroup(ProgressiveDisclosureGroup, EnhancedAgentsMCPCLI
 @click.option("--log-format", default=None, type=click.Choice(["json", "text"]))
 @click.option("--config", "config_path", default=None, help="Path to YAML config")
 @click.option("--debug", is_flag=True, hidden=True, help="Enable debug mode")
+# Fast path: launch v2 TUI directly from root with switches
+@click.option("--tui-v2/--no-tui-v2", default=False, help="Launch v2 TUI directly (dev mode)")
+@click.option("--backend/--no-backend", default=True, help="Enable conversation backend (default: enabled)")
+@click.option("--raw-input/--no-raw-input", default=True, help="Use raw input pipeline (default: enabled)")
+@click.option("--minimal", is_flag=True, help="Run v2 in minimal (raw) mode explicitly")
+@click.option("--input-lines", type=int, default=None, help="Visible input lines (raw mode)")
+@click.option("--wheel-lines", type=int, default=None, help="Mouse wheel step in lines")
+@click.option("--caret-char", default=None, help="Input caret character (e.g., █ or |)")
 def main(
-    log_level: Optional[str], log_format: Optional[str], config_path: Optional[str], debug: bool
+    log_level: Optional[str], log_format: Optional[str], config_path: Optional[str], debug: bool,
+    tui_v2: bool, backend: bool, raw_input: bool, minimal: bool,
+    input_lines: Optional[int], wheel_lines: Optional[int], caret_char: Optional[str]
 ) -> None:
     """AgentsMCP - Revolutionary Multi-Agent Orchestration with Cost Intelligence."""
     spinner = _Spinner("Initializing AgentsMCP")
@@ -130,6 +140,49 @@ def main(
         configure_logging(log_level or "INFO", log_format or "text")
     finally:
         spinner.stop("Initialized")
+
+    # Fast path: launch v2 TUI directly when requested
+    if tui_v2:
+        import os as _os
+        # Base flags
+        _os.environ["AGENTS_TUI_ENABLE_V2"] = "1"
+        _os.environ["AGENTS_TUI_V2_NO_FALLBACK"] = "1"
+        _os.environ["AGENTS_TUI_SUPPRESS_TIPS"] = "1"
+        # Minimal/raw toggle
+        if minimal:
+            _os.environ["AGENTS_TUI_V2_MINIMAL"] = "1"
+        else:
+            _os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "0")
+        # Backend
+        if backend:
+            _os.environ["AGENTS_TUI_V2_BACKEND"] = "1"
+            _os.environ.setdefault("AGENTS_TUI_V2_BACKEND_PREWARM", "1")
+        else:
+            _os.environ.pop("AGENTS_TUI_V2_BACKEND", None)
+            _os.environ["AGENTS_TUI_V2_BACKEND_PREWARM"] = "0"
+        # Raw input in full v2
+        _os.environ["AGENTS_TUI_V2_FORCE_RAW_INPUT"] = "1" if raw_input else "0"
+        # Optional tuning
+        if input_lines is not None and input_lines > 0:
+            _os.environ["AGENTS_TUI_V2_INPUT_LINES"] = str(input_lines)
+        if wheel_lines is not None and wheel_lines > 0:
+            _os.environ["AGENTS_TUI_V2_WHEEL_LINES"] = str(wheel_lines)
+        if caret_char:
+            _os.environ["AGENTS_TUI_V2_CARET_CHAR"] = caret_char
+
+        # Launch v2
+        try:
+            from agentsmcp.ui.v2.main_app import launch_main_tui
+            exit_code = asyncio.run(launch_main_tui())
+            if exit_code != 0:
+                click.echo(f"❌ v2 TUI exited with code {exit_code}")
+        except KeyboardInterrupt:
+            click.echo("\n👋 Goodbye!")
+        except Exception as exc:
+            logging.getLogger(__name__).exception("Failed to start v2 TUI from root")
+            click.echo(f"❌ v2 TUI failed: {exc}")
+        # Exit after running TUI
+        raise SystemExit(0)
 
 # =====================================================================
 # 1️⃣ INIT GROUP - Getting Started
@@ -895,6 +948,182 @@ def mcp_alias(ctx):
 def roles_alias(ctx):
     """[ALIAS] Role‑based orchestration commands."""
     ctx.forward(server_roles)
+
+@main.command("tui", hidden=True)
+@click.option("--theme", default="auto", type=click.Choice(["auto", "light", "dark"]))
+@click.option("--no-welcome", is_flag=True, help="Skip welcome screen")
+@click.option("--refresh-interval", default=2.0, type=float, help="Auto-refresh interval")
+@click.option("--orchestrator-model", default="gpt-5", help="Orchestrator model")
+@click.option("--agent", "agent_type", default="ollama-turbo-coding", help="Default AI agent")
+@click.pass_context
+def tui_alias(ctx, theme: str, no_welcome: bool, refresh_interval: float, 
+              orchestrator_model: str, agent_type: str):
+    """[ALIAS] Launch the modern TUI interface."""
+    # Forward to run_interactive but force TUI mode
+    config_path = ctx.parent.params.get('config_path')
+    config = _load_config(config_path)
+    
+    # Import here to avoid startup overhead
+    from agentsmcp.ui.cli_app import CLIApp, CLIConfig
+    import logging
+    
+    try:
+        # Create CLI configuration with parameters, explicitly set to TUI mode
+        cli_config = CLIConfig(
+            theme_mode=theme,
+            show_welcome=not no_welcome,
+            refresh_interval=refresh_interval,
+            orchestrator_model=orchestrator_model,
+            agent_type=agent_type,
+        )
+        
+        # Force TUI mode
+        app = CLIApp(config=cli_config, mode="tui")
+        
+        # Run the app asynchronously
+        async def run_app():
+            return await app.start()
+        
+        asyncio.run(run_app())
+    except KeyboardInterrupt:
+        print("\n👋 Goodbye!")
+    except Exception as exc:
+        logging.getLogger(__name__).exception(
+            "Failed to start the TUI interface"
+        )
+        print(f"❌ TUI mode failed: {exc}")
+
+@main.command("tui-v2-dev", hidden=False)
+@click.option("--minimal", is_flag=True, help="Run v2 in minimal input mode (default)")
+@click.option("--debug", is_flag=True, help="Enable v2 minimal debug logging")
+@click.option("--backend/--no-backend", default=True, help="Enable conversation backend (default: enabled)")
+@click.option("--raw-input/--no-raw-input", default=True, help="Use raw input pipeline (default: enabled)")
+@click.pass_context
+def tui_v2_dev(ctx, minimal: bool, debug: bool, backend: bool, raw_input: bool):
+    """Run the v2 TUI directly for development (no fallback)."""
+    # Set env flags for v2
+    import os as _os
+    if minimal:
+        _os.environ["AGENTS_TUI_V2_MINIMAL"] = "1"
+    else:
+        _os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "1")
+    _os.environ["AGENTS_TUI_ENABLE_V2"] = "1"
+    _os.environ["AGENTS_TUI_V2_NO_FALLBACK"] = "1"
+    if debug:
+        _os.environ["AGENTS_TUI_V2_DEBUG"] = "1"
+    if backend:
+        _os.environ["AGENTS_TUI_V2_BACKEND"] = "1"
+        # Enable backend prewarm to reduce first-response latency
+        _os.environ.setdefault("AGENTS_TUI_V2_BACKEND_PREWARM", "1")
+    else:
+        _os.environ.pop("AGENTS_TUI_V2_BACKEND", None)
+        _os.environ["AGENTS_TUI_V2_BACKEND_PREWARM"] = "0"
+    # Raw input by default (works best across terminals); allow opt-out
+    if raw_input:
+        _os.environ["AGENTS_TUI_V2_FORCE_RAW_INPUT"] = "1"
+    else:
+        _os.environ["AGENTS_TUI_V2_FORCE_RAW_INPUT"] = "0"
+    # Suppress progressive CLI tips while running/after v2 so exit is clean
+    _os.environ["AGENTS_TUI_SUPPRESS_TIPS"] = "1"
+
+    try:
+        # Launch v2 directly
+        from agentsmcp.ui.v2.main_app import launch_main_tui
+        exit_code = asyncio.run(launch_main_tui())
+        if exit_code != 0:
+            print(f"❌ tui-v2-dev exited with code {exit_code}")
+    except KeyboardInterrupt:
+        print("\n👋 Goodbye!")
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).exception("Failed to start tui-v2-dev")
+        print(f"❌ tui-v2-dev failed: {exc}")
+
+@main.command("tui-v2-raw", hidden=False)
+def tui_v2_raw():
+    """Ultra-minimal raw TTY input tester for v2.
+
+    - No renderer, no Rich, no prompt_toolkit
+    - Reads keys from /dev/tty in raw mode
+    - Echoes a single input line with a caret
+    - /quit or /exit exits; Ctrl+C/Ctrl+D exit
+    """
+    import os, sys, termios, tty, select, time
+
+    fd = None
+    old = None
+    prompt = "> "
+    buf = ""
+    try:
+        # Suppress progressive CLI tips for raw tester as well
+        os.environ["AGENTS_TUI_SUPPRESS_TIPS"] = "1"
+        # Open controlling terminal directly
+        fd = os.open('/dev/tty', os.O_RDONLY)
+        old = termios.tcgetattr(fd)
+        tty.setraw(fd)
+
+        def redraw():
+            sys.stdout.write('\r' + '\x1b[2K')  # Clear line
+            sys.stdout.write(prompt + buf + '|')
+            sys.stdout.flush()
+
+        # Initial paint
+        redraw()
+
+        while True:
+            r, _, _ = select.select([fd], [], [], 0.1)
+            if not r:
+                continue
+            data = os.read(fd, 64)
+            if not data:
+                continue
+            for b in data:
+                if b in (3, 4):  # Ctrl+C, Ctrl+D
+                    sys.stdout.write('\r\n')
+                    sys.stdout.flush()
+                    return
+                elif b in (8, 127):  # Backspace
+                    if buf:
+                        buf = buf[:-1]
+                    redraw()
+                elif b in (10, 13):  # Enter
+                    txt = buf.strip()
+                    if txt in ('/quit', '/exit'):
+                        sys.stdout.write('\r\n')
+                        sys.stdout.flush()
+                        return
+                    # Clear buffer on submit
+                    buf = ""
+                    redraw()
+                elif b == 27:  # ESC clears the line
+                    buf = ""
+                    redraw()
+                else:
+                    try:
+                        ch = bytes([b]).decode('utf-8', errors='ignore')
+                    except Exception:
+                        ch = ''
+                    if ch:
+                        buf += ch
+                        # Immediate quit without Enter for reliability
+                        if buf.strip().endswith('/quit') or buf.strip().endswith('/exit'):
+                            sys.stdout.write('\r\n')
+                            sys.stdout.flush()
+                            return
+                        redraw()
+    except Exception as exc:
+        sys.stdout.write(f"\n❌ tui-v2-raw failed: {exc}\n")
+    finally:
+        try:
+            if old is not None and fd is not None:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        except Exception:
+            pass
+        try:
+            if fd is not None:
+                os.close(fd)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()

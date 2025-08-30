@@ -12,6 +12,7 @@ import re
 import signal
 import sys
 from typing import Any, Awaitable, Callable, List, Optional, Union
+import logging
 
 # Rich imports with graceful fallback
 try:
@@ -25,6 +26,13 @@ except ImportError:  # pragma: no cover
     Text = None
     Style = None
     RenderableType = Any
+
+
+logger = logging.getLogger(__name__)
+try:
+    logger.setLevel(logging.DEBUG)
+except Exception:
+    pass
 
 
 class RealTimeInputField:
@@ -43,6 +51,7 @@ class RealTimeInputField:
         max_height: Maximum height of input panel (lines)
         initial_text: Starting content
         prompt: Text shown before input area
+        placeholder: Placeholder text shown when input is empty
         show_cursor: Whether to show blinking cursor
         cursor_style: Rich style for cursor display
     """
@@ -55,6 +64,7 @@ class RealTimeInputField:
         max_height: int = 5,
         initial_text: str = "",
         prompt: str = "",
+        placeholder: str = "",
         show_cursor: bool = True,
         cursor_style: str = "reverse bold"
     ) -> None:
@@ -62,6 +72,7 @@ class RealTimeInputField:
         self.max_width = max_width
         self.max_height = max_height
         self.prompt = prompt
+        self.placeholder = placeholder
         self.show_cursor = show_cursor
         self.cursor_style = cursor_style
         
@@ -85,6 +96,11 @@ class RealTimeInputField:
         
         # FIXED: Initialize properly from start
         self._ensure_initialized()
+
+    def _debug_log(self, message: str) -> None:
+        """Consistent debug logging helper for this component."""
+        # Debug logging disabled to prevent console flooding during TUI operation
+        pass
         
     def on_submit(self, callback: Callable[[str], Union[None, Awaitable[None]]]) -> None:
         """Register callback for when user submits input (Enter key)."""
@@ -127,7 +143,8 @@ class RealTimeInputField:
     def render(self) -> RenderableType:
         """Render the input field as a Rich renderable."""
         if not Text or not Panel:
-            return f"{self.prompt}{self.get_current_input()}"
+            fallback = f"{self.prompt}{self.get_current_input()}"
+            return fallback
         
         # CRITICAL FIX: Ensure we're properly initialized before rendering
         self._ensure_initialized()
@@ -135,27 +152,45 @@ class RealTimeInputField:
         # Build display text with cursor - CRITICAL FIX: Always show current input
         display_lines = []
         
-        for i, line in enumerate(self._lines):
-            text_line = Text()
+        # Check if input is empty and placeholder should be shown
+        is_empty = len(self._lines) == 1 and self._lines[0] == ""
+        
+        if is_empty and self.placeholder:
+            # Show placeholder text with special styling
+            placeholder_line = Text()
+            placeholder_line.append(self.placeholder, style="dim italic")
             
-            if i == self._cursor_row:
-                # Insert cursor in current line
-                before_cursor = line[:self._cursor_col]
-                after_cursor = line[self._cursor_col:]
-                
-                text_line.append(before_cursor)
-                
-                if self.show_cursor and self._cursor_visible:
-                    # Show cursor as highlighted space or character
-                    cursor_char = after_cursor[0] if after_cursor else " "
-                    text_line.append(cursor_char, style=self.cursor_style)
-                    text_line.append(after_cursor[1:] if len(after_cursor) > 1 else "")
-                else:
-                    text_line.append(after_cursor)
+            # Add cursor at beginning of placeholder if needed
+            if self.show_cursor and self._cursor_visible:
+                cursor_line = Text()
+                cursor_line.append(" ", style=self.cursor_style)
+                cursor_line.append_text(placeholder_line)
+                display_lines.append(cursor_line)
             else:
-                text_line.append(line)
+                display_lines.append(placeholder_line)
+        else:
+            # Normal input display with cursor
+            for i, line in enumerate(self._lines):
+                text_line = Text()
                 
-            display_lines.append(text_line)
+                if i == self._cursor_row:
+                    # Insert cursor in current line
+                    before_cursor = line[:self._cursor_col]
+                    after_cursor = line[self._cursor_col:]
+                    
+                    text_line.append(before_cursor)
+                    
+                    if self.show_cursor and self._cursor_visible:
+                        # Show cursor as highlighted space or character
+                        cursor_char = after_cursor[0] if after_cursor else " "
+                        text_line.append(cursor_char, style=self.cursor_style)
+                        text_line.append(after_cursor[1:] if len(after_cursor) > 1 else "")
+                    else:
+                        text_line.append(after_cursor)
+                else:
+                    text_line.append(line)
+                    
+                display_lines.append(text_line)
         
         # Combine lines
         if len(display_lines) == 1:
@@ -176,6 +211,9 @@ class RealTimeInputField:
             full_content.append_text(content)
             content = full_content
             
+
+        # Always render input panel even when empty so prompt/cursor remain visible
+        
         return Panel(
             content,
             width=min(self.max_width, 80) if self.max_width else None,
@@ -252,6 +290,9 @@ class RealTimeInputField:
         
     async def start_cursor_blink(self) -> None:
         """Start cursor blinking animation."""
+        # CRITICAL FIX: Set running flag so blink task works
+        self._running = True
+        
         if self._cursor_task:
             self._cursor_task.cancel()
             
@@ -264,6 +305,7 @@ class RealTimeInputField:
         
     def stop_cursor_blink(self) -> None:
         """Stop cursor blinking animation."""
+        self._running = False  # Stop the blink loop
         if self._cursor_task:
             self._cursor_task.cancel()
             self._cursor_task = None

@@ -288,5 +288,6 @@ class ChatHistoryDisplay:
     def clear_typing_indicator(self) -> None:
         """Clear the typing indicator."""
         if self.console:
-            # Move cursor up and clear line
-            self.console.print("\033[1A\033[K", end="")
+            # Use Rich's proper method to control the display instead of raw escape sequences
+            # In a TUI context, the typing indicator should be handled by the main rendering loop
+            pass

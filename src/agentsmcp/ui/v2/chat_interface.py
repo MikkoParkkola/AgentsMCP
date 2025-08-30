@@ -7,7 +7,7 @@ a complete chat interface that integrates with the existing AgentsMCP backend.
 
 import asyncio
 import logging
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any, Callable, List
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -59,15 +59,18 @@ class ChatInterface:
     
     def __init__(self,
                  application_controller: ApplicationController,
-                 config: Optional[ChatInterfaceConfig] = None):
+                 config: Optional[ChatInterfaceConfig] = None,
+                 status_manager=None,
+                 display_renderer=None):
         """Initialize the chat interface."""
         self.app_controller = application_controller
         self.config = config or ChatInterfaceConfig()
         
         # Get references to core systems
         self.event_system = application_controller.event_system
-        self.display_renderer = application_controller.display_renderer
+        self.display_renderer = display_renderer or application_controller.display_renderer
         self.input_handler = application_controller.input_handler
+        self.status_manager = status_manager or application_controller.status_manager
         self.keyboard_processor = application_controller.keyboard_processor
         
         # Chat components
@@ -89,6 +92,10 @@ class ChatInterface:
         # Status and feedback
         self.status_message = ""
         self.last_error: Optional[str] = None
+        self._spinner_task: Optional[asyncio.Task] = None
+        self._spinner_active: bool = False
+        # Input-line spinner (mirrors status spinner)
+        self._input_spinner_char: str = ''
         
         # Callbacks
         self._callbacks: Dict[str, Callable] = {}
@@ -180,12 +187,12 @@ class ChatInterface:
         try:
             # Get terminal capabilities
             caps = self.display_renderer.terminal_manager.detect_capabilities()
-            
-            # Allocate space for chat history (most of the screen)
-            history_height = caps.height - 3  # Leave room for input and status
-            
-            # Allocate space for input (bottom area)
-            input_height = 2  # Input line + status line
+
+            # Stabilize: single-line input + single-line status
+            status_height = 1
+            input_height = 1
+            # History fills remaining area
+            history_height = max(3, caps.height - (status_height + input_height))
             
             self.display_region = {
                 "history": {
@@ -195,17 +202,37 @@ class ChatInterface:
                 },
                 "input": {
                     "start_line": history_height,
-                    "end_line": history_height + input_height - 1, 
+                    "end_line": history_height + input_height - 1,
                     "width": caps.width
                 },
                 "status": {
-                    "start_line": caps.height - 1,
-                    "end_line": caps.height - 1,
+                    "start_line": history_height + input_height,
+                    "end_line": history_height + input_height,
                     "width": caps.width
                 }
             }
             
             logger.debug(f"Chat layout configured: {history_height} history + {input_height} input lines")
+            # Define renderer regions for input and status as well
+            try:
+                # Input region: single-line just above status
+                self.display_renderer.define_region(
+                    "chat_input",
+                    x=0,
+                    y=history_height,
+                    width=caps.width,
+                    height=1
+                )
+                # Status bar region: single bottom line
+                self.display_renderer.define_region(
+                    "status_bar",
+                    x=0,
+                    y=history_height + input_height,
+                    width=caps.width,
+                    height=1
+                )
+            except Exception as e:
+                logger.warning(f"Failed to define input/status regions: {e}")
             
         except Exception as e:
             logger.error(f"Error setting up chat layout: {e}")
@@ -291,16 +318,33 @@ Start typing to begin..."""
             # Activate components
             if self.chat_input:
                 await self.chat_input.activate()
+                # Disable direct stdout echo and printing; render via renderer
+                try:
+                    if hasattr(self.chat_input, 'input_handler') and self.chat_input.input_handler:
+                        self.chat_input.input_handler.set_echo(False)
+                    if hasattr(self.chat_input, '_immediate_display'):
+                        self.chat_input._immediate_display = False
+                except Exception:
+                    pass
             
             if self.chat_history:
                 self.chat_history.set_visibility(True)
             
             # Switch to chat view
             await self.app_controller.switch_to_view("chat")
-            
+
             # Set initial state
             self.state = ChatState.WAITING_INPUT
             await self._update_status("Ready for input")
+            # Initial input line paint
+            await self._handle_input_change(ChatInputEvent(event_type="text_change", text=self.chat_input.state.text))
+
+            # Ensure keyboard processor routes keys to text input component
+            try:
+                if self.keyboard_processor:
+                    self.keyboard_processor.enter_text_input_mode("chat_input")
+            except Exception:
+                pass
             
             logger.info("Chat interface activated")
             return True
@@ -324,6 +368,13 @@ Start typing to begin..."""
                 self.typing_task.cancel()
             
             self.state = ChatState.IDLE
+
+            # Leave text input mode
+            try:
+                if self.keyboard_processor:
+                    self.keyboard_processor.exit_text_input_mode()
+            except Exception:
+                pass
             
             logger.info("Chat interface deactivated")
             
@@ -350,11 +401,32 @@ Start typing to begin..."""
         
         # Process regular chat message
         await self._process_chat_message(text, user_msg_id)
+        # Refresh input line after submission
+        await self._handle_input_change(ChatInputEvent(event_type="text_change", text=self.chat_input.state.text))
     
     async def _handle_input_change(self, event: ChatInputEvent):
-        """Handle input text changes."""
-        # Could show typing indicators or other real-time feedback
-        pass
+        """Handle input text changes by updating the input region via the renderer."""
+        try:
+            if not self.display_renderer or not self.display_region:
+                return
+            # Compose single-line input view with cursor
+            full_text = self.chat_input.state.text
+            pos = self.chat_input.state.cursor_position
+            # Add spinner char to prompt when active
+            prompt = (f"{self._input_spinner_char} " if self._input_spinner_char else "") + self.chat_input.prompt_text
+            cursor_char = self.chat_input.cursor_char if (self.chat_input.state.show_cursor and getattr(self.chat_input, '_cursor_visible', True)) else ""
+            if cursor_char:
+                display_text = full_text[:pos] + cursor_char + full_text[pos:]
+            else:
+                display_text = full_text
+            caps = self.display_renderer.terminal_manager.detect_capabilities()
+            width = caps.width
+            line = f"{prompt}{display_text}"
+            if len(line) < width:
+                line = line + (" " * (width - len(line)))
+            self.display_renderer.update_region("chat_input", line[:width], force=True)
+        except Exception as e:
+            logger.debug(f"Input change render failed: {e}")
     
     async def _handle_input_mode_change(self, event: ChatInputEvent):
         """Handle input mode changes."""
@@ -582,6 +654,12 @@ Start typing to begin..."""
         try:
             self.state = ChatState.PROCESSING
             await self._update_status("Processing...")
+            # Start a lightweight spinner that updates the status bar and input line
+            try:
+                if self.display_renderer and self.display_region:
+                    self._start_status_spinner()
+            except Exception:
+                pass
             
             # Create AI response message  
             ai_msg_id = await self.chat_history.add_message(
@@ -612,7 +690,7 @@ Start typing to begin..."""
                 
                 self.state = ChatState.WAITING_INPUT
                 await self._update_status("Ready")
-                
+
             except asyncio.TimeoutError:
                 await self.chat_history.update_message(
                     ai_msg_id,
@@ -633,7 +711,7 @@ Start typing to begin..."""
                 
                 self.state = ChatState.ERROR
                 await self._update_status("Timeout error")
-                
+
         except Exception as e:
             logger.error(f"Error processing chat message: {e}")
             
@@ -661,10 +739,61 @@ Start typing to begin..."""
             await self._update_status(f"Error: {str(e)}")
         
         finally:
+            # Stop spinner
+            try:
+                self._stop_status_spinner()
+            except Exception:
+                pass
             # Cancel timeout task
             if self.typing_task and not self.typing_task.done():
                 self.typing_task.cancel()
             self.current_message_id = None
+
+    def _start_status_spinner(self):
+        if self._spinner_active:
+            return
+        self._spinner_active = True
+        frames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏']
+
+        async def _spin():
+            idx = 0
+            try:
+                while self._spinner_active:
+                    ch = frames[idx % len(frames)]
+                    idx += 1
+                    # Update status bar region directly for responsiveness (single line)
+                    try:
+                        caps = self.display_renderer.terminal_manager.detect_capabilities()
+                        content = f"{ch} Processing…  |  /help  |  /quit"
+                        if len(content) < caps.width:
+                            content = content + (" " * (caps.width - len(content)))
+                        self.display_renderer.update_region('status_bar', content[:caps.width], force=True)
+                        # Mirror spinner in the prompt line
+                        self._input_spinner_char = ch
+                        await self._handle_input_change(ChatInputEvent(event_type="text_change", text=self.chat_input.state.text))
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                pass
+
+        self._spinner_task = asyncio.create_task(_spin())
+
+    def _stop_status_spinner(self):
+        self._spinner_active = False
+        if self._spinner_task:
+            try:
+                self._spinner_task.cancel()
+            except Exception:
+                pass
+            self._spinner_task = None
+        # Clear prompt spinner
+        self._input_spinner_char = ''
+        try:
+            # Force a final input-line repaint without spinner
+            asyncio.create_task(self._handle_input_change(ChatInputEvent(event_type="text_change", text=self.chat_input.state.text)))
+        except Exception:
+            pass
     
     async def _handle_message_added(self, message: ChatMessage):
         """Handle message added to history."""
@@ -685,13 +814,13 @@ Start typing to begin..."""
     async def _handle_scroll_up(self, event: Event) -> bool:
         """Handle Page Up to scroll history up."""
         if self.chat_history:
-            self.chat_history.scroll_up(5)
+            self.chat_history.scroll_up(1)
         return True
     
     async def _handle_scroll_down(self, event: Event) -> bool:
         """Handle Page Down to scroll history down."""
         if self.chat_history:
-            self.chat_history.scroll_down(5)
+            self.chat_history.scroll_down(1)
         return True
     
     async def _handle_search(self, event: Event) -> bool:
@@ -880,6 +1009,8 @@ Start typing to begin..."""
 
 # Utility function for easy instantiation
 def create_chat_interface(application_controller: ApplicationController,
-                         config: Optional[ChatInterfaceConfig] = None) -> ChatInterface:
+                         config: Optional[ChatInterfaceConfig] = None,
+                         status_manager=None,
+                         display_renderer=None) -> ChatInterface:
     """Create and return a new ChatInterface instance."""
-    return ChatInterface(application_controller, config)
+    return ChatInterface(application_controller, config, status_manager, display_renderer)

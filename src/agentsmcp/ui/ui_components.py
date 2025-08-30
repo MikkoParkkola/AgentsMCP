@@ -753,7 +753,9 @@ class UIComponents:
     
     def clear_screen(self):
         """Clear the terminal screen"""
-        return "\033[2J\033[H"
+        # Instead of returning escape sequences that get printed to scrollback,
+        # return empty string and let the caller handle clearing properly
+        return ""
     
     def move_cursor(self, x: int, y: int) -> str:
         """Generate ANSI code to move cursor"""
@@ -761,8 +763,10 @@ class UIComponents:
     
     def hide_cursor(self) -> str:
         """Generate ANSI code to hide cursor"""
-        return "\033[?25l"
+        # Return empty string to avoid console flooding - Rich handles cursor visibility
+        return ""
     
     def show_cursor(self) -> str:
         """Generate ANSI code to show cursor"""
-        return "\033[?25h"
+        # Return empty string to avoid console flooding - Rich handles cursor visibility
+        return ""

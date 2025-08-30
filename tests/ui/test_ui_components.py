@@ -99,14 +99,14 @@ class TestUIComponents:
         assert ui is not None
         assert ui.theme_manager == theme_manager
     
-    def test_clear_screen_returns_ansi_codes(self):
-        """Test that clear_screen returns ANSI codes instead of calling os.system."""
+    def test_clear_screen_returns_empty_string(self):
+        """Test clear screen returns empty string to prevent scrollback pollution."""
         theme_manager = ThemeManager()
         ui = UIComponents(theme_manager)
         
         result = ui.clear_screen()
         assert isinstance(result, str)
-        assert "\033[2J\033[H" in result
+        assert result == ""  # Should return empty string to prevent console flooding
     
     def test_move_cursor_returns_ansi_codes(self):
         """Test cursor movement returns proper ANSI codes."""

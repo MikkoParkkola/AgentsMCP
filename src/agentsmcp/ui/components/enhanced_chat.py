@@ -168,5 +168,6 @@ class EnhancedChatInput:
     def clear_paste_feedback(self) -> None:
         """Clear paste feedback message."""
         if self.console:
-            # Move cursor up and clear line
-            self.console.print("\033[1A\033[K", end="")
+            # Use Rich's proper method instead of raw escape sequences
+            # In a TUI context, feedback should be handled by the main rendering loop
+            pass

@@ -165,12 +165,12 @@ class DisplayRenderer:
     
     def _determine_render_mode(self, caps: TerminalCapabilities) -> RenderMode:
         """Determine the best rendering mode for the terminal."""
-        if not caps.interactive:
-            return RenderMode.FALLBACK
-        
+        # CRITICAL FIX: Force FULL_SCREEN mode when alternate screen is available
+        # to prevent scrollback flooding - this was the #1 user complaint
         if caps.cursor_control and caps.alternate_screen and caps.width >= 60:
             return RenderMode.FULL_SCREEN
         elif caps.cursor_control and caps.width >= 40:
+            # Use IN_PLACE for terminals that support cursor control but not alternate screen
             return RenderMode.IN_PLACE
         elif caps.width >= 20:
             return RenderMode.LINE_BASED
