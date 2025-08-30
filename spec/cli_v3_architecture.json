@@ -1,0 +1,66 @@
+{
+  "name": "CLI v3 Core Command Engine Architecture",
+  "version": "1.0.0",
+  "description": "Central command execution pipeline with intelligent routing and lifecycle management",
+  "components": {
+    "command_engine": {
+      "purpose": "Central command execution pipeline handling routing, validation, and lifecycle management",
+      "inputs": {
+        "command": "CommandRequest",
+        "execution_mode": "ExecutionMode",
+        "user_profile": "UserProfile"
+      },
+      "outputs": {
+        "result": "CommandResult",
+        "execution_metrics": "ExecutionMetrics", 
+        "next_suggestions": "List[NextAction]"
+      },
+      "errors": [
+        "CommandNotFound",
+        "ValidationFailed", 
+        "ExecutionTimeout",
+        "PermissionDenied",
+        "ResourceExhausted"
+      ],
+      "performance": {
+        "p95_latency_ms": 500,
+        "complex_orchestration_max_ms": 2000,
+        "startup_time_ms": 200
+      }
+    },
+    "execution_context": {
+      "purpose": "Manages user context, permissions, resource limits and session state",
+      "capabilities": [
+        "user_context_management",
+        "resource_limit_enforcement", 
+        "interface_mode_adaptation",
+        "session_state_persistence"
+      ]
+    },
+    "command_models": {
+      "purpose": "Pydantic data structures for command pipeline",
+      "models": [
+        "CommandRequest",
+        "CommandResult", 
+        "ExecutionMetrics",
+        "NextAction",
+        "Suggestion", 
+        "UserProfile",
+        "ExecutionMode"
+      ]
+    }
+  },
+  "integration_points": {
+    "natural_language_processor": "Hook for NL command interpretation",
+    "user_intelligence_system": "Hook for user behavior analysis",
+    "cross_modal_coordinator": "Hook for multi-interface coordination", 
+    "telemetry_collector": "Hook for metrics and observability"
+  },
+  "key_features": [
+    "progressive_disclosure",
+    "smart_suggestions",
+    "resource_management", 
+    "audit_trail",
+    "graceful_degradation"
+  ]
+}
