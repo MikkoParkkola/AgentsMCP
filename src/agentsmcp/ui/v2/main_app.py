@@ -24,6 +24,9 @@ from .themes import create_theme_manager, detect_preferred_scheme, ColorMode
 from .chat_interface import create_chat_interface, ChatInterfaceConfig
 from .keyboard_processor import KeyboardProcessor, ShortcutContext
 from .status_manager import StatusManager, SystemState
+from .terminal_state_manager import TerminalStateManager, TerminalMode
+from .unified_input_handler import UnifiedInputHandler, InputEventType as UnifiedInputEventType
+from .ansi_markdown_processor import ANSIMarkdownProcessor, RenderConfig
 from ..cli_app import CLIConfig
 import os
 
@@ -61,6 +64,12 @@ class MainTUIApp:
         self.chat_interface = None
         self.keyboard_processor = None
         self.status_manager = None
+        
+        # New critical components for input fix
+        self.terminal_state_manager = None
+        self.unified_input_handler = None
+        self.ansi_processor = None
+        
         # Logging suppression during TUI to avoid stray console lines
         self._removed_stream_handlers = []
         
@@ -75,6 +84,16 @@ class MainTUIApp:
         
         try:
             logger.info("Initializing TUI v2 system...")
+            
+            # CRITICAL FIX: Initialize terminal state manager first for proper TTY control
+            self.terminal_state_manager = TerminalStateManager()
+            if not self.terminal_state_manager.initialize():
+                logger.error("Failed to initialize terminal state manager")
+                return False
+            
+            # Initialize ANSI markdown processor for text rendering
+            config = RenderConfig(width=80, enable_colors=True)
+            self.ansi_processor = ANSIMarkdownProcessor(config)
             
             # PERFORMANCE: Fast concurrent initialization where possible
             init_start = time.time()
@@ -92,6 +111,10 @@ class MainTUIApp:
             if caps is None or caps.type == TerminalType.UNKNOWN:
                 logger.error("Unknown terminal type detected or initialization failed")
                 return False
+                
+            # Update ANSI processor width based on terminal
+            if caps.width > 0:
+                self.ansi_processor.config.width = caps.width
                 
             logger.debug(f"Terminal init: {term_init_time*1000:.1f}ms")
             
@@ -370,7 +393,7 @@ class MainTUIApp:
             
             # Start input processing to capture keystrokes (echo is disabled; UI renders input)
             try:
-                if self.input_handler and self.input_handler.is_available():
+                if self.input_handler:
                     asyncio.create_task(self.input_handler.run_async(app=None))
             except Exception as e:
                 logger.warning(f"Input handler run failed: {e}")
@@ -478,7 +501,7 @@ class MainTUIApp:
             input_y = max(0, height - input_lines)
             usable_h = max(0, input_y - status_y)
             # Give history a useful height (10–30 lines depending on terminal)
-            history_h = max(10, min(30, usable_h - 1))
+            history_h = max(3, usable_h - 1)
             history_y = max(status_y + 1, input_y - history_h)
             _dbg(f"step: define regions status_y={status_y} history_y={history_y} input_y={input_y} width={width} history_h={history_h} input_lines={input_lines}")
             self.display_renderer.define_region("status", 0, status_y, width, 1)
@@ -507,6 +530,13 @@ class MainTUIApp:
                 return 1
             # Spinner state for outbound requests
             spinner_task: Optional[asyncio.Task] = None
+            
+            # Backspace debouncing to prevent multi-delete on single tap
+            import time as _time
+            last_bs_time: float = 0.0
+            bs_series_start: float = 0.0
+            BS_TAP_WINDOW = 0.12   # seconds; ignore repeats inside this window
+            BS_SERIES_GRACE = 0.40 # seconds; allow repeats after this (long press)
             spinner_active: bool = False
             spinner_frames = ['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏']
             spinner_idx = 0
@@ -587,6 +617,158 @@ class MainTUIApp:
                             prefix = indent_prefix if i > 0 else indent_prefix
                             out.append((prefix + seg)[:width])
                 return out
+
+            # Simple modal panel state for /settings and /agents
+            panel = {"active": False, "type": "", "index": 0}
+            settings = {"Theme": "auto", "Provider": "ollama-turbo", "Mouse Scroll": "off"}
+            agents_cfg = [
+                {"name": "codex", "enabled": True},
+                {"name": "claude", "enabled": True},
+                {"name": "ollama-turbo", "enabled": True},
+                {"name": "ollama", "enabled": True},
+            ]
+
+            def _render_panel():
+                nonlocal status_text
+                if not panel["active"]:
+                    return
+                head = f" Settings " if panel["type"] == "settings" else f" Agents "
+                title = f"[ {head.strip()} ]  (Esc to close, ↑/↓ select, ←/→ change, s=save)"
+                lines = [title]
+                if panel["type"] == "settings":
+                    items = [
+                        ("Theme", settings["Theme"], ["auto", "dark", "light"]),
+                        ("Provider", settings["Provider"], ["ollama-turbo", "ollama"]),
+                        ("Mouse Scroll", settings["Mouse Scroll"], ["off", "on"]),
+                    ]
+                    for idx, (k, v, choices) in enumerate(items):
+                        cursor = ">" if idx == panel["index"] else " "
+                        lines.append(f"{cursor} {k}: {v}")
+                else:
+                    for idx, a in enumerate(agents_cfg):
+                        cursor = ">" if idx == panel["index"] else " "
+                        mark = "[x]" if a.get("enabled") else "[ ]"
+                        lines.append(f"{cursor} {mark} {a.get('name')}")
+                # Fit to history region height and width
+                padded = []
+                for ln in lines[:history_h]:
+                    if len(ln) < width:
+                        ln = ln + (" " * (width - len(ln)))
+                    else:
+                        ln = ln[:width]
+                    padded.append(ln)
+                while len(padded) < history_h:
+                    padded.append(" " * width)
+                self.display_renderer.update_region("history", "\n".join(padded), force=True)
+                status_text = ("Editing settings | ←/→ change | s save | Esc close" if panel["type"] == "settings" else "Editing agents | Space/→ toggle | s save | Esc close")
+
+            def _panel_cycle(delta: int):
+                if panel["type"] == "settings":
+                    idx = panel["index"]
+                    keys = ["Theme", "Provider", "Mouse Scroll"]
+                    key = keys[idx]
+                    choices = {
+                        "Theme": ["auto", "dark", "light"],
+                        "Provider": ["ollama-turbo", "ollama"],
+                        "Mouse Scroll": ["off", "on"],
+                    }[key]
+                    cur = settings[key]
+                    try:
+                        i = choices.index(cur)
+                    except ValueError:
+                        i = 0
+                    i = (i + delta) % len(choices)
+                    settings[key] = choices[i]
+                else:
+                    idx = panel["index"]
+                    if 0 <= idx < len(agents_cfg):
+                        agents_cfg[idx]["enabled"] = not agents_cfg[idx].get("enabled", True)
+
+            def _save_settings():
+                # Persist to ~/.agentsmcp/config.json
+                try:
+                    import json
+                    cfg_dir = Path.home() / ".agentsmcp"
+                    cfg_dir.mkdir(parents=True, exist_ok=True)
+                    cfg_path = cfg_dir / "config.json"
+                    data = {}
+                    if cfg_path.exists():
+                        try:
+                            data = json.loads(cfg_path.read_text())
+                        except Exception:
+                            data = {}
+                    # Map settings to config fields
+                    if settings["Provider"]:
+                        data["provider"] = settings["Provider"]
+                    # Theme is handled by CLI, keep for future
+                    data.setdefault("api_keys", data.get("api_keys", {}))
+                    cfg_path.write_text(json.dumps(data, indent=2))
+                except Exception:
+                    pass
+
+            def _save_agents():
+                try:
+                    import json
+                    cfg_dir = Path.home() / ".agentsmcp"
+                    cfg_dir.mkdir(parents=True, exist_ok=True)
+                    agents_path = cfg_dir / "agents.json"
+                    agents_path.write_text(json.dumps(agents_cfg, indent=2))
+                except Exception:
+                    pass
+
+            def _open_panel(kind: str):
+                panel["active"] = True
+                panel["type"] = kind
+                panel["index"] = 0
+                _render_panel()
+
+            def _close_panel():
+                panel["active"] = False
+                # Repaint history to resume chat view
+                render()
+
+            def _apply_ansi_markdown(text: str) -> str:
+                """Apply ANSI color codes to markdown-style text using the advanced processor."""
+                if not text:
+                    return text
+                
+                # Use the advanced ANSI markdown processor if available
+                if self.ansi_processor:
+                    try:
+                        return self.ansi_processor.process_text(text)
+                    except Exception as e:
+                        logger.warning(f"ANSI processor failed, using fallback: {e}")
+                
+                # Fallback to basic processing
+                import re
+                
+                # ANSI color codes
+                BOLD = "\x1b[1m"
+                ITALIC = "\x1b[3m"
+                CYAN = "\x1b[36m"
+                YELLOW = "\x1b[33m"
+                MAGENTA = "\x1b[35m"
+                GREEN = "\x1b[32m"
+                RED = "\x1b[31m"
+                RESET = "\x1b[0m"
+                
+                # Apply markdown-style formatting
+                # Code blocks (backticks)
+                text = re.sub(r"`([^`]+)`", rf"{CYAN}\1{RESET}", text)
+                
+                # Bold text (**text**)
+                text = re.sub(r"\*\*(.+?)\*\*", rf"{BOLD}\1{RESET}", text)
+                
+                # Italic text (*text* but not **text**)
+                text = re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", rf"{ITALIC}\1{RESET}", text)
+                
+                # Headers (# text)
+                text = re.sub(r"^(\s*#+)\s*(.+)$", rf"\1 {BOLD}{YELLOW}\2{RESET}", text, flags=re.MULTILINE)
+                
+                # List items (- or * at start of line)
+                text = re.sub(r"^(\s*[-*])\s+", rf"\1 {MAGENTA}•{RESET} ", text, flags=re.MULTILINE)
+                
+                return text
 
             def _format_history_lines() -> list[str]:
                 lines: list[str] = []
@@ -671,7 +853,7 @@ class MainTUIApp:
                         width, height = caps2.width, caps2.height
                         input_y = max(0, height - input_lines)
                         usable_h = max(0, input_y - status_y)
-                        history_h = max(10, min(30, usable_h - 1))
+                        history_h = max(3, usable_h - 1)
                         history_y = max(status_y + 1, input_y - history_h)
                         self.display_renderer.define_region("status", 0, status_y, width, 1)
                         self.display_renderer.define_region("history", 0, history_y, width, history_h)
@@ -698,8 +880,10 @@ class MainTUIApp:
                 while len(visual) < input_lines:
                     visual.insert(0, " " * width)
                 self.display_renderer.update_region("input", "\n".join(visual), force=True)
-                # Render history with scroll offset, padded
-                if messages is not None:
+                # Render history with scroll offset, padded (or panel if active)
+                if panel["active"]:
+                    _render_panel()
+                elif messages is not None:
                     # Build all logical lines with Markdown++ styling
                     formatted = []
                     for m in messages:
@@ -835,7 +1019,7 @@ class MainTUIApp:
                             input_lines = new_lines
                             input_y = max(0, height - input_lines)
                             usable_h = max(0, input_y - status_y)
-                            history_h = max(10, min(30, usable_h - 1))
+                            history_h = max(3, usable_h - 1)
                             history_y = max(status_y + 1, input_y - history_h)
                             # Redefine regions
                             self.display_renderer.define_region("history", 0, history_y, width, history_h)
@@ -848,6 +1032,16 @@ class MainTUIApp:
                     except Exception:
                         messages.append({'role': 'system', 'text': "Failed to set input height.", 'time': datetime.now().strftime('%H:%M')})
                         status_text = "Error | /help | /quit"
+                elif text == "/settings":
+                    _open_panel("settings")
+                    state["text"] = ""
+                    state["cursor"] = 0
+                    return
+                elif text == "/agents":
+                    _open_panel("agents")
+                    state["text"] = ""
+                    state["cursor"] = 0
+                    return
                 elif text.startswith("/"):
                     messages.append({
                         'role': 'system',
@@ -953,14 +1147,15 @@ class MainTUIApp:
                 state["caret_visible"] = True
                 render()
 
-            # Enable mouse reporting (Xterm SGR mode) for wheel events
+            # Optionally enable mouse reporting (Xterm SGR mode) for wheel events
             try:
-                _dbg("step: enable mouse start")
-                out = self.display_renderer._output  # sys.stdout
-                out.write('\033[?1000h')  # Enable basic mouse
-                out.write('\033[?1006h')  # Enable SGR extended mode
-                out.flush()
-                _dbg("step: enable mouse ok")
+                if os.getenv("AGENTS_TUI_V2_MOUSE", "0") == "1":
+                    _dbg("step: enable mouse start")
+                    out = self.display_renderer._output  # sys.stdout
+                    out.write('\033[?1000h')  # Enable basic mouse
+                    out.write('\033[?1006h')  # Enable SGR extended mode
+                    out.flush()
+                    _dbg("step: enable mouse ok")
             except Exception as e:
                 _dbg(f"step: enable mouse failed: {e}")
 
@@ -1045,36 +1240,46 @@ class MainTUIApp:
                                 continue
                             # Backspace with immediate processing
                             if b in (8, 127):
-                                # IMMEDIATE BACKSPACE PROCESSING to fix one-character-behind lag
-                                if state["text"] and state["cursor"] > 0:
-                                    txt = state["text"]
-                                    pos = state["cursor"]
-                                    state["text"] = txt[:pos-1] + txt[pos:]
-                                    state["cursor"] = pos - 1
-                                    state["caret_visible"] = True
-                                    
-                                    # Immediate rendering for instant backspace feedback
-                                    try:
-                                        caret = caret_char if state.get("caret_visible", True) else " "
+                                # Debounce backspace to avoid multi-delete on single tap
+                                now = _time.monotonic()
+                                start_new_series = (now - last_bs_time) > BS_TAP_WINDOW
+                                if start_new_series:
+                                    bs_series_start = now
+                                within_tap_window = (now - last_bs_time) < BS_TAP_WINDOW
+                                long_press = (now - bs_series_start) >= BS_SERIES_GRACE
+                                # Only process if not a rapid repeat within tap window, unless long press
+                                if (not within_tap_window) or long_press:
+                                    last_bs_time = now
+                                    # IMMEDIATE BACKSPACE PROCESSING to fix one-character-behind lag
+                                    if state["text"] and state["cursor"] > 0:
+                                        txt = state["text"]
                                         pos = state["cursor"]
-                                        full_with_caret = state["text"][:pos] + caret + state["text"][pos:]
+                                        state["text"] = txt[:pos-1] + txt[pos:]
+                                        state["cursor"] = pos - 1
+                                        state["caret_visible"] = True
                                         
-                                        # Build visual representation
-                                        visual = []
-                                        for line_idx, line in enumerate(full_with_caret.split('\n')):
-                                            if line_idx == 0:
-                                                visual.append(f"> {line}")
-                                            else:
-                                                visual.append(f"  {line}")
-                                        
-                                        # Direct region update for instant backspace feedback
-                                        self.display_renderer.update_region("input", "\n".join(visual), force=True)
-                                    except Exception:
-                                        pass  # Fail silently, async handler will eventually update
-                                
-                                # Also schedule async handler for full processing
-                                if loop:
-                                    loop.call_soon_threadsafe(on_backspace, None)
+                                        # Immediate rendering for instant backspace feedback
+                                        try:
+                                            caret = caret_char if state.get("caret_visible", True) else " "
+                                            pos = state["cursor"]
+                                            full_with_caret = state["text"][:pos] + caret + state["text"][pos:]
+                                            
+                                            # Build visual representation
+                                            visual = []
+                                            for line_idx, line in enumerate(full_with_caret.split('\n')):
+                                                if line_idx == 0:
+                                                    visual.append(f"> {line}")
+                                                else:
+                                                    visual.append(f"  {line}")
+                                            
+                                            # Direct region update for instant backspace feedback
+                                            self.display_renderer.update_region("input", "\n".join(visual), force=True)
+                                        except Exception:
+                                            pass  # Fail silently, async handler will eventually update
+                                    
+                                    # Also schedule async handler for full processing
+                                    if loop:
+                                        loop.call_soon_threadsafe(on_backspace, None)
                                 i += 1
                                 continue
                             # Enter / Ctrl+J distinction in raw mode
@@ -1166,34 +1371,64 @@ class MainTUIApp:
                                     elif not handled and 'A' in seq_str:  # Up
                                         def _up():
                                             nonlocal scroll_offset, status_text
-                                            total = _total_history_lines()
-                                            if total > 0:
-                                                scroll_offset = min(scroll_offset + 1, max(0, total - history_h))
-                                                status_text = f"Viewing older (offset {scroll_offset}) | /help | /quit"
-                                                render()
+                                            if panel["active"]:
+                                                if panel["index"] > 0:
+                                                    panel["index"] -= 1
+                                                _render_panel()
+                                            else:
+                                                total = _total_history_lines()
+                                                if total > 0:
+                                                    scroll_offset = min(scroll_offset + 1, max(0, total - history_h))
+                                                    status_text = f"Viewing older (offset {scroll_offset}) | /help | /quit"
+                                                    render()
                                         if loop:
                                             loop.call_soon_threadsafe(_up)
                                         handled = True
                                     elif not handled and 'B' in seq_str:  # Down
                                         def _down():
                                             nonlocal scroll_offset, status_text
-                                            if scroll_offset > 0:
-                                                scroll_offset = max(0, scroll_offset - 1)
-                                                status_text = (f"Viewing older (offset {scroll_offset}) | /help | /quit"
-                                                               if scroll_offset > 0 else "Ready | /help | /quit")
-                                                render()
+                                            if panel["active"]:
+                                                max_idx = 2 if panel["type"] == "settings" else max(0, len(agents_cfg) - 1)
+                                                if panel["index"] < max_idx:
+                                                    panel["index"] += 1
+                                                _render_panel()
+                                            else:
+                                                if scroll_offset > 0:
+                                                    scroll_offset = max(0, scroll_offset - 1)
+                                                    status_text = (f"Viewing older (offset {scroll_offset}) | /help | /quit"
+                                                                   if scroll_offset > 0 else "Ready | /help | /quit")
+                                                    render()
                                         if loop:
                                             loop.call_soon_threadsafe(_down)
+                                        handled = True
+                                    elif not handled and 'C' in seq_str:  # Right
+                                        def _right():
+                                            if panel["active"]:
+                                                _panel_cycle(+1)
+                                                _render_panel()
+                                        if loop:
+                                            loop.call_soon_threadsafe(_right)
+                                        handled = True
+                                    elif not handled and 'D' in seq_str:  # Left
+                                        def _left():
+                                            if panel["active"]:
+                                                _panel_cycle(-1)
+                                                _render_panel()
+                                        if loop:
+                                            loop.call_soon_threadsafe(_left)
                                         handled = True
                                     # Advance index past ESC [ ... tail
                                     i = j + 1
                                     if handled:
                                         continue
-                                # ESC alone: clear input
+                                # ESC alone: close panel or clear input
                                 def _clear():
-                                    state["text"] = ""
-                                    state["cursor"] = 0
-                                    render()
+                                    if panel["active"]:
+                                        _close_panel()
+                                    else:
+                                        state["text"] = ""
+                                        state["cursor"] = 0
+                                        render()
                                 if loop:
                                     loop.call_soon_threadsafe(_clear)
                                 i += 1
@@ -1204,6 +1439,24 @@ class MainTUIApp:
                             except Exception:
                                 ch = ''
                             if ch:
+                                # If a panel is active, intercept keys for save/toggle and ignore normal input
+                                if panel["active"]:
+                                    def _panel_key():
+                                        nonlocal status_text
+                                        if ch.lower() == 's':
+                                            if panel["type"] == "settings":
+                                                _save_settings()
+                                            else:
+                                                _save_agents()
+                                            status_text = "Saved | Esc to close"
+                                            _render_panel()
+                                        elif ch == ' ' and panel["type"] == "agents":
+                                            _panel_cycle(+1)
+                                            _render_panel()
+                                    if loop:
+                                        loop.call_soon_threadsafe(_panel_key)
+                                    i += 1
+                                    continue
                                 # IMMEDIATE CHARACTER PROCESSING to fix one-character-behind lag
                                 # Update state directly in thread to avoid async scheduling delays
                                 txt = state["text"]
@@ -1344,12 +1597,14 @@ class MainTUIApp:
             self.chat_interface,
             self.keyboard_processor,
             self.input_handler,
+            self.unified_input_handler,
             self.display_renderer,
             self.layout_engine,
             self.theme_manager,
             self.status_manager,
             self.event_system,
-            self.terminal_manager
+            self.terminal_manager,
+            self.terminal_state_manager
         ]
         
         for component in components:
