@@ -1,6 +1,13 @@
 """
 AgentsMCP Orchestration Module
 
+Unified integration API for dynamic agent loading with:
+- Dynamic task classification and team composition
+- Agile coach integration for complex tasks  
+- Intelligent orchestration with fallback mechanisms
+- Comprehensive retrospectives and continuous improvement
+- Backward compatibility with existing team runner API
+
 AGENTS.md v2 Two-Tier Orchestration System with:
 - Single main loop coordination (Tier 1)
 - Stateless agent functions (Tier 2)
@@ -10,11 +17,44 @@ AGENTS.md v2 Two-Tier Orchestration System with:
 Legacy systems (seamless, emotional, symphony) remain for backward compatibility.
 """
 
+# Core orchestration components
+from .team_runner import run_team  # Original team runner for backward compatibility
+from .task_classifier import TaskClassifier
+from .team_composer import TeamComposer
+from .dynamic_orchestrator import DynamicOrchestrator
+from .agile_coach import AgileCoachIntegration
+from .retrospective_engine import RetrospectiveEngine
+
+# Data models and types
+from .models import (
+    TaskClassification,
+    TaskType,
+    ComplexityLevel,
+    RiskLevel,
+    TechnologyStack,
+    CoordinationStrategy,
+    AgentSpec,
+    ResourceConstraints,
+    TeamComposition,
+    TeamPerformanceMetrics,
+    TaskResult,
+)
+
+# Resource management
+from .resource_manager import ResourceManager, ResourceType
+
+# Execution engine
+from .execution_engine import ExecutionEngine, TeamExecution, ExecutionStatus, ExecutionProgress
+
 # AGENTS.md v2 Two-Tier Architecture
-from .coordinator import MainCoordinator
-from .delegation import DelegationEngine
-from .state_machine import TaskState, TaskStateMachine
-from .quality_gates import QualityGate, QualityGateManager
+try:
+    from .coordinator import MainCoordinator
+    from .delegation import DelegationEngine
+    from .state_machine import TaskState, TaskStateMachine
+    from .quality_gates import QualityGate, QualityGateManager
+    V2_AVAILABLE = True
+except ImportError:
+    V2_AVAILABLE = False
 
 # Legacy orchestration systems (backward compatibility)
 try:
@@ -27,28 +67,50 @@ try:
 except ImportError:
     LEGACY_AVAILABLE = False
 
-# Event system from parent module (imports handled locally in coordinator to avoid circular imports)
-
-# Export list - prioritize v2 components
+# Export list - prioritize dynamic orchestration components
 __all__ = [
-    # AGENTS.md v2 Two-Tier Architecture
-    "MainCoordinator",
-    "DelegationEngine", 
-    "TaskState",
-    "TaskStateMachine",
-    "QualityGate",
-    "QualityGateManager",
+    # Core team running functions (backward compatible)
+    "run_team",
     
-    # Event system
-    "EventBus",
-    "Event",
-    "JobStarted",
-    "JobCompleted", 
-    "JobFailed",
-    "AgentSpawned",
-    "AgentTerminated",
-    "ResourceLimitExceeded"
+    # Dynamic orchestration components
+    "TaskClassifier",
+    "TeamComposer", 
+    "DynamicOrchestrator",
+    "AgileCoachIntegration",
+    "RetrospectiveEngine",
+    
+    # Data models and types
+    "TaskClassification",
+    "TaskType",
+    "ComplexityLevel", 
+    "RiskLevel",
+    "TechnologyStack",
+    "CoordinationStrategy",
+    "AgentSpec",
+    "ResourceConstraints",
+    "TeamComposition",
+    "TeamPerformanceMetrics",
+    "TaskResult",
+    
+    # Resource and execution management
+    "ResourceManager",
+    "ResourceType",
+    "ExecutionEngine",
+    "TeamExecution", 
+    "ExecutionStatus",
+    "ExecutionProgress",
 ]
+
+# Add AGENTS.md v2 components if available
+if V2_AVAILABLE:
+    __all__.extend([
+        "MainCoordinator",
+        "DelegationEngine", 
+        "TaskState",
+        "TaskStateMachine",
+        "QualityGate",
+        "QualityGateManager",
+    ])
 
 # Add legacy components if available
 if LEGACY_AVAILABLE:
@@ -59,3 +121,15 @@ if LEGACY_AVAILABLE:
         'PredictiveSpawner',
         'OrchestrationManager'
     ])
+
+# Version and compatibility information
+__version__ = "3.0.0"
+__api_version__ = "v3"
+
+# Compatibility notes
+COMPATIBILITY_NOTES = {
+    "run_team": "Original team runner API maintained for backward compatibility",
+    "dynamic_orchestration": "New v3 API with intelligent task classification and team composition",
+    "agile_integration": "Built-in agile coach for planning and retrospectives",
+    "continuous_improvement": "Automated retrospectives and performance optimization"
+}
