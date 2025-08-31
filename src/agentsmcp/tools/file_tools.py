@@ -13,12 +13,17 @@ class FileOperationTool(BaseTool):
         super().__init__(name, description)
 
     def _validate_file_path(self, file_path: str) -> Path:
-        """Validate and return Path object."""
+        """Validate and return a path within the project root (launch directory)."""
+        root = Path.cwd().resolve()
         path = Path(file_path)
-        if not path.is_absolute():
-            # Make relative paths relative to current working directory
-            path = Path.cwd() / path
-        return path
+        candidate = (path if path.is_absolute() else (root / path)).resolve()
+        try:
+            # Ensure candidate is under root (recursive access allowed)
+            if str(candidate) == str(root) or str(candidate).startswith(str(root) + str(Path('/'))):
+                return candidate
+        except Exception:
+            pass
+        raise PermissionError(f"Access outside project root is not allowed: {file_path}")
 
 
 class ReadFileTool(FileOperationTool):

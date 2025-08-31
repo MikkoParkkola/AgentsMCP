@@ -1,4 +1,8 @@
-# AgentsMCP UI/UX Review and Recommendations (2025-08-26)
+# AgentsMCP UI/UX Review and Recommendations (Reference)
+
+Note: This document is reference material. The canonical UX roadmap is `docs/ui-ux-improvement-plan-revised.md`. Keep this file only for historical context or background; update the revised plan for any changes.
+
+---
 
 This review covers the three user entry points — CLI flags, interactive CLI UI, and the Web UI — and provides prioritized, production-focused fixes and improvements to deliver a polished, fast, comprehensive, and professional experience.
 

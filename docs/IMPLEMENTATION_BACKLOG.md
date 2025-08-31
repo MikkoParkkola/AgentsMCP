@@ -1,5 +1,10 @@
-# 📋 AgentsMCP Implementation Backlog
-*Detailed task breakdown for agentic framework integration*
+# 📋 AgentsMCP Implementation Backlog (Archived)
+
+This document is retained for historical context. Do not implement from this file.
+The single source of truth for current work is `docs/backlog.md`.
+For high‑level planning, see `docs/implementation-roadmap.md` and `docs/work-plan.md`.
+
+---
 
 ## 🎯 Sprint Planning Overview
 

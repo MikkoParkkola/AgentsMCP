@@ -67,12 +67,9 @@ class AgentManager:
             "durations": collections.deque(maxlen=200),  # type: ignore[var-annotated]
         }
 
-        # Agent type mapping
-        self.agent_classes = {
-            "codex": CodexAgent,
-            "claude": ClaudeAgent,
-            "ollama": OllamaAgent,
-        }
+        # Agent type mapping – disable legacy MCP agents; use SelfAgent for all
+        from .agents.self_agent import SelfAgent  # noqa: F401
+        self.agent_classes = {}
 
     # -----------------------------
     # Role-based execution (P1)
@@ -178,15 +175,19 @@ class AgentManager:
 
     def _create_agent(self, agent_type: str) -> BaseAgent:
         """Create an agent instance based on type."""
-        if agent_type not in self.agent_classes:
-            raise ValueError(f"Unknown agent type: {agent_type}")
-
         agent_config = self.config.get_agent_config(agent_type)
         if not agent_config:
             raise ValueError(f"No configuration found for agent type: {agent_type}")
-
-        agent_class = self.agent_classes[agent_type]
-        return agent_class(agent_config, self.config)
+        # Use SelfAgent for all configured agent types
+        from .agents.self_agent import SelfAgent
+        agent = SelfAgent(agent_config, self.config)
+        # Inject event bus if available so agent can emit progress
+        try:
+            if self.events is not None:
+                setattr(agent, "event_bus", self.events)
+        except Exception:
+            pass
+        return agent
 
     async def spawn_agent(self, agent_type: str, task: str, timeout: int = 300) -> str:
         """Spawn a new agent to handle a task."""

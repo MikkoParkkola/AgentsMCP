@@ -339,25 +339,53 @@ class TUIShell:
             lines: List[str] = []
             for msg in self.chat_messages[-50:]:
                 who = "You" if msg.get("role") == "user" else "Assistant"
-                text = msg.get('text', '')
-                # Wrap long messages to fit content area
-                if len(text) > content_width - 20:  # Account for "Who: " prefix
-                    wrapped_lines = self._safe_text_wrap(text, content_width - 20)
-                    for i, wrapped_line in enumerate(wrapped_lines):
-                        if i == 0:
-                            lines.append(f"[bold magenta]{who}[/]: {wrapped_line}")
+                text = msg.get('text', '') or ''
+                # Preserve existing line breaks by wrapping each line independently
+                message_lines = text.splitlines() or [""]
+                first_visual_line = True
+                for raw_line in message_lines:
+                    # Wrap each physical line to the content width budget
+                    wrapped = self._safe_text_wrap(raw_line, content_width - 20)
+                    if not wrapped:
+                        # Preserve blank lines between paragraphs
+                        if first_visual_line:
+                            lines.append(f"[bold magenta]{who}[/]: ")
+                            first_visual_line = False
                         else:
-                            lines.append(f"     {wrapped_line}")  # Indent continuation
-                else:
-                    lines.append(f"[bold magenta]{who}[/]: {text}")
+                            lines.append("")
+                        continue
+                    for i, wrapped_line in enumerate(wrapped):
+                        if first_visual_line:
+                            lines.append(f"[bold magenta]{who}[/]: {wrapped_line}")
+                            first_visual_line = False
+                        else:
+                            # Indent continuation/paragraph lines for readability
+                            lines.append(f"     {wrapped_line}")
             lines.append("")
             caret = "▌" if self.focus == 'chat' else ""
-            # Ensure chat buffer doesn't overflow
-            buffer_display = self.chat_buffer
-            if len(buffer_display) > content_width - 10:
-                buffer_display = buffer_display[:content_width - 13] + "..."
-            lines.append(f"[cyan]>[/] {buffer_display}{caret}")
-            body = "\n".join(lines) if lines else f"[cyan]>[/] {buffer_display}{caret}"
+            # Render input buffer, supporting multi-line content (e.g., pasted blocks)
+            buffer_text = self.chat_buffer
+            buffer_lines = buffer_text.splitlines() or [""]
+            if len(buffer_lines) == 1:
+                # Single-line input: clamp width and render inline
+                line = buffer_lines[0]
+                if len(line) > content_width - 10:
+                    line = line[: content_width - 13] + "..."
+                lines.append(f"[cyan]>[/] {line}{caret}")
+            else:
+                # Multi-line input: show first line with prompt, subsequent with indent
+                first = buffer_lines[0]
+                wrapped_first = self._safe_text_wrap(first, content_width - 10) or [""]
+                # Last visual line gets the caret
+                for i, wline in enumerate(wrapped_first):
+                    if i == len(wrapped_first) - 1:
+                        lines.append(f"[cyan]>[/] {wline}{caret}")
+                    else:
+                        lines.append(f"[cyan]>[/] {wline}")
+                for rest_line in buffer_lines[1:]:
+                    for wline in self._safe_text_wrap(rest_line, content_width - 6):
+                        lines.append(f"     {wline}")
+            body = "\n".join(lines) if lines else f"[cyan]>[/] {self.chat_buffer}{caret}"
             chat_panel = Panel(body, title="[magenta]Chat", border_style="green", box=box.ROUNDED)
             items = [chat_panel]
             buf = self.chat_buffer
@@ -560,6 +588,11 @@ class TUIShell:
                                 self._thread_queue.put({"key": "\x1b[D"})
                             elif k == Keys.Right:
                                 self._thread_queue.put({"key": "\x1b[C"})
+                            elif k == Keys.BracketedPaste:
+                                # Treat the entire paste block as one input chunk, do NOT submit
+                                data = getattr(kp, 'data', '') or ''
+                                if data:
+                                    self._thread_queue.put({"paste": data})
                             elif k in (Keys.Enter,):
                                 self._thread_queue.put({"key": "\n"})
                             elif k in (Keys.Backspace,):
@@ -762,7 +795,13 @@ class TUIShell:
         self._key_thread.start()
         # Use alternate screen and live updates so frames don't fill scrollback.
         # transient=False keeps the TUI visible on exit; set True to clear on exit.
+        # Enable bracketed paste so prompt_toolkit can emit a single BracketedPaste event
         try:
+            try:
+                sys.stdout.write('\x1b[?2004h')
+                sys.stdout.flush()
+            except Exception:
+                pass
             with Live(layout, console=self.console, refresh_per_second=24, screen=True, transient=True) as live:
                 while self.running:
                     # Drain any pending input first
@@ -774,6 +813,19 @@ class TUIShell:
                         else:
                             if isinstance(item, dict) and "key" in item:
                                 await self._handle_key(item["key"])  # type: ignore[arg-type]
+                            elif isinstance(item, dict) and "paste" in item:
+                                # Multi-line paste: append to buffer verbatim, don't auto-submit
+                                try:
+                                    data = str(item["paste"])
+                                    # Normalize Windows line endings to Unix
+                                    data = data.replace("\r\n", "\n").replace("\r", "\n")
+                                    self.chat_buffer += data
+                                    # Update suggestions if pasting a command start
+                                    if self.chat_buffer.startswith(':'):
+                                        self._update_cmd_suggestions()
+                                    self._dirty = True
+                                except Exception:
+                                    pass
                             elif isinstance(item, dict) and "cmd" in item:
                                 await self._handle_command(str(item["cmd"]))
                             elif isinstance(item, str):
@@ -793,6 +845,12 @@ class TUIShell:
         finally:
             self.running = False
             await self._stop_watch()
+            # Disable bracketed paste mode if we enabled it
+            try:
+                sys.stdout.write('\x1b[?2004l')
+                sys.stdout.flush()
+            except Exception:
+                pass
             # Best-effort join of the key thread (daemon)
             try:
                 if self._key_thread and self._key_thread.is_alive():

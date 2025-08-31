@@ -1678,12 +1678,14 @@ class MainTUIApp:
                 content=welcome_content,
                 border_style="double"
             )
-            print(welcome_box)
-            print()  # Add spacing
+            sys.stdout.write(f"\r{welcome_box}\n")
+            sys.stdout.write("\r\n")  # Add spacing
+            sys.stdout.flush()
         except Exception:
             # Fallback: print plain text if renderer API is unavailable
-            print("\n".join(["=== Welcome to AgentsMCP ===", *welcome_content]))
-            print()
+            sys.stdout.write(f"\r{chr(10).join(['=== Welcome to AgentsMCP ==='] + welcome_content)}\n")
+            sys.stdout.write("\r\n")
+            sys.stdout.flush()
     
     async def _display_status_bar(self):
         """Display/update the main status bar using the renderer, not prints."""
@@ -1738,6 +1740,18 @@ class TUILauncher:
         Returns:
             Exit code
         """
+        # Check for emergency minimal TUI mode or immediate fix mode
+        import os
+        use_fixed = (
+            os.getenv("AGENTS_TUI_MINIMAL_EMERGENCY", "0") == "1" or
+            os.getenv("AGENTS_TUI_IMMEDIATE_FIX", "1") == "1"  # Default to immediate fix
+        )
+        if use_fixed:
+            sys.stdout.write("\r🔧 Using fixed working TUI with real LLM connection\n")
+            sys.stdout.flush()
+            from .fixed_working_tui import launch_fixed_working_tui
+            return await launch_fixed_working_tui()
+        
         try:
             # Try to launch v2 TUI
             self.app = MainTUIApp(cli_config)
@@ -1745,6 +1759,14 @@ class TUILauncher:
             
         except Exception as e:
             logger.exception(f"Failed to launch TUI v2: {e}")
+            
+            # Emergency fallback to minimal TUI for immediate usability
+            print("⚠️  TUI v2 failed, using minimal emergency TUI for immediate typing fix")
+            try:
+                from .minimal_working_tui import launch_minimal_tui
+                return await launch_minimal_tui()
+            except Exception as fallback_error:
+                logger.exception(f"Emergency TUI also failed: {fallback_error}")
             
             # Respect no-fallback mode for development
             import os as _os

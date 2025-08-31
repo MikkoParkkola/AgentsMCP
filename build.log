@@ -1,9 +1,9 @@
-74 INFO: PyInstaller: 6.15.0, contrib hooks: 2025.8
-74 INFO: Python: 3.10.9
-80 INFO: Platform: macOS-15.6-arm64-arm-64bit
-80 INFO: Python environment: /Users/mikko/.pyenv/versions/3.10.9
-84 INFO: Removing temporary files and cleaning cache in /Users/mikko/github/AgentsMCP/.build/pyinstaller_cfg/pyinstaller
-84 INFO: Module search paths (PYTHONPATH):
+78 INFO: PyInstaller: 6.15.0, contrib hooks: 2025.8
+78 INFO: Python: 3.10.9
+84 INFO: Platform: macOS-15.6.1-arm64-arm-64bit
+84 INFO: Python environment: /Users/mikko/.pyenv/versions/3.10.9
+87 INFO: Removing temporary files and cleaning cache in /Users/mikko/github/AgentsMCP/.build/pyinstaller_cfg/pyinstaller
+87 INFO: Module search paths (PYTHONPATH):
 ['/Users/mikko/github/AgentsMCP',
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python310.zip',
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10',
@@ -13,6 +13,292 @@
  '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/setuptools/_vendor',
  '/Users/mikko/github/AgentsMCP/src',
  '/Users/mikko/github/AgentsMCP/src']
+425 INFO: checking Analysis
+425 INFO: Building Analysis because Analysis-00.toc is non existent
+425 INFO: Running Analysis Analysis-00.toc
+425 INFO: Target bytecode optimization level: 0
+425 INFO: Initializing module dependency graph...
+425 INFO: Initializing module graph hook caches...
+435 INFO: Analyzing modules for base_library.zip ...
+696 INFO: Processing standard module hook 'hook-heapq.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+724 INFO: Processing standard module hook 'hook-encodings.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+1251 INFO: Processing standard module hook 'hook-pickle.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+1685 INFO: Caching module dependency graph...
+1705 INFO: Looking for Python shared library...
+1708 INFO: Using Python shared library: /Users/mikko/.pyenv/versions/3.10.9/lib/libpython3.10.dylib
+1708 INFO: Analyzing /Users/mikko/github/AgentsMCP/src/agentsmcp/cli.py
+1770 INFO: Processing standard module hook 'hook-multiprocessing.util.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+1825 INFO: Processing standard module hook 'hook-xml.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+1905 INFO: Processing standard module hook 'hook-_ctypes.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+2049 INFO: Processing pre-safe-import-module hook 'hook-typing_extensions.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+2050 INFO: SetuptoolsInfo: initializing cached setuptools info...
+3816 INFO: Processing standard module hook 'hook-platform.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+3845 INFO: Processing standard module hook 'hook-difflib.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+3905 INFO: Processing standard module hook 'hook-pydantic.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/pydantic/experimental/__init__.py:7: PydanticExperimentalWarning: This module is experimental, its contents are subject to change and deprecation.
+  warnings.warn(
+4259 INFO: Processing standard module hook 'hook-pygments.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+4754 INFO: Processing standard module hook 'hook-IPython.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+5508 INFO: Processing standard module hook 'hook-xml.dom.domreg.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+5569 INFO: Processing standard module hook 'hook-matplotlib.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+5765 INFO: Processing pre-safe-import-module hook 'hook-packaging.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+5796 INFO: Processing standard module hook 'hook-numpy.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+6060 INFO: Processing standard module hook 'hook-sysconfig.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+6064 INFO: Processing standard module hook 'hook-_osx_support.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+6200 INFO: Processing standard module hook 'hook-psutil.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+6682 INFO: Processing pre-safe-import-module hook 'hook-gi.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+6749 INFO: Processing standard module hook 'hook-matplotlib.backend_bases.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+6814 INFO: Processing standard module hook 'hook-PIL.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+6845 INFO: Processing standard module hook 'hook-PIL.Image.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+6987 INFO: Processing standard module hook 'hook-xml.etree.cElementTree.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+7113 INFO: Processing standard module hook 'hook-PIL.ImageFilter.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+7401 INFO: Processing standard module hook 'hook-jinja2.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+7586 INFO: Processing standard module hook 'hook-matplotlib.backends.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+7614 INFO: Processing standard module hook 'hook-matplotlib.pyplot.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+8047 INFO: Processing standard module hook 'hook-dateutil.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+8072 INFO: Processing pre-safe-import-module hook 'hook-six.moves.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+8596 INFO: Processing standard module hook 'hook-certifi.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+8910 INFO: Processing standard module hook 'hook-wcwidth.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+9354 INFO: Processing standard module hook 'hook-jedi.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+9549 INFO: Processing standard module hook 'hook-parso.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+9916 INFO: Processing standard module hook 'hook-pkg_resources.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+10051 INFO: Processing pre-safe-import-module hook 'hook-jaraco.text.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10051 INFO: Setuptools: 'jaraco.text' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.text'!
+10053 INFO: Processing standard module hook 'hook-setuptools.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+10057 INFO: Processing pre-safe-import-module hook 'hook-distutils.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10058 INFO: Processing pre-find-module-path hook 'hook-distutils.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_find_module_path'
+10140 INFO: Processing standard module hook 'hook-distutils.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+10148 INFO: Processing standard module hook 'hook-distutils.util.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+10225 INFO: Processing pre-safe-import-module hook 'hook-more_itertools.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10268 INFO: Processing pre-safe-import-module hook 'hook-jaraco.functools.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10268 INFO: Setuptools: 'jaraco.functools' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.functools'!
+10271 INFO: Processing pre-safe-import-module hook 'hook-importlib_metadata.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10278 INFO: Processing standard module hook 'hook-importlib_metadata.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+10279 INFO: Processing pre-safe-import-module hook 'hook-zipp.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10383 INFO: Processing pre-safe-import-module hook 'hook-tomli.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10606 INFO: Processing pre-safe-import-module hook 'hook-wheel.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10606 INFO: Setuptools: 'wheel' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.wheel'!
+10657 INFO: Processing standard module hook 'hook-setuptools._vendor.jaraco.text.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+10658 INFO: Processing pre-safe-import-module hook 'hook-importlib_resources.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10659 INFO: Processing standard module hook 'hook-importlib_resources.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+10670 INFO: Processing pre-safe-import-module hook 'hook-jaraco.context.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10670 INFO: Setuptools: 'jaraco.context' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.jaraco.context'!
+10672 INFO: Processing pre-safe-import-module hook 'hook-backports.tarfile.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10673 INFO: Setuptools: 'backports.tarfile' appears to be a setuptools-vendored copy - creating alias to 'setuptools._vendor.backports.tarfile'!
+10700 INFO: Processing standard module hook 'hook-backports.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+10701 INFO: Processing pre-safe-import-module hook 'hook-platformdirs.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+10704 INFO: Processing standard module hook 'hook-platformdirs.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+10824 INFO: Processing standard module hook 'hook-sqlite3.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+11336 INFO: Processing standard module hook 'hook-zoneinfo.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+12751 INFO: Processing standard module hook 'hook-urllib3.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+13031 INFO: Processing standard module hook 'hook-charset_normalizer.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+13072 INFO: Processing standard module hook 'hook-cryptography.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+13484 INFO: hook-cryptography: cryptography does not seem to be using dynamically linked OpenSSL.
+13611 INFO: Processing standard module hook 'hook-bcrypt.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+13967 INFO: Processing standard module hook 'hook-pycparser.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+14385 INFO: Processing standard module hook 'hook-anyio.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+15175 INFO: Processing standard module hook 'hook-websockets.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+15532 INFO: Processing standard module hook 'hook-pandas.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+16663 INFO: Processing standard module hook 'hook-pytz.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+16746 INFO: Processing standard module hook 'hook-scipy.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+16762 INFO: Processing standard module hook 'hook-pytest.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+16895 INFO: Processing standard module hook 'hook-py.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+17444 INFO: Processing standard module hook 'hook-torch.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+1447 WARNING: Failed to collect submodules for 'torch.testing._internal.opinfo' because importing 'torch.testing._internal.opinfo' raised: ModuleNotFoundError: No module named 'expecttest'
+/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/utils/hooks/__init__.py:665: DeprecationWarning: `TorchScript` support for functional optimizers is deprecated and will be removed in a future PyTorch release. Consider using the `torch.compile` optimizer instead.
+  __import__(name)
+W0831 13:57:30.136000 75123 site-packages/torch/distributed/elastic/multiprocessing/redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
+/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/utils/hooks/__init__.py:665: DeprecationWarning: `torch.distributed._sharding_spec` will be deprecated, use `torch.distributed._shard.sharding_spec` instead
+  __import__(name)
+/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/utils/hooks/__init__.py:665: DeprecationWarning: `torch.distributed._sharded_tensor` will be deprecated, use `torch.distributed._shard.sharded_tensor` instead
+  __import__(name)
+/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/utils/hooks/__init__.py:665: DeprecationWarning: `torch.distributed._shard.checkpoint` will be deprecated, use `torch.distributed.checkpoint` instead
+  __import__(name)
+/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/tempfile.py:860: ResourceWarning: Implicitly cleaning up <TemporaryDirectory '/var/folders/wt/dyd15zp92g54yp9kj1t42c5w0000gn/T/tmp1r_7qgxu'>
+  _warnings.warn(warn_message, ResourceWarning)
+24339 INFO: Processing standard module hook 'hook-scipy.linalg.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+24382 INFO: Processing standard module hook 'hook-scipy.special._ufuncs.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+24433 INFO: Processing standard module hook 'hook-scipy.special._ellip_harm_2.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+24883 INFO: Processing standard module hook 'hook-scipy.spatial._ckdtree.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+25004 INFO: Processing standard module hook 'hook-scipy.spatial.transform.rotation.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+25313 INFO: Processing standard module hook 'hook-scipy.stats._stats.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+25585 INFO: Processing standard module hook 'hook-scipy.sparse.csgraph.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+29550 INFO: Processing standard module hook 'hook-pyarrow.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+29908 INFO: Processing standard module hook 'hook-fsspec.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+30215 INFO: Processing standard module hook 'hook-numba.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+30224 INFO: Processing standard module hook 'hook-llvmlite.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+32421 INFO: Processing pre-safe-import-module hook 'hook-win32com.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/pre_safe_import_module'
+33062 INFO: Processing standard module hook 'hook-pandas.io.formats.style.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+34303 INFO: Processing standard module hook 'hook-openpyxl.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+34630 INFO: Processing standard module hook 'hook-pandas.plotting.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+35028 INFO: Processing standard module hook 'hook-sqlalchemy.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+36568 INFO: Processing standard module hook 'hook-pandas.io.clipboard.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+37544 INFO: Processing standard module hook 'hook-shelve.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+37979 INFO: Processing standard module hook 'hook-transformers.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+39886 INFO: Processing standard module hook 'hook-uvloop.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+40257 INFO: Processing standard module hook 'hook-orjson.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+40679 INFO: Processing standard module hook 'hook-soundfile.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+40757 INFO: Processing pre-safe-import-module hook 'hook-tensorflow.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/pre_safe_import_module'
+40975 INFO: Processing standard module hook 'hook-jsonschema.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+41018 INFO: Processing standard module hook 'hook-jsonschema_specifications.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+41307 INFO: Processing standard module hook 'hook-uvicorn.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+42283 INFO: Processing standard module hook 'hook-onnxruntime.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+42523 INFO: Processing standard module hook 'hook-datasets.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+42596 INFO: Processing pre-find-module-path hook 'hook-tkinter.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_find_module_path'
+42596 INFO: TclTkInfo: initializing cached Tcl/Tk info...
+42642 INFO: TclTkInfo: using macOS system Tcl/Tk framework - not collecting data files.
+42907 INFO: Processing standard module hook 'hook-_tkinter.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+43048 INFO: Processing standard module hook 'hook-scipy.io.matlab.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+43235 INFO: Processing standard module hook 'hook-regex.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+43326 INFO: Processing standard module hook 'hook-librosa.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+43679 INFO: Processing standard module hook 'hook-torchaudio.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+47047 INFO: Processing standard module hook 'hook-cloudpickle.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+47059 INFO: Processing standard module hook 'hook-sklearn.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+47170 INFO: Processing standard module hook 'hook-sklearn.utils.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+47243 INFO: Processing standard module hook 'hook-sklearn.metrics.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+49329 INFO: Processing standard module hook 'hook-sklearn.metrics.cluster.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+49387 INFO: Processing standard module hook 'hook-sklearn.cluster.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+49408 INFO: Processing standard module hook 'hook-sklearn.metrics.pairwise.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+49490 INFO: Processing standard module hook 'hook-sklearn.neighbors.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+49768 INFO: Processing standard module hook 'hook-sklearn.linear_model.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+50910 INFO: Processing standard module hook 'hook-sentry_sdk.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+51183 INFO: Processing standard module hook 'hook-django.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+52463 WARNING: No django root directory could be found!
+52609 INFO: Processing standard module hook 'hook-django.db.backends.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+52772 INFO: Processing standard module hook 'hook-django.core.cache.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+52947 INFO: Processing standard module hook 'hook-django.core.mail.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+52958 INFO: Processing standard module hook 'hook-django.core.management.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+54233 INFO: Processing standard module hook 'hook-av.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+54795 INFO: Processing standard module hook 'hook-yt_dlp.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/yt_dlp/__pyinstaller'
+68 WARNING: Failed to collect submodules for 'urllib3.contrib.emscripten' because importing 'urllib3.contrib.emscripten' raised: ModuleNotFoundError: No module named 'js'
+55161 WARNING: collect_data_files - skipping data collection for module 'curl_cffi' as it is not a package.
+60555 INFO: Processing standard module hook 'hook-sacremoses.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+61534 INFO: Processing standard module hook 'hook-opentelemetry.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+63401 INFO: Processing standard module hook 'hook-nltk.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+66366 INFO: Processing pre-safe-import-module hook 'hook-inflect.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+66394 INFO: Processing pre-safe-import-module hook 'hook-typeguard.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_safe_import_module'
+69576 INFO: Processing standard module hook 'hook-rapidfuzz.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/rapidfuzz/__pyinstaller'
+73706 INFO: Processing standard module hook 'hook-mako.codegen.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+76285 INFO: Processing standard module hook 'hook-sounddevice.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+77694 INFO: Processing standard module hook 'hook-grpc.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+79489 INFO: Processing standard module hook 'hook-google.api_core.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+80139 INFO: Processing standard module hook 'hook-httplib2.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+80170 INFO: Processing standard module hook 'hook-googleapiclient.model.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+82102 INFO: Analyzing hidden import 'agentsmcp.ui.components.enhanced_chat'
+82104 INFO: Analyzing hidden import 'agentsmcp.ui.components.chat_history'
+82107 INFO: Analyzing hidden import 'agentsmcp.ui.components.realtime_input'
+82111 INFO: Analyzing hidden import 'agentsmcp.conversation.command_interface_impl'
+82112 INFO: Analyzing hidden import 'agentsmcp.conversation.dispatcher'
+82114 INFO: Processing module hooks (post-graph stage)...
+82659 INFO: Processing standard module hook 'hook-sklearn.tree.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+82936 INFO: Processing standard module hook 'hook-lightning.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+83400 INFO: Processing standard module hook 'hook-hydra.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+90950 INFO: Processing standard module hook 'hook-markdown.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/stdhooks'
+93089 INFO: Processing standard module hook 'hook-django.db.backends.mysql.base.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+93181 INFO: Processing standard module hook 'hook-django.db.backends.oracle.base.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+93323 INFO: Processing standard module hook 'hook-django.contrib.sessions.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+93664 INFO: Processing standard module hook 'hook-django.template.loaders.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+93896 WARNING: Hidden import "scipy.special._cdflib" not found!
+93897 WARNING: Hidden import "django.db.backends.__pycache__.base" not found!
+93897 INFO: Processing standard module hook 'hook-_tkinter.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+94308 WARNING: Hidden import "importlib_resources.trees" not found!
+94396 INFO: Processing standard module hook 'hook-PIL.SpiderImagePlugin.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+94410 INFO: Processing standard module hook 'hook-matplotlib.backends.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+94410 INFO: Matplotlib backend selection method: automatic discovery of used backends
+94416 INFO: Discovered Matplotlib backend(s) via `matplotlib.use()` call in module 'sympy.testing.runtests': ['Agg', 'Agg']
+94424 INFO: The following Matplotlib backends were discovered by scanning for `matplotlib.use()` calls: ['Agg']. If your backend of choice is not in this list, either add a `matplotlib.use()` call to your code, or configure the backend collection via hook options (see: https://pyinstaller.org/en/stable/hooks-config.html#matplotlib-hooks).
+94424 INFO: Selected matplotlib backends: ['Agg']
+94424 WARNING: Hidden import "django.db.backends.oracle.compiler" not found!
+94425 INFO: Processing standard module hook 'hook-sqlalchemy.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+94563 WARNING: Hidden import "pysqlite2" not found!
+95466 INFO: Performing binary vs. data reclassification (8272 entries)
+96332 INFO: Looking for ctypes DLLs
+96338 WARNING: Library user32 required via ctypes not found
+96370 WARNING: Ignoring /usr/lib64/libgomp.so.1 imported from /Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/torch/_inductor/codecache.py - only basenames are supported with ctypes imports!
+96373 WARNING: Library libnvidia-ml.so.1 required via ctypes not found
+96410 WARNING: Library msvcrt required via ctypes not found
+96433 WARNING: Library libnvidia-ml.so.1 required via ctypes not found
+96435 WARNING: Library libc.so.6 required via ctypes not found
+96442 WARNING: Library libc.so.6 required via ctypes not found
+96519 INFO: Analyzing run-time hooks ...
+96556 INFO: Including run-time hook 'pyi_rth_pkgutil.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/rthooks'
+96557 INFO: Including run-time hook 'pyi_rth_mplconfig.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/rthooks'
+96557 INFO: Processing pre-find-module-path hook 'hook-_pyi_rth_utils.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/pre_find_module_path'
+96558 INFO: Processing standard module hook 'hook-_pyi_rth_utils.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks'
+96559 INFO: Including run-time hook 'pyi_rth_pkgres.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/rthooks'
+96560 INFO: Including run-time hook 'pyi_rth_setuptools.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/rthooks'
+96561 INFO: Including run-time hook 'pyi_rth_multiprocessing.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/rthooks'
+96562 INFO: Including run-time hook 'pyi_rth_traitlets.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/rthooks'
+96562 INFO: Including run-time hook 'pyi_rth_cryptography_openssl.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/rthooks'
+96563 INFO: Including run-time hook 'pyi_rth__tkinter.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/rthooks'
+96563 INFO: Including run-time hook 'pyi_rth_django.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/rthooks'
+96564 INFO: Including run-time hook 'pyi_rth_nltk.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/_pyinstaller_hooks_contrib/rthooks'
+96565 INFO: Including run-time hook 'pyi_rth_inspect.py' from '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/hooks/rthooks'
+96797 INFO: Creating base_library.zip...
+96826 INFO: Looking for dynamic libraries
+97891 WARNING: Library not found: could not resolve '@rpath/libz.1.dylib', dependency of '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/llvmlite/binding/libllvmlite.dylib'.
+97892 WARNING: Library not found: could not resolve '@rpath/libc++.1.dylib', dependency of '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/llvmlite/binding/libllvmlite.dylib'.
+97892 WARNING: Library not found: could not resolve '@rpath/libc++.1.dylib', dependency of '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/numba/core/typeconv/_typeconv.cpython-310-darwin.so'.
+97892 WARNING: Library not found: could not resolve '@rpath/libc++.1.dylib', dependency of '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/numba/np/ufunc/workqueue.cpython-310-darwin.so'.
+97892 WARNING: Library not found: could not resolve '@rpath/libc++.1.dylib', dependency of '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/numba/np/ufunc/omppool.cpython-310-darwin.so'.
+97892 WARNING: Library not found: could not resolve '@rpath/libc++.1.dylib', dependency of '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/numba/_dispatcher.cpython-310-darwin.so'.
+97892 INFO: Missing dependency handling: adding symbolic link from 'torchaudio/lib/libtorchaudio_sox.so' to top-level application directory.
+97892 INFO: Missing dependency handling: adding symbolic link from 'torchaudio/lib/libtorchaudio.so' to top-level application directory.
+98022 INFO: Warnings written to /Users/mikko/github/AgentsMCP/.build/pyi_work/agentsmcp/warn-agentsmcp.txt
+98526 INFO: Graph cross-reference written to /Users/mikko/github/AgentsMCP/.build/pyi_work/agentsmcp/xref-agentsmcp.html
+99066 WARNING: Found one or more binaries with invalid or incompatible macOS SDK version:
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/sparse/linalg/_propack/_zpropack.cpython-310-darwin.so', collected as 'scipy/sparse/linalg/_propack/_zpropack.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/sparse/linalg/_propack/_cpropack.cpython-310-darwin.so', collected as 'scipy/sparse/linalg/_propack/_cpropack.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/sparse/linalg/_propack/_dpropack.cpython-310-darwin.so', collected as 'scipy/sparse/linalg/_propack/_dpropack.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/sparse/linalg/_propack/_spropack.cpython-310-darwin.so', collected as 'scipy/sparse/linalg/_propack/_spropack.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/sparse/linalg/_eigen/arpack/_arpack.cpython-310-darwin.so', collected as 'scipy/sparse/linalg/_eigen/arpack/_arpack.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/optimize/_slsqp.cpython-310-darwin.so', collected as 'scipy/optimize/_slsqp.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/optimize/_cobyla.cpython-310-darwin.so', collected as 'scipy/optimize/_cobyla.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/interpolate/_dfitpack.cpython-310-darwin.so', collected as 'scipy/interpolate/_dfitpack.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/interpolate/_fitpack.cpython-310-darwin.so', collected as 'scipy/interpolate/_fitpack.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/integrate/_lsoda.cpython-310-darwin.so', collected as 'scipy/integrate/_lsoda.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/integrate/_dop.cpython-310-darwin.so', collected as 'scipy/integrate/_dop.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/integrate/_vode.cpython-310-darwin.so', collected as 'scipy/integrate/_vode.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/integrate/_odepack.cpython-310-darwin.so', collected as 'scipy/integrate/_odepack.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/stats/_mvn.cpython-310-darwin.so', collected as 'scipy/stats/_mvn.cpython-310-darwin.so'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/.dylibs/libgfortran.5.dylib', collected as 'scipy/.dylibs/libgfortran.5.dylib'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/.dylibs/libquadmath.0.dylib', collected as 'scipy/.dylibs/libquadmath.0.dylib'; version: (0, 0, 0)
+99066 WARNING:  * '/opt/homebrew/opt/openblas/lib/libopenblas.0.dylib', collected as 'libopenblas.0.dylib'; version: (0, 0, 0)
+99066 WARNING:  * '/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/scipy/.dylibs/libgcc_s.1.1.dylib', collected as 'scipy/.dylibs/libgcc_s.1.1.dylib'; version: (0, 0, 0)
+99066 WARNING:  * '/opt/homebrew/opt/gcc/lib/gcc/current/libgomp.1.dylib', collected as 'libgomp.1.dylib'; version: (0, 0, 0)
+99066 WARNING: These binaries will likely cause issues with code-signing and hardened runtime!
+99360 INFO: checking PYZ
+99360 INFO: Building PYZ because PYZ-00.toc is non existent
+99360 INFO: Building PYZ (ZlibArchive) /Users/mikko/github/AgentsMCP/.build/pyi_work/agentsmcp/PYZ-00.pyz
+105552 INFO: Building PYZ (ZlibArchive) /Users/mikko/github/AgentsMCP/.build/pyi_work/agentsmcp/PYZ-00.pyz completed successfully.
+105710 INFO: EXE target arch: arm64
+105710 INFO: Code signing identity: None
+105799 INFO: checking PKG
+105800 INFO: Building PKG because PKG-00.toc is non existent
+105800 INFO: Building PKG (CArchive) agentsmcp.pkg
+178345 INFO: Building PKG (CArchive) agentsmcp.pkg completed successfully.
+178465 INFO: Bootloader /Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/bootloader/Darwin-64bit/run
+178465 INFO: checking EXE
+178465 INFO: Building EXE because EXE-00.toc is non existent
+178465 INFO: Building EXE from EXE-00.toc
+178466 INFO: Copying bootloader EXE to /Users/mikko/github/AgentsMCP/dist/agentsmcp
+178467 INFO: Converting EXE to target arch (arm64)
+178490 INFO: Removing signature(s) from EXE
+178515 INFO: Modifying Mach-O image UUID(s) in EXE
+178675 INFO: Appending PKG archive to EXE
+178786 INFO: Fixing EXE headers for code signing
+178788 INFO: Re-signing the EXE
+179245 INFO: Building EXE from EXE-00.toc completed successfully.
+179368 INFO: checking COLLECT
+179368 INFO: Building COLLECT because COLLECT-00.toc is non existent
+179368 INFO: Removing dir /Users/mikko/github/AgentsMCP/dist/.
+Traceback (most recent call last):
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/utils.py", line 394, in _make_clean_directory
+    os.remove(path)
+PermissionError: [Errno 1] Operation not permitted: '/Users/mikko/github/AgentsMCP/dist/.'
+
+During handling of the above exception, another exception occurred:
+
 Traceback (most recent call last):
   File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/runpy.py", line 196, in _run_module_as_main
     return _run_code(code, main_globals, None,
@@ -28,14 +314,21 @@ Traceback (most recent call last):
     build(specfile, distpath, workpath, clean_build)
   File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/build_main.py", line 1220, in build
     exec(code, spec_namespace)
-  File "agentsmcp.spec", line 9, in <module>
-    a = Analysis(
-  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/build_main.py", line 533, in __init__
-    self.hookspath += discover_hook_directories()
-  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/isolated/_parent.py", line 435, in wrapped
-    return call(function, *args, **kwargs)
-  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/isolated/_parent.py", line 404, in call
-    return isolated.call(function, *args, **kwargs)
-  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/isolated/_parent.py", line 322, in call
-    raise SubprocessDiedError(
-PyInstaller.isolated._parent.SubprocessDiedError: Child process died calling discover_hook_directories() with args=() and kwargs={}. Its exit code was -11.
+  File "agentsmcp.spec", line 76, in <module>
+    coll = COLLECT(
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/api.py", line 1150, in __init__
+    self.__postinit__()
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/datastruct.py", line 184, in __postinit__
+    self.assemble()
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/api.py", line 1162, in assemble
+    _make_clean_directory(self.name)
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/utils.py", line 396, in _make_clean_directory
+    _rmtree(path)
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/site-packages/PyInstaller/building/utils.py", line 421, in _rmtree
+    shutil.rmtree(path)
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/shutil.py", line 731, in rmtree
+    onerror(os.rmdir, path, sys.exc_info())
+  File "/Users/mikko/.pyenv/versions/3.10.9/lib/python3.10/shutil.py", line 729, in rmtree
+    os.rmdir(path)
+OSError: [Errno 22] Invalid argument: '/Users/mikko/github/AgentsMCP/dist/.'
+Adding imports: ['yt_dlp.compat._legacy', 'yt_dlp.compat._deprecated', 'yt_dlp.utils._legacy', 'yt_dlp.utils._deprecated', 'Cryptodome', 'websockets', 'websockets.__main__', 'websockets.auth', 'websockets.client', 'websockets.connection', 'websockets.datastructures', 'websockets.exceptions', 'websockets.extensions', 'websockets.extensions.base', 'websockets.extensions.permessage_deflate', 'websockets.frames', 'websockets.headers', 'websockets.http', 'websockets.http11', 'websockets.imports', 'websockets.legacy', 'websockets.legacy.async_timeout', 'websockets.legacy.auth', 'websockets.legacy.client', 'websockets.legacy.compatibility', 'websockets.legacy.framing', 'websockets.legacy.handshake', 'websockets.legacy.http', 'websockets.legacy.protocol', 'websockets.legacy.server', 'websockets.protocol', 'websockets.server', 'websockets.speedups', 'websockets.streams', 'websockets.sync', 'websockets.sync.client', 'websockets.sync.compatibility', 'websockets.sync.connection', 'websockets.sync.messages', 'websockets.sync.server', 'websockets.sync.utils', 'websockets.typing', 'websockets.uri', 'websockets.utils', 'websockets.version', 'requests', 'requests.__version__', 'requests._internal_utils', 'requests.adapters', 'requests.api', 'requests.auth', 'requests.certs', 'requests.compat', 'requests.cookies', 'requests.exceptions', 'requests.help', 'requests.hooks', 'requests.models', 'requests.packages', 'requests.sessions', 'requests.status_codes', 'requests.structures', 'requests.utils', 'urllib3', 'urllib3._base_connection', 'urllib3._collections', 'urllib3._request_methods', 'urllib3._version', 'urllib3.connection', 'urllib3.connectionpool', 'urllib3.contrib', 'urllib3.contrib.pyopenssl', 'urllib3.contrib.socks', 'urllib3.exceptions', 'urllib3.fields', 'urllib3.filepost', 'urllib3.http2', 'urllib3.http2.connection', 'urllib3.http2.probe', 'urllib3.poolmanager', 'urllib3.response', 'urllib3.util', 'urllib3.util.connection', 'urllib3.util.proxy', 'urllib3.util.request', 'urllib3.util.response', 'urllib3.util.retry', 'urllib3.util.ssl_', 'urllib3.util.ssl_match_hostname', 'urllib3.util.ssltransport', 'urllib3.util.timeout', 'urllib3.util.url', 'urllib3.util.util', 'urllib3.util.wait', 'mutagen', 'brotli', 'certifi', 'secretstorage', 'curl_cffi']

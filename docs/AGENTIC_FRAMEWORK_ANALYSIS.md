@@ -1,4 +1,9 @@
-# 🧠 Agentic Framework Analysis Report
+# 🧠 Agentic Framework Analysis Report (Archived)
+
+This document is kept for historical context. For current plans and tasks, see `docs/backlog.md` (canonical) and `docs/work-plan.md`.
+
+---
+
 *Comprehensive analysis of 2025 AI agent frameworks for AgentsMCP enhancement*
 
 ## 📋 Executive Summary

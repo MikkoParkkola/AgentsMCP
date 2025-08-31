@@ -72,6 +72,11 @@ class InputHandler:
         self._echo_enabled = True
         self._initialized = False
         
+        # TTY state management
+        self._orig_term_attrs = None
+        self._tty_fd = None
+        self._raw_applied = False
+        
         # Store references for integration
         self.terminal_manager = terminal_manager
         self.event_system = event_system
@@ -127,6 +132,15 @@ class InputHandler:
                 self._app.exit()
                 self._app = None
             
+            # Restore terminal settings if we modified them
+            try:
+                if self._orig_term_attrs is not None and self._raw_applied:
+                    import termios
+                    termios.tcsetattr(self._tty_fd, termios.TCSADRAIN, self._orig_term_attrs)
+                    self._raw_applied = False
+            except Exception:
+                pass
+            
             self._callbacks.clear()
             self._initialized = False
             
@@ -136,20 +150,58 @@ class InputHandler:
             logger.warning(f"Error during input handler cleanup: {e}")
             
     def set_echo(self, enabled: bool):
-        """Enable or disable character echo."""
+        """Enable or disable character echo (and raw input when disabling)."""
         self._echo_enabled = enabled
+        try:
+            import sys as _sys
+            if not _sys.stdin.isatty():
+                return
+            import termios, tty
+            fd = _sys.stdin.fileno()
+            # Cache fd and original attrs once
+            if self._tty_fd is None:
+                self._tty_fd = fd
+            if self._orig_term_attrs is None:
+                try:
+                    self._orig_term_attrs = termios.tcgetattr(fd)
+                except Exception:
+                    self._orig_term_attrs = None
+            if not enabled:
+                # Disable ECHO and ICANON for immediate, no-echo input
+                try:
+                    attrs = termios.tcgetattr(fd)
+                    lflag = attrs[3]
+                    lflag &= ~termios.ECHO
+                    lflag &= ~termios.ICANON
+                    attrs[3] = lflag
+                    # Min chars/time for non-canonical reads
+                    attrs[6][termios.VMIN] = 1
+                    attrs[6][termios.VTIME] = 0
+                    termios.tcsetattr(fd, termios.TCSADRAIN, attrs)
+                    self._raw_applied = True
+                except Exception:
+                    pass
+            else:
+                # Restore original settings if we had changed them
+                try:
+                    if self._orig_term_attrs is not None and self._raw_applied:
+                        termios.tcsetattr(self._tty_fd, termios.TCSADRAIN, self._orig_term_attrs)
+                        self._raw_applied = False
+                except Exception:
+                    pass
+        except Exception:
+            # Be defensive on platforms without termios
+            pass
     
     def add_key_handler(self, key: str, callback: Callable[[InputEvent], Any]):
         """
         Add a key handler for a specific key or key combination.
+        Works for both prompt_toolkit and fallback raw modes.
         
         Args:
             key: Key identifier (e.g., 'c-c', 'enter', 'a', 'escape')
             callback: Function to call when key is pressed
         """
-        if not self.available:
-            return
-            
         self._callbacks[key] = callback
     
     def remove_key_handler(self, key: str):
@@ -368,113 +420,201 @@ class InputHandler:
         Args:
             app: Optional Application instance to run
         """
-        if not self.available:
-            return
-            
-        if app is not None:
-            # Run provided PTK application (may manage its own output)
-            self._app = app
-            self._running = True
-            try:
-                await app.run_async()
-            finally:
-                self._running = False
-                self._app = None
-            return
-
-        # Lightweight key reader that doesn't render UI
-        try:
-            from prompt_toolkit.keys import Keys  # type: ignore
-        except Exception:
-            return
-
+        # If prompt_toolkit is available, use it; otherwise run a fallback raw reader
         loop = asyncio.get_running_loop()
-        self._running = True
-
-        def reader():
+        
+        if self.available:
+            if app is not None:
+                # Run provided PTK application (may manage its own output)
+                self._app = app
+                # Ensure we suppress terminal echo while reading
+                try:
+                    self.set_echo(False)
+                except Exception:
+                    pass
+                self._running = True
+                try:
+                    await app.run_async()
+                finally:
+                    self._running = False
+                    self._app = None
+                return
+            
+            # Lightweight key reader that doesn't render UI (PTK)
             try:
-                with create_input() as inp:
-                    for kp in inp.read_keys():
-                        if not self._running:
-                            break
-                        k = getattr(kp, 'key', None)
-                        data = getattr(kp, 'data', None)
-                        # Map to InputEvent
-                        evt = None
-                        if k == Keys.ControlC:
-                            evt = InputEvent(InputEventType.CTRL_KEY, key='c-c', ctrl=True)
-                        elif k == Keys.ControlD:
-                            evt = InputEvent(InputEventType.CTRL_KEY, key='c-d', ctrl=True)
-                        elif k == Keys.Backspace:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='backspace')
-                        elif k == Keys.ControlJ:
-                            # Ctrl+J is handled explicitly by UI (e.g., submit in multiline mode)
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='c-j')
-                        elif k == Keys.Enter or k == Keys.ControlM:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='enter')
-                        elif k == Keys.Home:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='home')
-                        elif k == Keys.End:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='end')
-                        elif k == Keys.ControlU:
-                            evt = InputEvent(InputEventType.CTRL_KEY, key='c-u', ctrl=True)
-                        elif k == Keys.ControlK:
-                            evt = InputEvent(InputEventType.CTRL_KEY, key='c-k', ctrl=True)
-                        elif k == Keys.Escape:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='escape')
-                        elif k == Keys.Up:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='up')
-                        elif k == Keys.Down:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='down')
-                        elif k == Keys.Left:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='left')
-                        elif k == Keys.Right:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='right')
-                        elif k == Keys.PageUp:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='page_up')
-                        elif k == Keys.PageDown:
-                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='page_down')
+                from prompt_toolkit.keys import Keys  # type: ignore
+            except Exception:
+                # PTK import failed unexpectedly; fall back
+                self.available = False
+            else:
+                self._running = True
+                def reader_ptk():
+                    try:
+                        with create_input() as inp:
+                            for kp in inp.read_keys():
+                                if not self._running:
+                                    break
+                                k = getattr(kp, 'key', None)
+                                data = getattr(kp, 'data', None)
+                                evt = None
+                                if k == Keys.ControlC:
+                                    evt = InputEvent(InputEventType.CTRL_KEY, key='c-c', ctrl=True)
+                                elif k == Keys.ControlD:
+                                    evt = InputEvent(InputEventType.CTRL_KEY, key='c-d', ctrl=True)
+                                elif k == Keys.Backspace:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='backspace')
+                                elif k == Keys.ControlJ:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='c-j')
+                                elif k == Keys.Enter or k == Keys.ControlM:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='enter')
+                                elif k == Keys.Home:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='home')
+                                elif k == Keys.End:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='end')
+                                elif k == Keys.ControlU:
+                                    evt = InputEvent(InputEventType.CTRL_KEY, key='c-u', ctrl=True)
+                                elif k == Keys.ControlK:
+                                    evt = InputEvent(InputEventType.CTRL_KEY, key='c-k', ctrl=True)
+                                elif k == Keys.Escape:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='escape')
+                                elif k == Keys.Up:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='up')
+                                elif k == Keys.Down:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='down')
+                                elif k == Keys.Left:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='left')
+                                elif k == Keys.Right:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='right')
+                                elif k == Keys.PageUp:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='page_up')
+                                elif k == Keys.PageDown:
+                                    evt = InputEvent(InputEventType.SPECIAL_KEY, key='page_down')
+                                else:
+                                    ch = data or (k if isinstance(k, str) else None)
+                                    if ch and len(ch) == 1 and ch.isprintable():
+                                        evt = InputEvent(InputEventType.CHARACTER, character=ch)
+                                    elif ch == '\n' or ch == '\r':
+                                        evt = InputEvent(InputEventType.SPECIAL_KEY, key='enter')
+                                if evt is None:
+                                    continue
+                                def dispatch():
+                                    cb = self._callbacks.get(evt.key or evt.character)
+                                    if cb:
+                                        try:
+                                            res = cb(evt)
+                                            if asyncio.iscoroutine(res):
+                                                loop.create_task(res)
+                                        except Exception:
+                                            pass
+                                    cb2 = self._callbacks.get('*')
+                                    if cb2:
+                                        try:
+                                            res = cb2(evt)
+                                            if asyncio.iscoroutine(res):
+                                                loop.create_task(res)
+                                        except Exception:
+                                            pass
+                                loop.call_soon_threadsafe(dispatch)
+                    except Exception:
+                        pass
+                import threading
+                t = threading.Thread(target=reader_ptk, name="InputReaderPTK", daemon=True)
+                t.start()
+                try:
+                    while self._running:
+                        await asyncio.sleep(0.05)
+                finally:
+                    self._running = False
+                    try:
+                        self.set_echo(True)
+                    except Exception:
+                        pass
+                return
+        
+        # Fallback raw reader without prompt_toolkit
+        self._running = True
+        def reader_raw():
+            try:
+                import sys as _sys, select
+                # Disable echo/canonical to get immediate keys
+                try:
+                    self.set_echo(False)
+                except Exception:
+                    pass
+                buf = ''
+                while self._running:
+                    r, _, _ = select.select([_sys.stdin], [], [], 0.1)
+                    if not r:
+                        continue
+                    ch = _sys.stdin.read(1)
+                    if not ch:
+                        continue
+                    evt = None
+                    if ch == '\x03':  # Ctrl+C
+                        evt = InputEvent(InputEventType.CTRL_KEY, key='c-c', ctrl=True)
+                    elif ch == '\x04':  # Ctrl+D
+                        evt = InputEvent(InputEventType.CTRL_KEY, key='c-d', ctrl=True)
+                    elif ch == '\x7f':  # Backspace
+                        evt = InputEvent(InputEventType.SPECIAL_KEY, key='backspace')
+                    elif ch == '\r' or ch == '\n':
+                        evt = InputEvent(InputEventType.SPECIAL_KEY, key='enter')
+                    elif ch == '\x1b':
+                        # Escape sequence for arrows and more
+                        # Try to read the next two bytes if available
+                        _sys.stdin.flush()
+                        seq = _sys.stdin.read(1)
+                        if seq == '[':
+                            seq2 = _sys.stdin.read(1)
+                            if seq2 == 'A':
+                                evt = InputEvent(InputEventType.SPECIAL_KEY, key='up')
+                            elif seq2 == 'B':
+                                evt = InputEvent(InputEventType.SPECIAL_KEY, key='down')
+                            elif seq2 == 'C':
+                                evt = InputEvent(InputEventType.SPECIAL_KEY, key='right')
+                            elif seq2 == 'D':
+                                evt = InputEvent(InputEventType.SPECIAL_KEY, key='left')
+                            else:
+                                # Swallow other CSI for now
+                                evt = None
                         else:
-                            ch = data or (k if isinstance(k, str) else None)
-                            if ch and len(ch) == 1 and ch.isprintable():
-                                evt = InputEvent(InputEventType.CHARACTER, character=ch)
-                            # Map raw newlines conservatively to Enter for reliability
-                            elif ch == '\n' or ch == '\r':
-                                evt = InputEvent(InputEventType.SPECIAL_KEY, key='enter')
-                        if evt is None:
-                            continue
-                        # Dispatch to callbacks on the asyncio loop
-                        def dispatch():
-                            # Specific
-                            cb = self._callbacks.get(evt.key or evt.character)
-                            if cb:
-                                try:
-                                    res = cb(evt)
-                                    if asyncio.iscoroutine(res):
-                                        loop.create_task(res)
-                                except Exception:
-                                    pass
-                            # Wildcard
-                            cb2 = self._callbacks.get('*')
-                            if cb2:
-                                try:
-                                    res = cb2(evt)
-                                    if asyncio.iscoroutine(res):
-                                        loop.create_task(res)
-                                except Exception:
-                                    pass
-                        loop.call_soon_threadsafe(dispatch)
+                            evt = InputEvent(InputEventType.SPECIAL_KEY, key='escape')
+                    else:
+                        if ch.isprintable():
+                            evt = InputEvent(InputEventType.CHARACTER, character=ch)
+                    if evt is None:
+                        continue
+                    def dispatch():
+                        cb = self._callbacks.get(evt.key or evt.character)
+                        if cb:
+                            try:
+                                res = cb(evt)
+                                if asyncio.iscoroutine(res):
+                                    loop.create_task(res)
+                            except Exception:
+                                pass
+                        cb2 = self._callbacks.get('*')
+                        if cb2:
+                            try:
+                                res = cb2(evt)
+                                if asyncio.iscoroutine(res):
+                                    loop.create_task(res)
+                            except Exception:
+                                pass
+                    loop.call_soon_threadsafe(dispatch)
             except Exception:
                 pass
-
         import threading
-        t = threading.Thread(target=reader, name="InputReader", daemon=True)
+        t = threading.Thread(target=reader_raw, name="InputReaderRaw", daemon=True)
         t.start()
         try:
             while self._running:
                 await asyncio.sleep(0.05)
         finally:
             self._running = False
+            try:
+                self.set_echo(True)
+            except Exception:
+                pass
     
     def stop(self):
         """Stop the input handler."""

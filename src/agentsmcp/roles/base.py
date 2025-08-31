@@ -35,6 +35,23 @@ class RoleName(str, Enum):
     DOCS = "docs"
     PROCESS_COACH = "process_coach"
     METRICS_COLLECTOR = "metrics_collector"
+    BUSINESS_ANALYST = "business_analyst"
+    BACKEND_ENGINEER = "backend_engineer"
+    WEB_FRONTEND_ENGINEER = "web_frontend_engineer"
+    API_ENGINEER = "api_engineer"
+    TUI_FRONTEND_ENGINEER = "tui_frontend_engineer"
+    BACKEND_QA_ENGINEER = "backend_qa_engineer"
+    WEB_FRONTEND_QA_ENGINEER = "web_frontend_qa_engineer"
+    TUI_FRONTEND_QA_ENGINEER = "tui_frontend_qa_engineer"
+    CHIEF_QA_ENGINEER = "chief_qa_engineer"
+    IT_LAWYER = "it_lawyer"
+    MARKETING_MANAGER = "marketing_manager"
+    CI_CD_ENGINEER = "ci_cd_engineer"
+    DEV_TOOLING_ENGINEER = "dev_tooling_engineer"
+    DATA_ANALYST = "data_analyst"
+    DATA_SCIENTIST = "data_scientist"
+    ML_SCIENTIST = "ml_scientist"
+    ML_ENGINEER = "ml_engineer"
 
 
 class ModelAssignment(BaseModel):

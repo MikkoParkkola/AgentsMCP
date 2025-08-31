@@ -1,28 +1,28 @@
 # Current Product Status
 
-AgentsMCP now ships a basic CLI, an async `AgentManager`, a FastAPI server, and an experimental RAG pipeline. The repository includes tests and CI workflows but lacks production-ready orchestration, pluggable retrieval, and end-to-end examples. Configuration via `agentsmcp.yaml` allows MCP clients to access tools such as `filesystem`, `git`, `bash`, and `web_search`.
+AgentsMCP provides a CLI, an async `AgentManager`, a FastAPI server, and early UI surfaces (legacy TUI v1; TUI v2 in active development). The repository includes tests and CI scaffolding. Production-grade orchestration, pluggable retrieval, and full E2E examples are in progress.
 
 ## User Experience
-- CLI-only interface for invoking agents.
-- Documentation outlines expected behaviors and configuration points.
-- Chat CLI adds `/models` for model discovery and `/apikey` for persisting keys.
-- Provider validation runs non-blocking with actionable hints.
+- CLI: core commands; chat CLI includes `/models` and `/provider` workflows (see `docs/usage.md`).
+- TUI: v1 (Rich-based) is stable but limited; v2 is the target and under active development (see `docs/ui-ux-improvement-plan-revised.md`).
+- Provider validation: non-blocking with actionable hints; setup wizard planned (see backlog).
 
 ## Developer Experience
-- Repository provides best-practice documentation and CI scaffolding.
-- Sample configuration file enables tool access for agents.
+- Clear backlog (`docs/backlog.md`) with ≤500‑LOC tasks and acceptance criteria.
+- Best-practice docs and CI scaffolding for contributions.
 
 ## Integrations
-- No external cloud services are integrated today.
-- Future plans include pluggable data sources for retrieval-augmented generation.
+- MCP tools via configuration; provider model discovery and streaming tracked in the backlog.
 
-## Opportunities
-- Define standard agent roles and contracts.
-- Showcase coordinated CI tasks using specialized agents.
- - Expand discovery (announcer, list, handshake) into richer coordination.
- - Grow web UI from scaffold to charts and controls.
+## Opportunities (near-term)
+- Finish TUI v2 input + command palette and logs (Phase 1 in UX plan).
+- Provider/model discovery facade and `/models` UX.
+- SSE event bus + basic web dashboard.
 
 ## Currently Working Use Cases
-- Acts as a template repository for spinning up new MCP-based agent systems.
- - Local discovery via registry + CLI listing when enabled.
- - Minimal web dashboard with SSE events, spawn, and cancel controls.
+- Template for MCP-based agent systems.
+- Local discovery (registry) + CLI listing when enabled.
+- Minimal web dashboard with SSE (scaffold).
+
+See `docs/backlog.md` for what’s next and `docs/changelog.md` for recent changes.
+

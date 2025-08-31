@@ -15,6 +15,8 @@ from .web_tools import (
     web_search_tool,
 )
 from .mcp_tool import MCPCallTool
+# Ensure shell tool is registered on package import
+from .shell_tools import ShellCommandTool, run_shell_tool  # noqa: F401
 
 __all__ = [
     "BaseTool",
@@ -32,4 +34,6 @@ __all__ = [
     "web_search_tool",
     "http_request_tool",
     "MCPCallTool",
+    "ShellCommandTool",
+    "run_shell_tool",
 ]

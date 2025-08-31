@@ -8,6 +8,25 @@ from .architect import ArchitectRole
 from .coder import CoderRole
 from .qa import QARole
 from .merge_bot import MergeBotRole
+from .human_specialists import (
+    BusinessAnalystRole,
+    BackendEngineerRole,
+    WebFrontendEngineerRole,
+    APIEngineerRole,
+    TUIFrontendEngineerRole,
+    BackendQARole,
+    WebFrontendQARole,
+    TUIFrontendQARole,
+    ChiefQARole,
+    ITLawyerRole,
+    MarketingManagerRole,
+    CICDEngineerRole,
+    DevToolingEngineerRole,
+    DataAnalystRole,
+    DataScientistRole,
+    MLSicentistRole,
+    MLEngineerRole,
+)
 
 
 @dataclass(frozen=True)
@@ -31,18 +50,72 @@ class RoleRegistry:
         RoleName.CODER: CoderRole,
         RoleName.QA: QARole,
         RoleName.MERGE_BOT: MergeBotRole,
+        RoleName.BUSINESS_ANALYST: BusinessAnalystRole,
+        RoleName.BACKEND_ENGINEER: BackendEngineerRole,
+        RoleName.WEB_FRONTEND_ENGINEER: WebFrontendEngineerRole,
+        RoleName.API_ENGINEER: APIEngineerRole,
+        RoleName.TUI_FRONTEND_ENGINEER: TUIFrontendEngineerRole,
+        RoleName.BACKEND_QA_ENGINEER: BackendQARole,
+        RoleName.WEB_FRONTEND_QA_ENGINEER: WebFrontendQARole,
+        RoleName.TUI_FRONTEND_QA_ENGINEER: TUIFrontendQARole,
+        RoleName.CHIEF_QA_ENGINEER: ChiefQARole,
+        RoleName.IT_LAWYER: ITLawyerRole,
+        RoleName.MARKETING_MANAGER: MarketingManagerRole,
+        RoleName.CI_CD_ENGINEER: CICDEngineerRole,
+        RoleName.DEV_TOOLING_ENGINEER: DevToolingEngineerRole,
+        RoleName.DATA_ANALYST: DataAnalystRole,
+        RoleName.DATA_SCIENTIST: DataScientistRole,
+        RoleName.ML_SCIENTIST: MLSicentistRole,
+        RoleName.ML_ENGINEER: MLEngineerRole,
     }
 
     KEYWORD_TO_ROLE = {
         "design": RoleName.ARCHITECT,
         "architecture": RoleName.ARCHITECT,
+        "analysis": RoleName.BUSINESS_ANALYST,
+        "requirements": RoleName.BUSINESS_ANALYST,
         "refactor": RoleName.CODER,
         "implement": RoleName.CODER,
         "fix": RoleName.CODER,
         "test": RoleName.QA,
         "qa": RoleName.QA,
+        "backend": RoleName.BACKEND_ENGINEER,
+        "database": RoleName.BACKEND_ENGINEER,
+        "api": RoleName.API_ENGINEER,
+        "rest": RoleName.API_ENGINEER,
+        "openapi": RoleName.API_ENGINEER,
+        "frontend": RoleName.WEB_FRONTEND_ENGINEER,
+        "web": RoleName.WEB_FRONTEND_ENGINEER,
+        "react": RoleName.WEB_FRONTEND_ENGINEER,
+        "tui": RoleName.TUI_FRONTEND_ENGINEER,
+        "terminal": RoleName.TUI_FRONTEND_ENGINEER,
+        "backend qa": RoleName.BACKEND_QA_ENGINEER,
+        "web qa": RoleName.WEB_FRONTEND_QA_ENGINEER,
+        "tui qa": RoleName.TUI_FRONTEND_QA_ENGINEER,
+        "chief qa": RoleName.CHIEF_QA_ENGINEER,
         "merge": RoleName.MERGE_BOT,
         "rebase": RoleName.MERGE_BOT,
+        "legal": RoleName.IT_LAWYER,
+        "license": RoleName.IT_LAWYER,
+        "privacy": RoleName.IT_LAWYER,
+        "gdpr": RoleName.IT_LAWYER,
+        "marketing": RoleName.MARKETING_MANAGER,
+        "seo": RoleName.MARKETING_MANAGER,
+        "ci ": RoleName.CI_CD_ENGINEER,
+        "cd ": RoleName.CI_CD_ENGINEER,
+        "pipeline": RoleName.CI_CD_ENGINEER,
+        "deploy": RoleName.CI_CD_ENGINEER,
+        "devtools": RoleName.DEV_TOOLING_ENGINEER,
+        "tooling": RoleName.DEV_TOOLING_ENGINEER,
+        "analytics": RoleName.DATA_ANALYST,
+        "sql": RoleName.DATA_ANALYST,
+        "data science": RoleName.DATA_SCIENTIST,
+        "statistics": RoleName.DATA_SCIENTIST,
+        "ml research": RoleName.ML_SCIENTIST,
+        "ml scientist": RoleName.ML_SCIENTIST,
+        "training": RoleName.ML_ENGINEER,
+        "dataset": RoleName.ML_ENGINEER,
+        "inference": RoleName.ML_ENGINEER,
     }
 
     def resolve_role(self, objective: str, role_hint: Optional[RoleName] = None) -> RoleName:
@@ -82,4 +155,3 @@ class RoleRegistry:
         reason = "complex reasoning" if agent_type == "codex" else "basic automation"
         inst = self.instantiate(role, agent_type=agent_type)
         return inst, RoutingDecision(role=role, agent_type=agent_type, reason=reason)
-

@@ -3,6 +3,16 @@
 This file records notable changes to the project. Keep entries in reverse chronological order.
 
 ## [Unreleased]
+- TUI v2: CRLF-based line resets; markdown with colors via ansi_markdown_processor in fixed TUI.
+- Providers: `providers_enabled` + `AGENTS_PROVIDERS_ENABLED` to allowlist; default only `ollama-turbo`.
+- Roles: Added human roles (BA, BE, Web FE, API, TUI FE, Backend/Web/TUI QA, Chief QA, IT lawyer, marketing manager, CI/CD, dev tooling, data analyst/scientist, ML scientist/engineer) and routing.
+- Continuous Improvement: Retrospectives -> JSONL + improvements.md; auto-update versioned role/team docs under docs/roles/.
+- TUI v2: Fixed progressive indentation by writing CRLF at line starts; moved connection status to its own line; integrated ANSI Markdown renderer with colors for assistant responses in fixed working TUI.
+- Providers: Added provider allowlist via config `providers_enabled` and env `AGENTS_PROVIDERS_ENABLED`. Default enables only `ollama-turbo`.
+- Roles: Added human-oriented roles (business analyst, backend engineer, web frontend engineer, API engineer, TUI frontend engineer; backend/web/TUI QA engineers; chief QA engineer) and hooked into role registry and routing.
+- Continuous Improvement: Added post-task retrospective (individual + joint), persisted to `build/retrospectives/` with a rolling `improvements.md` fed into the system prompt.
+- TUI: Fix chat rendering preserving line breaks and remove odd indentation in assistant/user messages by wrapping each physical line independently.
+- TUI: Handle multi-line bracketed paste as a single input chunk (no auto-submit); pasted newlines are kept in the input buffer and rendered as multi-line until user presses Enter.
 - P6.2 Design: Add user-friendly configuration proposal (role preferences, auto-detection, smart defaults, first-run wizard, task-to-team mapping) in docs/P6.2-config-design.md.
 - Agents: add environment-tailored guide `AGENTS_LOCAL.md` and link from `AGENTS.md`.
 - Repo-Mapper: scaffold `ownership_map.json` and `path_locks.json` with no-overlap and lock policies.

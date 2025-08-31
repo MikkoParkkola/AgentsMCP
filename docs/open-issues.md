@@ -2,6 +2,8 @@
 
 Track significant open questions, decision needs, and risks. Move entries to `decision-log.md` once resolved.
 
+Note: For actionable work items, the single source of truth is `docs/backlog.md`. Use this file to capture decision needs and risks; link the relevant backlog tasks.
+
 <!--
 Template:
 ## [ID] - Title

@@ -225,22 +225,25 @@ class CLIApp:
             elif self.current_mode == "stats":
                 await self._run_statistics_mode()
             elif self.current_mode == "tui":
-                # Modern world-class TUI – introduced in Task 2.
-                if ModernTUI is None:
-                    import logging
-                    logging.getLogger(__name__).error(
-                        "ModernTUI class not available – falling back to legacy interactive mode"
+                # Modern world-class TUI – prefer v2 even if ModernTUI import fails.
+                try:
+                    await self._run_modern_tui()
+                except Exception as exc:  # pragma: no cover – defensive
+                    import logging, os as _os
+                    logging.getLogger(__name__).exception(
+                        "Failed to start TUI (v2/v1 path)"
                     )
+                    # Respect no-fallback mode to surface TUI errors for debugging
+                    if _os.getenv("AGENTS_TUI_V2_NO_FALLBACK", "0") == "1":
+                        await self._show_error(f"TUI failed: {exc}")
+                        # Early return to avoid silently switching to legacy UI
+                        return {
+                            "status": "error",
+                            "session_duration": 0,
+                            "final_mode": "tui",
+                            "error": str(exc)
+                        }
                     await self._run_interactive_mode()
-                else:
-                    try:
-                        await self._run_modern_tui()
-                    except Exception as exc:  # pragma: no cover – defensive
-                        import logging
-                        logging.getLogger(__name__).exception(
-                            "Failed to start ModernTUI, falling back to legacy mode"
-                        )
-                        await self._run_interactive_mode()
             else:
                 await self._run_interactive_mode()  # Default fallback
                 
@@ -387,14 +390,17 @@ class CLIApp:
                 # Ensure sane defaults for v2 behavior when launched via ./agentsmcp tui
                 try:
                     os.environ.setdefault("AGENTS_TUI_SUPPRESS_TIPS", "1")  # keep exit clean
-                    os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "1")     # stable raw path by default
+                    # Prefer full v2 UI by default for rich features; raw minimal mode opt-in
+                    os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "0")
                     os.environ.setdefault("AGENTS_TUI_V2_BACKEND", "1")     # connect backend by default
                     os.environ.setdefault("AGENTS_TUI_V2_BACKEND_PREWARM", "1")
                 except Exception:
                     pass
                 # Try v2 TUI first - the new and improved system
                 from .v2 import launch_main_tui
-                print("🚀 Starting TUI v2...")
+                # Use proper cursor reset to prevent progressive indentation
+                sys.stdout.write("\r🚀 Starting TUI v2...\n")
+                sys.stdout.flush()
                 exit_code = await launch_main_tui(self.config)
                 if exit_code != 0:
                     raise RuntimeError(f"TUI v2 failed with exit code: {exit_code}")

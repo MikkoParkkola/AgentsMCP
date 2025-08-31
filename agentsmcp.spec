@@ -15,11 +15,22 @@ a = Analysis(
         # UI modules
         'agentsmcp.ui.cli_app',
         'agentsmcp.ui.tui_shell',
+        'agentsmcp.ui.modern_tui',
         'agentsmcp.ui.status_dashboard',
         'agentsmcp.ui.statistics_display',
         'agentsmcp.ui.theme_manager',
         'agentsmcp.ui.ui_components',
         'agentsmcp.ui.command_interface',
+        # UI components used by ModernTUI
+        'agentsmcp.ui.components.enhanced_chat',
+        'agentsmcp.ui.components.chat_history',
+        'agentsmcp.ui.components.realtime_input',
+        # v2 TUI system
+        'agentsmcp.ui.v2',
+        'agentsmcp.ui.v2.main_app',
+        'agentsmcp.ui.v2.fixed_working_tui',
+        'agentsmcp.ui.v2.minimal_working_tui',
+        'agentsmcp.ui.v2.input_handler',
         # Conversation/command routing
         'agentsmcp.conversation.command_interface_impl',
         'agentsmcp.conversation.dispatcher',

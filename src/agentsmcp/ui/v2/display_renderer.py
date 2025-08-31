@@ -321,21 +321,20 @@ class DisplayRenderer:
     
     def _render_positioned(self, region: RenderRegion, content: str) -> bool:
         """Render with positioned cursor control."""
-        lines = content.split('\n')
+        # Avoid clearing the entire region to reduce flicker; instead pad each
+        # line to full width and ensure we write exactly region.height rows.
+        raw_lines = content.split('\n') if content is not None else []
+        width = region.width
+        height = region.height
         
-        # Clear region first
-        self._clear_region(region)
-        
-        # Render content line by line
-        for i, line in enumerate(lines[:region.height]):
-            if i >= region.height:
-                break
-            
+        for i in range(height):
+            line = raw_lines[i] if i < len(raw_lines) else ""
+            if len(line) < width:
+                line = line + (" " * (width - len(line)))
+            else:
+                line = line[:width]
             self._move_cursor(region.x, region.y + i)
-            
-            # Truncate line if too long
-            display_line = line[:region.width]
-            self._output.write(display_line)
+            self._output.write(line)
         
         self._output.flush()
         region.dirty = False

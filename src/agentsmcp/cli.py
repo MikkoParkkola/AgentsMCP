@@ -22,15 +22,15 @@ from agentsmcp.errors import (
     TaskExecutionError,
     AuthenticationError,
     MissingParameterError,
-    require_option
+    require_option,
+    InvalidCommandError,
+    PermissionError,
+    ResourceNotFoundError,
+    VersionCompatibilityError,
+    RateLimitError,
+    suggest_command
 )
-from agentsmcp.cli_enhanced import (
-    EnhancedAgentsMCPCLI,
-    handle_common_errors,
-    validate_task_input,
-    check_config_exists,
-    with_intelligent_suggestions
-)
+from agentsmcp.intelligent_suggestions import get_suggestion_system, display_suggestions
 from agentsmcp.progressive_disclosure import (
     ProgressiveDisclosureGroup,
     advanced_option,
@@ -49,6 +49,202 @@ from agentsmcp.commands.rag import rag_group
 from agentsmcp.paths import pid_file_path, ensure_dirs
 
 PID_FILE = pid_file_path()
+
+
+class EnhancedAgentsMCPCLI(click.Group):
+    """Enhanced Click group with friendly error handling and suggestions."""
+
+    def get_command(self, ctx, cmd_name):
+        """Override to provide suggestions for invalid commands."""
+        rv = super().get_command(ctx, cmd_name)
+        if rv is not None:
+            return rv
+            
+        # Command not found - provide intelligent suggestions
+        suggestion_system = get_suggestion_system()
+        suggestions = suggestion_system.suggest_for_invalid_command(cmd_name)
+        
+        # Display suggestions before raising error
+        if suggestions:
+            click.echo()  # Extra spacing
+            display_suggestions(suggestions, "💡 Did you mean?")
+        
+        raise InvalidCommandError(cmd_name)
+
+    def invoke(self, ctx):
+        """Wrap the regular invoke with enhanced error handling."""
+        try:
+            return super().invoke(ctx)
+        
+        except click.ClickException as ce:
+            # Already a ClickException – check if it's our enhanced type
+            if isinstance(ce, AgentsMCPError):
+                ce.show()
+            else:
+                # Unknown ClickException – add a gentle tip
+                click.echo(
+                    f"❓  {click.style('Oops! Something went wrong.', fg='red', bold=True)}\n"
+                    f"   {click.style(str(ce), fg='yellow')}\n"
+                    "💡 Run the command with --help to see the expected usage.",
+                    err=True,
+                )
+            ctx.exit(1)
+
+        except KeyboardInterrupt:
+            click.echo("\n👋 Operation cancelled by user.", err=True)
+            ctx.exit(130)  # Standard exit code for SIGINT
+            
+        except Exception as exc:
+            # SystemExit with code 0 is success - don't show as error
+            if isinstance(exc, SystemExit) and exc.code == 0:
+                ctx.exit(0)
+                
+            # Anything else (programming error, unexpected library error...)
+            # Show helpful message but preserve debugging capability
+            if "--debug" in sys.argv or ctx.find_root().params.get('debug'):
+                raise  # Let the full traceback bubble up
+
+            click.echo(
+                f"💥  {click.style('Unexpected error:', fg='red', bold=True)} {exc}\n"
+                f"💡 If this keeps happening, please:\n"
+                f"   • Re-run with {click.style('--debug', fg='cyan')} to see the full traceback\n"
+                f"   • Report the issue at {click.style('https://github.com/yourorg/agentsmcp/issues', fg='cyan')}",
+                err=True,
+            )
+            ctx.exit(1)
+
+    def main(self, *args, **kwargs):
+        """Override main to add debug option handling."""
+        try:
+            return super().main(*args, **kwargs)
+        except SystemExit as e:
+            # Preserve system exit codes - don't show error for successful exits
+            if e.code != 0:
+                raise e
+            else:
+                # Success exit - just exit cleanly
+                sys.exit(0)
+        except Exception:
+            # Last resort error handling
+            if "--debug" in sys.argv:
+                raise
+            click.echo("💥 Fatal error occurred. Use --debug for details.", err=True)
+            sys.exit(1)
+
+
+def handle_common_errors(func):
+    """Decorator to handle common errors in command functions."""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except FileNotFoundError as e:
+            raise ResourceNotFoundError(f"file {e.filename}")
+        except OSError as e:
+            if e.errno == 13:  # Permission denied
+                raise PermissionError(str(e.filename or "resource"))
+            raise
+        except ConnectionError as e:
+            raise NetworkError(str(e))
+        except ImportError as e:
+            if "cost" in str(e).lower():
+                raise ConfigError("Cost tracking features not available. Install with: pip install agentsmcp[cost]")
+            elif "rag" in str(e).lower():
+                raise ConfigError("RAG features not available. Install with: pip install agentsmcp[rag]")
+            raise
+    return wrapper
+
+
+def with_intelligent_suggestions(func):
+    """Decorator to add intelligent suggestions after command execution."""
+    import functools
+    
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        # Extract command name from function context
+        import inspect
+        frame = inspect.currentframe()
+        try:
+            # Get the click context
+            ctx = None
+            for arg in args:
+                if isinstance(arg, click.Context):
+                    ctx = arg
+                    break
+            
+            # Execute the original function
+            result = func(*args, **kwargs)
+            
+            # Get command name from context or function name
+            command_name = func.__name__ if not ctx else ctx.info_name
+            if ctx and ctx.parent:
+                # Build full command path
+                parent_names = []
+                current_ctx = ctx.parent
+                while current_ctx and current_ctx.info_name != 'agentsmcp':
+                    parent_names.append(current_ctx.info_name)
+                    current_ctx = current_ctx.parent
+                if parent_names:
+                    command_name = ' '.join(reversed(parent_names)) + ' ' + command_name
+            
+            # Record successful usage and show suggestions
+            suggestion_system = get_suggestion_system()
+            suggestion_system.record_command_usage(command_name, success=True)
+            
+            # Show next-step suggestions (but only in advanced mode or if specifically helpful)
+            should_show_suggestions = True
+            if ctx and ctx.obj and not ctx.obj.get('advanced', False):
+                # In simple mode, only show suggestions for key moments
+                key_moments = ['init setup', 'run simple', 'monitor costs']
+                should_show_suggestions = any(key in command_name for key in key_moments)
+            
+            if should_show_suggestions:
+                suggestions = suggestion_system.suggest_next_actions(command_name)
+                if suggestions:
+                    display_suggestions(suggestions[:3], "💡 What's next?")  # Limit to 3
+                    
+            return result
+            
+        except Exception as e:
+            # Record failed usage
+            if 'command_name' in locals():
+                suggestion_system = get_suggestion_system()
+                suggestion_system.record_command_usage(command_name, success=False)
+            raise
+        finally:
+            if frame:
+                del frame
+                
+    return wrapper
+
+
+def validate_task_input(task: str) -> str:
+    """Validate and clean task input."""
+    if not task or not task.strip():
+        raise MissingParameterError("task", "run simple")
+    
+    task = task.strip()
+    if len(task) > 1000:
+        raise TaskExecutionError("Task description too long (max 1000 characters)")
+    
+    return task
+
+
+def check_config_exists(config_path: Optional[str] = None) -> Path:
+    """Check if config exists and provide helpful error if not."""
+    if config_path:
+        path = Path(config_path)
+    else:
+        from agentsmcp.paths import default_user_config_path
+        path = default_user_config_path()
+    
+    if not path.exists():
+        raise ConfigError(
+            f"Configuration file not found at {path}. "
+            "Run 'agentsmcp init setup' to create one."
+        )
+    
+    return path
+
 
 def _load_config(config_path: Optional[str]) -> Config:
     env = AppSettings()
@@ -122,10 +318,12 @@ class AgentsMCPProgressiveGroup(ProgressiveDisclosureGroup, EnhancedAgentsMCPCLI
 @click.option("--input-lines", type=int, default=None, help="Visible input lines (raw mode)")
 @click.option("--wheel-lines", type=int, default=None, help="Mouse wheel step in lines")
 @click.option("--caret-char", default=None, help="Input caret character (e.g., █ or |)")
+@click.option("--network/--no-network", default=True, help="Allow network access (default: on)")
 def main(
     log_level: Optional[str], log_format: Optional[str], config_path: Optional[str], debug: bool,
     tui_v2: bool, backend: bool, raw_input: bool, minimal: bool,
-    input_lines: Optional[int], wheel_lines: Optional[int], caret_char: Optional[str]
+    input_lines: Optional[int], wheel_lines: Optional[int], caret_char: Optional[str],
+    network: bool
 ) -> None:
     """AgentsMCP - Revolutionary Multi-Agent Orchestration with Cost Intelligence."""
     spinner = _Spinner("Initializing AgentsMCP")
@@ -144,6 +342,22 @@ def main(
     # Fast path: launch v2 TUI directly when requested
     if tui_v2:
         import os as _os
+        # Ensure current working directory has rwx for the current user
+        try:
+            cwd = Path.cwd()
+            st = cwd.stat()
+            # Only attempt to fix if owned by current user
+            uid = os.geteuid() if hasattr(os, 'geteuid') else None
+            if uid is not None and st.st_uid == uid:
+                import stat as _stat
+                need_fix = (not os.access(cwd, os.R_OK) or not os.access(cwd, os.W_OK) or not os.access(cwd, os.X_OK))
+                if need_fix:
+                    mode = st.st_mode
+                    mode |= (_stat.S_IRUSR | _stat.S_IWUSR | _stat.S_IXUSR)
+                    os.chmod(cwd, mode)
+        except Exception:
+            # Non-fatal: continue even if we cannot adjust
+            pass
         # Base flags
         _os.environ["AGENTS_TUI_ENABLE_V2"] = "1"
         _os.environ["AGENTS_TUI_V2_NO_FALLBACK"] = "1"
@@ -169,6 +383,8 @@ def main(
             _os.environ["AGENTS_TUI_V2_WHEEL_LINES"] = str(wheel_lines)
         if caret_char:
             _os.environ["AGENTS_TUI_V2_CARET_CHAR"] = caret_char
+        # Network access toggle (default on)
+        _os.environ["AGENTS_NETWORK_ENABLED"] = "1" if network else "0"
 
         # Launch v2
         try:
@@ -190,7 +406,7 @@ def main(
 
 @main.group(name="init")
 def init_group():
-    """Getting started – discovery & first-time configuration."""
+    """Getting started - discovery & first-time configuration."""
     pass
 
 @init_group.command("setup")
@@ -886,7 +1102,7 @@ def setup_alias(ctx):
 @main.command("first-run", hidden=False)
 @click.pass_context
 def first_run_alias(ctx):
-    """Guided first‑run onboarding (alias to 'init onboarding')."""
+    """Guided first-run onboarding (alias to 'init onboarding')."""
     ctx.forward(init_onboarding)
 
 # =====================================================================
@@ -898,7 +1114,7 @@ def first_run_alias(ctx):
 @click.option("--after", help="Show suggestions after a specific command")
 @click.pass_context
 def suggest(ctx, all: bool, after: Optional[str]):
-    """💡 Get intelligent suggestions for what to do next."""
+    """Get intelligent suggestions for what to do next."""
     from agentsmcp.intelligent_suggestions import get_suggestion_system, display_suggestions
     
     suggestion_system = get_suggestion_system()
@@ -946,7 +1162,7 @@ def mcp_alias(ctx):
 @main.command("roles", hidden=True)
 @click.pass_context
 def roles_alias(ctx):
-    """[ALIAS] Role‑based orchestration commands."""
+    """[ALIAS] Role-based orchestration commands."""
     ctx.forward(server_roles)
 
 @main.command("tui", hidden=True)
@@ -1127,3 +1343,68 @@ def tui_v2_raw():
 
 if __name__ == "__main__":
     main()
+
+
+# --------------------------
+# Agents management commands
+# --------------------------
+@main.group("agents", cls=EnhancedAgentsMCPCLI)
+def agents_group():
+    """Manage human-oriented role agents (list and configure)."""
+
+
+@agents_group.command("list")
+def agents_list():
+    """List configured agents with provider/model."""
+    cfg = Config.load()
+    for name, ac in cfg.agents.items():
+        prov = getattr(ac.provider, "value", str(ac.provider))
+        click.echo(f"- {name}: provider={prov} model={ac.model}")
+
+
+@agents_group.command("set")
+@click.argument("agent_name")
+@click.option("--model", required=False, help="Set model for the agent")
+@click.option("--provider", required=False, type=click.Choice(["ollama-turbo"]))
+def agents_set(agent_name: str, model, provider):
+    """Set model and/or provider for an agent and persist to user config."""
+    cfg_path = Config.default_config_path()
+    cfg = Config.load()
+    if agent_name not in cfg.agents:
+        raise click.ClickException(f"Unknown agent: {agent_name}")
+    ac = cfg.agents[agent_name]
+    if model:
+        ac.model = model
+    if provider:
+        from agentsmcp.config import ProviderType
+        ac.provider = ProviderType(provider)
+    cfg.agents[agent_name] = ac
+    cfg.save_to_file(cfg_path)
+    click.echo(f"✅ Updated {agent_name}: provider={getattr(ac.provider,'value',ac.provider)} model={ac.model}")
+
+
+# --------------------------
+# Team orchestration commands
+# --------------------------
+@main.group("team", cls=EnhancedAgentsMCPCLI)
+def team_group():
+    """Run multiple role agents in parallel (team mode)."""
+
+
+@team_group.command("run")
+@click.argument("objective")
+@click.option("--roles", help="Comma-separated roles to run (default: built-in team)")
+@with_intelligent_suggestions
+def team_run(objective: str, roles: str | None = None):
+    """Run a team of agents against an objective."""
+    import asyncio
+    from agentsmcp.orchestration.team_runner import run_team, DEFAULT_TEAM
+    rlist = [r.strip() for r in (roles.split(',') if roles else DEFAULT_TEAM)]
+    results = asyncio.run(run_team(objective, rlist))
+    click.echo("
+🎯 Objective: " + objective)
+    for role, out in results.items():
+        click.echo(f"
+🧩 {role}:
+{out}
+")

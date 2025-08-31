@@ -97,13 +97,17 @@ class ChatInput:
         
         try:
             # Enable immediate character echo for real-time display
-            if self.input_handler and self.input_handler.is_available():
-                # Render via DisplayRenderer, do not echo to stdout
-                self.input_handler.set_echo(False)
+            if self.input_handler:
+                try:
+                    # Render via DisplayRenderer, do not echo to stdout
+                    self.input_handler.set_echo(False)
+                except Exception:
+                    pass
+                # Always set up handlers (works for both PTK and fallback raw modes)
                 self._setup_input_handlers()
                 logger.info("Chat input initialized with real-time character display")
             else:
-                logger.warning("Input handler not available, using fallback mode")
+                logger.warning("Input handler missing, using fallback mode")
                 self._setup_fallback_input()
             
             # Setup keyboard shortcuts

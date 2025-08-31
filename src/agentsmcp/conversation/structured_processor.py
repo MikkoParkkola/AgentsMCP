@@ -187,6 +187,11 @@ class StructuredProcessor:
             await self._emit_status(task_id, "Completing task", "Generating comprehensive summary")
             task.status = TaskStatus.COMPLETING
             task.summary = await self._generate_summary(task)
+            # STEP 8: Retrospective and continuous improvement logging
+            try:
+                await self._generate_retrospectives(task)  # type: ignore[attr-defined]
+            except Exception as _e:
+                logger.debug(f"Retrospective step skipped: {_e}")
             task.status = TaskStatus.COMPLETED
             task.end_time = datetime.now()
             
@@ -819,6 +824,74 @@ Keep it concise but comprehensive.
         except Exception as e:
             logger.warning(f"Summary generation failed: {e}")
             return self._create_fallback_summary(task)
+
+    async def _generate_retrospectives(self, task: StructuredTask) -> None:
+        """Collect and persist retrospectives for continuous improvement."""
+        try:
+            from pathlib import Path
+            import json
+            from datetime import datetime
+
+            ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+            out_dir = Path("build/retrospectives")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            log_path = out_dir / f"retro-{ts}.jsonl"
+            imp_path = out_dir / "improvements.md"
+
+            base_context = self._format_steps_for_summary(task.steps)
+            ind_prompt = (
+                "You are conducting a brief retrospective of your contribution."
+                " In 3 bullets: (1) What went well (2) What could be better"
+                " (3) One concrete experiment to try next time.\n\nContext:\n" + base_context
+            )
+            joint_prompt = (
+                "Team retrospective (all agents/LLMs). In 5 concise bullets:"
+                " Wins, Risks, Process improvements, Tech debt, Next experiments.\n\nContext:\n" + base_context
+            )
+
+            records = []
+            agents = [a for a in (task.parallel_agents or [])] or ["primary"]
+            for agent in agents:
+                txt = await self.llm_client.send_message(f"[RETRO:INDIVIDUAL:{agent}]\n" + ind_prompt)
+                records.append({"type": "individual", "who": str(agent), "text": txt})
+            joint = await self.llm_client.send_message("[RETRO:JOINT]\n" + joint_prompt)
+            records.append({"type": "joint", "who": "team", "text": joint})
+
+            with log_path.open("w", encoding="utf-8") as f:
+                for r in records:
+                    f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+            try:
+                with imp_path.open("a", encoding="utf-8") as f:
+                    f.write(f"\n\n## {ts} Improvements\n")
+                    for r in records:
+                        f.write(f"\n### {r['type'].title()} - {r['who']}\n{r['text'].strip()}\n")
+            except Exception:
+                pass
+
+            # Update human-reviewable, versioned docs for team and roles
+            try:
+                from ..roles.doc_manager import update_team_instructions, update_role_doc
+                from ..roles.registry import RoleRegistry
+                # Team-level
+                update_team_instructions(joint)
+                # Role-level (refresh latest with joint improvements)
+                for role_name, role_cls in RoleRegistry.ROLE_CLASSES.items():
+                    default_prompt = ""
+                    try:
+                        if hasattr(role_cls, "default_prompt"):
+                            default_prompt = role_cls.default_prompt()  # type: ignore[attr-defined]
+                    except Exception:
+                        pass
+                    try:
+                        responsibilities = list(role_cls.responsibilities())
+                    except Exception:
+                        responsibilities = []
+                    update_role_doc(role_name.value, default_prompt, responsibilities, improvements=joint)
+            except Exception as _e:
+                logger.debug(f"Doc manager update skipped: {_e}")
+        except Exception as e:
+            logger.warning(f"Retrospective generation failed: {e}")
     
     async def _format_response(self, task: StructuredTask) -> str:
         """Format the complete response showing all 7 steps."""

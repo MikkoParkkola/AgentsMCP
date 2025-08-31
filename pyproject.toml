@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agentsmcp = "agentsmcp.cli_minimal:main"
+agentsmcp = "agentsmcp.cli:main"
 
 [project.optional-dependencies]
 dev = [

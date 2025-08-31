@@ -190,32 +190,35 @@ class Config(BaseSettings):
     rag: RAGConfig = Field(default_factory=RAGConfig)
 
     # Optional per-provider credentials/base URLs
-    providers: Dict[str, ProviderConfig] = Field(default_factory=dict)
+    providers: Dict[str, ProviderConfig] = Field(
+        default_factory=lambda: {
+            ProviderType.OLLAMA_TURBO.value: ProviderConfig(
+                name=ProviderType.OLLAMA_TURBO,
+                api_base="https://ollama.com/",
+                api_key=os.getenv("OLLAMA_API_KEY"),
+            )
+        }
+    )
 
     agents: Dict[str, AgentConfig] = Field(
         default_factory=lambda: {
-            "codex": AgentConfig(
-                type="codex",
-                model="gpt-4",
-                system_prompt="You are a code generation and analysis expert.",
-                tools=["filesystem", "git", "bash"],
-            ),
-            "claude": AgentConfig(
-                type="claude",
-                model="claude-3-sonnet",
-                system_prompt=(
-                    "You are a helpful AI assistant with deep reasoning capabilities."
-                ),
-                tools=["filesystem", "web_search"],
-            ),
-            "ollama": AgentConfig(
-                type="ollama",
-                model="llama2",
-                system_prompt=(
-                    "You are a cost-effective AI assistant for general tasks."
-                ),
-                tools=["filesystem"],
-            ),
+            "business_analyst": AgentConfig(type="business_analyst", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a business analyst. Elicit requirements, define acceptance criteria, clarify scope, and translate needs into engineering-ready tasks.", tools=["filesystem"]),
+            "backend_engineer": AgentConfig(type="backend_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a backend engineer. Design and implement robust services, data models, persistence layers, and APIs with performance and security in mind.", tools=["filesystem", "git", "bash"]),
+            "web_frontend_engineer": AgentConfig(type="web_frontend_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a web frontend engineer. Build accessible, responsive, and maintainable UI components with great UX.", tools=["filesystem", "git"]),
+            "api_engineer": AgentConfig(type="api_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are an API engineer. Define contracts/ICDs, versioning, and error semantics; ensure clarity, stability, and testability.", tools=["filesystem", "git"]),
+            "tui_frontend_engineer": AgentConfig(type="tui_frontend_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a TUI frontend engineer. Design/implement terminal UIs with clean layout, great keyboard interaction, and broad terminal compatibility.", tools=["filesystem", "git"]),
+            "backend_qa_engineer": AgentConfig(type="backend_qa_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a backend QA engineer. Design and execute tests for services and data layers, covering contracts, errors, and load scenarios.", tools=["filesystem", "bash"]),
+            "web_frontend_qa_engineer": AgentConfig(type="web_frontend_qa_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a web frontend QA engineer. Validate accessibility, rendering, and interaction across browsers; prevent UX regressions.", tools=["filesystem"]),
+            "tui_frontend_qa_engineer": AgentConfig(type="tui_frontend_qa_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a TUI frontend QA engineer. Test TUI across terminals, inputs, and edge cases; ensure reliable behavior.", tools=["filesystem"]),
+            "chief_qa_engineer": AgentConfig(type="chief_qa_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a chief QA engineer. Define QA strategy, quality gates, and approve releases; drive continuous quality improvements.", tools=["filesystem"]),
+            "it_lawyer": AgentConfig(type="it_lawyer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are an IT lawyer. Advise on licensing, privacy/GDPR, and compliance; flag legal risks and propose mitigations.", tools=["filesystem"]),
+            "marketing_manager": AgentConfig(type="marketing_manager", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a marketing manager. Craft positioning, messaging, and content/SEO plans aligned to audience and product goals.", tools=["filesystem"]),
+            "ci_cd_engineer": AgentConfig(type="ci_cd_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a CI/CD engineer. Design reliable build/test/deploy pipelines and safe release flows.", tools=["filesystem", "bash", "git"]),
+            "dev_tooling_engineer": AgentConfig(type="dev_tooling_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a developer tooling engineer. Improve developer experience with effective tooling and automation.", tools=["filesystem", "bash", "git"]),
+            "data_analyst": AgentConfig(type="data_analyst", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a data analyst. Perform exploratory analysis, build metrics and dashboards, and communicate insights.", tools=["filesystem"]),
+            "data_scientist": AgentConfig(type="data_scientist", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a data scientist. Design experiments and models to answer questions and validate hypotheses.", tools=["filesystem", "bash"]),
+            "ml_scientist": AgentConfig(type="ml_scientist", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a machine learning scientist. Explore and evaluate novel ML approaches and research directions.", tools=["filesystem", "bash"]),
+            "ml_engineer": AgentConfig(type="ml_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a machine learning engineer. Build reliable training, data, and inference systems for ML models.", tools=["filesystem", "bash"]),
         }
     )
 
@@ -359,13 +362,30 @@ class Config(BaseSettings):
         explicit = path or (Path(os.getenv("AGENTSMCP_CONFIG")) if os.getenv("AGENTSMCP_CONFIG") else None)
         cfg_path = explicit or (home_cfg if home_cfg.exists() else None)
         if cfg_path and Path(cfg_path).exists():
-            return cls.from_file(Path(cfg_path))
+            cfg = cls.from_file(Path(cfg_path))
+            try:
+                cfg._ensure_human_role_agents()
+                cfg.save_to_file(Path(cfg_path))
+            except Exception:
+                pass
+            return cfg
         # Fallback: legacy cwd file if present
         legacy = Path("agentsmcp.yaml")
         if legacy.exists():
-            return cls.from_file(legacy)
+            cfg = cls.from_file(legacy)
+            try:
+                cfg._ensure_human_role_agents()
+                cfg.save_to_file(legacy)
+            except Exception:
+                pass
+            return cfg
         # Merge env overrides onto defaults
-        return cls.from_env()
+        cfg = cls.from_env()
+        try:
+            cfg._ensure_human_role_agents()
+        except Exception:
+            pass
+        return cfg
 
     def save_to_file(self, path: Path):
         """Save configuration to a YAML file."""
@@ -396,3 +416,31 @@ class Config(BaseSettings):
         from .paths import default_user_config_path
         return default_user_config_path()
 
+
+    def _ensure_human_role_agents(self) -> None:
+        roles = [
+            "business_analyst","backend_engineer","web_frontend_engineer","api_engineer","tui_frontend_engineer",
+            "backend_qa_engineer","web_frontend_qa_engineer","tui_frontend_qa_engineer","chief_qa_engineer",
+            "it_lawyer","marketing_manager","ci_cd_engineer","dev_tooling_engineer",
+            "data_analyst","data_scientist","ml_scientist","ml_engineer",
+        ]
+        self.providers.setdefault(
+            ProviderType.OLLAMA_TURBO.value,
+            ProviderConfig(name=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", api_key=os.getenv("OLLAMA_API_KEY")),
+        )
+        for legacy in ["codex","claude","ollama"]:
+            if legacy in self.agents:
+                try:
+                    del self.agents[legacy]
+                except Exception:
+                    pass
+        for r in roles:
+            ac = self.agents.get(r)
+            if not ac:
+                self.agents[r] = AgentConfig(
+                    type=r, model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/",
+                )
+            else:
+                ac.provider = ProviderType.OLLAMA_TURBO
+                ac.model = ac.model or "gpt-oss:120b"
+                ac.api_base = "https://ollama.com/"

@@ -16,7 +16,7 @@ Architecture:
 """
 
 # Core API components
-from .nlp_processor import NaturalLanguageProcessor
+from .nlp_processor import NLPProcessor
 from .intent_recognition_service import IntentRecognitionService
 from .command_translation_engine import CommandTranslationEngine
 from .symphony_orchestration_api import SymphonyOrchestrationAPI
@@ -32,7 +32,7 @@ from .performance import PerformanceMonitoring
 
 __all__ = [
     # Core API Services
-    "NaturalLanguageProcessor",
+    "NLPProcessor",
     "IntentRecognitionService", 
     "CommandTranslationEngine",
     "SymphonyOrchestrationAPI",

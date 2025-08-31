@@ -541,6 +541,14 @@ class ModernTUI:
         import io
         from contextlib import redirect_stdout, redirect_stderr
         
+        # Enable bracketed paste mode so supported terminals emit single paste events
+        try:
+            import sys as _sys
+            _sys.stdout.write('\x1b[?2004h')
+            _sys.stdout.flush()
+        except Exception:
+            pass
+
         with Live(
             self._render(), 
             console=self._console, 
@@ -640,6 +648,13 @@ class ModernTUI:
                         self.realtime_input.stop_cursor_blink()
                 except Exception:
                     pass
+        # Disable bracketed paste mode on exit of Live
+        try:
+            import sys as _sys
+            _sys.stdout.write('\x1b[?2004l')
+            _sys.stdout.flush()
+        except Exception:
+            pass
                 
                 # Stop SSE listener
                 await self._stop_sse_listener()
@@ -2335,6 +2350,20 @@ class ModernTUI:
                                     break
                                 k = kp.key
                                 key_str = None
+                                # Handle bracketed paste as a single input chunk
+                                if k == Keys.BracketedPaste:
+                                    data = getattr(kp, 'data', '') or ''
+                                    if data and self.realtime_input is not None:
+                                        try:
+                                            # Normalize line endings and append to current input
+                                            data = data.replace('\r\n','\n').replace('\r','\n')
+                                            current = self.realtime_input.get_current_input()
+                                            self.realtime_input.set_input(current + data)
+                                            # Force immediate input repaint; do not submit
+                                            self._force_immediate_footer_refresh()
+                                        except Exception:
+                                            pass
+                                    continue
                                 if k == Keys.Up:
                                     key_str = "up"
                                 elif k == Keys.Down:

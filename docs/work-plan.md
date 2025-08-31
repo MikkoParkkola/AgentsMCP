@@ -4,6 +4,8 @@ Last updated: 2025-08-23
 
 This document captures the prioritized, delegable plan to get the system ready fast without refactors. Each task includes specs and acceptance criteria for straightforward delegation and verification.
 
+Canonical backlog: `docs/backlog.md` (authoritative). Treat this file as overview only; when priorities change, update `backlog.md` and link from here.
+
 Note: The high-level tasks below are decomposed into sub-500 LOC backlog items in `docs/backlog.md` for parallel execution. See references like B1–B6, C1–C4, etc.
 
 ## 1) Provider Model Discovery (OpenAI, OpenRouter, Ollama)

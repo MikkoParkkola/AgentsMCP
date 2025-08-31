@@ -103,7 +103,8 @@ def handle_tui_command(args: List[str]) -> int:
     # Ensure v2 sane defaults when invoking TUI via wrapper
     try:
         os.environ.setdefault("AGENTS_TUI_ENABLE_V2", "1")
-        os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "1")
+        # Run full v2 UI by default; minimal raw mode can be enabled explicitly if needed
+        os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "0")
         os.environ.setdefault("AGENTS_TUI_V2_BACKEND", "1")
         os.environ.setdefault("AGENTS_TUI_V2_BACKEND_PREWARM", "1")
         os.environ.setdefault("AGENTS_TUI_SUPPRESS_TIPS", "1")
@@ -113,6 +114,7 @@ def handle_tui_command(args: List[str]) -> int:
     # Check for help first — delegate to Click for consistent formatting
     if "--help" in args or "-h" in args:
         try:
+            os.environ.setdefault("COLUMNS", "100")
             from agentsmcp.cli import main as cli_main
             cli_main()
             return 0
@@ -361,6 +363,8 @@ def main():
     # Handle no arguments - delegate to Click help for robust formatting
     if not args:
         try:
+            # Normalize terminal width for consistent wrapping in various terminals
+            os.environ.setdefault("COLUMNS", "100")
             from agentsmcp.cli import main as cli_main
             cli_main()
             return 0
@@ -379,6 +383,7 @@ def main():
     # Handle help requests anywhere on the command line: delegate to Click
     if any(a in ("--help", "-h") for a in args):
         try:
+            os.environ.setdefault("COLUMNS", "100")
             from agentsmcp.cli import main as cli_main
             cli_main()
             return 0

@@ -917,8 +917,21 @@ Start typing to begin..."""
         await self.chat_history.add_message(complete_check, MessageRole.ERROR)
     
     async def _update_status(self, message: str):
-        """Update status message."""
+        """Update status message and paint status bar."""
         self.status_message = message
+
+        # Try to paint a single-line status bar with simple, helpful affordances
+        try:
+            if self.display_renderer:
+                caps = self.display_renderer.terminal_manager.detect_capabilities()
+                width = caps.width
+                content = f"{message}  |  /help  |  /quit"
+                if len(content) < width:
+                    content = content + (" " * (width - len(content)))
+                self.display_renderer.define_region("status_bar", 0, max(0, caps.height - 1), width, 1)
+                self.display_renderer.update_region("status_bar", content[:width], force=True)
+        except Exception:
+            pass
         
         # Emit status update event
         event = Event(

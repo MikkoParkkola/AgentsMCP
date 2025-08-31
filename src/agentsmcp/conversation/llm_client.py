@@ -1,5 +1,22 @@
 """
-LLM Client for conversational interface.
+LLM Client for conversatio,
+            {
+                "type": "function",
+                "function": {
+                    "name": "github_create_pull_request",
+                    "description": "Create a GitHub pull request using the GitHub CLI if available",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string", "description": "PR title"},
+                            "body": {"type": "string", "description": "PR body", "default": "Automated PR"},
+                            "base": {"type": "string", "description": "Base branch", "default": "main"},
+                            "head": {"type": "string", "description": "Head branch", "default": "auto/agentsmcp"}
+                        },
+                        "required": ["title"]
+                    }
+                }
+            }nal interface.
 Handles communication with configured LLM models using real MCP clients.
 """
 
@@ -17,13 +34,48 @@ from ..tools.base_tools import tool_registry
 from ..tools import file_tools
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
-# Ensure we have a handler for debugging
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-    logger.addHandler(handler)
+# Configure logger based on environment - prevent console spam in TUI mode
+def _configure_logger():
+    """Configure logger to prevent console contamination in TUI mode."""
+    import os
+    import tempfile
+    
+    # Check if we're in TUI mode (set by TUI when it imports this)
+    is_tui_mode = os.environ.get('AGENTSMCP_TUI_MODE', '0') == '1'
+    
+    if is_tui_mode:
+        # TUI mode: Log only to file, no console output
+        logger.setLevel(logging.DEBUG)  # Allow debug logs to file
+        
+        # Remove any existing console handlers
+        for handler in logger.handlers[:]:
+            if isinstance(handler, logging.StreamHandler):
+                logger.removeHandler(handler)
+        
+        # Add file handler only
+        try:
+            log_file = os.path.join(tempfile.gettempdir(), 'agentsmcp_llm_debug.log')
+            file_handler = logging.FileHandler(log_file)
+            file_handler.setLevel(logging.DEBUG)
+            formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+        except Exception:
+            # Fallback: silence the logger entirely if file logging fails
+            logger.setLevel(logging.CRITICAL)
+    else:
+        # CLI mode: Standard logging setup
+        logger.setLevel(logging.DEBUG)
+        
+        # Ensure we have a handler for debugging
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+            logger.addHandler(handler)
+
+# Configure the logger immediately
+_configure_logger()
 
 @dataclass
 class ModelCapabilities:
@@ -80,7 +132,9 @@ class LLMClient:
             "max_tokens": 4096,  # Higher default for better responses
             "context_window": 128000,  # 128k tokens for gpt-oss models
             # Provider-specific keys map
-            "api_keys": {}
+            "api_keys": {},
+            # Allow/deny providers. By default, only ollama-turbo is enabled as requested.
+            "providers_enabled": ["ollama-turbo"]
         }
         
         # Adjust defaults based on provider to optimize for context windows
@@ -162,6 +216,22 @@ class LLMClient:
             {
                 "type": "function",
                 "function": {
+                    "name": "write_file",
+                    "description": "Write content to a file (creates directories if needed)",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "file_path": {"type": "string", "description": "Path to the file to write"},
+                            "content": {"type": "string", "description": "Content to write"},
+                            "encoding": {"type": "string", "description": "File encoding", "default": "utf-8"}
+                        },
+                        "required": ["file_path", "content"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "list_directory",
                     "description": "List the contents of a directory",
                     "parameters": {
@@ -214,6 +284,52 @@ class LLMClient:
                         "required": ["path"]
                     }
                 }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "run_shell",
+                    "description": "Run a shell command inside the current project directory",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command": {"type": "string", "description": "The shell command to execute"},
+                            "timeout": {"type": "integer", "description": "Max seconds before termination", "default": 60}
+                        },
+                        "required": ["command"]
+                    }
+                }
+            }
+            ,
+            {
+                "type": "function",
+                "function": {
+                    "name": "list_staged_changes",
+                    "description": "List files staged for approval (write operations pending review)",
+                    "parameters": {"type": "object", "properties": {}, "required": []}
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "approve_changes",
+                    "description": "Apply all staged changes to the working tree and create a git commit",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "commit_message": {"type": "string", "description": "Commit message to use", "default": "chore: apply reviewed changes"}
+                        },
+                        "required": []
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "discard_staged_changes",
+                    "description": "Discard all staged (pending) changes without applying",
+                    "parameters": {"type": "object", "properties": {}, "required": []}
+                }
             }
         ]
         
@@ -236,6 +352,15 @@ class LLMClient:
                         supplemental.append(f"# {name}\n\n{txt}")
                     except Exception:
                         pass
+            # Include continuous improvement notes if present
+            try:
+                imp_path = Path("build/retrospectives/improvements.md")
+                if imp_path.exists():
+                    txt = imp_path.read_text(encoding="utf-8")
+                    # Take last ~4000 chars to keep prompt bounded
+                    supplemental.append("# Continuous Improvement Notes\n\n" + txt[-4000:])
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -289,7 +414,26 @@ CONVERSATION STYLE:
 - Be concise for simple queries
 - Provide context and progress updates for complex tasks
 
-Remember: You're primarily an LLM client that smartly delegates complex tasks to specialized agents while handling regular chat naturally."""
+Remember: You're primarily an LLM client that smartly delegates complex tasks to specialized agents while handling regular chat naturally.
+
+# AGENT CATALOG (Authoritative)
+
+You MUST consider the configured human-oriented roles as the only available agents. Each role has a configured provider and model. The current environment is constrained to a single provider and model for all roles:
+
+- Provider: ollama-turbo (OpenAI-compatible API), Base URL: https://ollama.com/
+- Model: gpt-oss:120b
+- API key source: env OLLAMA_API_KEY (already configured by the host)
+
+Human-oriented roles (examples): business_analyst, backend_engineer, web_frontend_engineer, api_engineer, tui_frontend_engineer, backend_qa_engineer, web_frontend_qa_engineer, tui_frontend_qa_engineer, chief_qa_engineer, it_lawyer, marketing_manager, ci_cd_engineer, dev_tooling_engineer, data_analyst, data_scientist, ml_scientist, ml_engineer.
+
+When the user asks for "configured agents", list these human roles and explicitly state provider=ollama-turbo and model=gpt-oss:120b for each. Do NOT mention codex/claude/openrouter or any other providers/models.
+
+# TOOLS POLICY (Authoritative)
+
+- Agents have access to filesystem and shell via the orchestrator. Treat these tools as available to agents within a sandboxed project directory. When a role needs to read/write files or run commands, you can invoke those tools (the runtime will execute safely) and feed results back into the role.
+- The orchestrator can adjust each agent's toolset for efficiency (e.g., enabling/disabling shell/filesystem per role or per task). Assume filesystem and run_shell are available by default, and request additional tools only when beneficial.
+- Only use the configured provider(s). Providers not explicitly enabled (e.g., codex/claude/openrouter) are NOT available and must not be referenced.
+"""
         if supplemental:
             base_text += "\n\n# PROJECT INSTRUCTIONS\n\n" + "\n\n".join(supplemental)
         if orchestration_working:
@@ -715,6 +859,24 @@ Remember: Be truthful about the system's current state rather than creating fals
             logger.info(f"Calling LLM with provider: {self.provider}, model: {self.model}")
             primary = (self.provider or "ollama-turbo").lower()
             candidates = [primary, "openai", "openrouter", "anthropic", "ollama", "codex"]
+
+            # Apply provider allowlist from config or env (comma-separated)
+            enabled = []
+            try:
+                cfg_enabled = self.config.get("providers_enabled")
+                if isinstance(cfg_enabled, list) and cfg_enabled:
+                    enabled = [str(p).lower() for p in cfg_enabled]
+            except Exception:
+                enabled = []
+            env_enabled = os.getenv("AGENTS_PROVIDERS_ENABLED", "")
+            if env_enabled.strip():
+                enabled = [p.strip().lower() for p in env_enabled.split(',') if p.strip()]
+            if enabled:
+                candidates = [c for c in candidates if c in enabled]
+                if primary not in candidates:
+                    # If current provider isn't enabled, switch to first enabled
+                    if enabled:
+                        candidates = [enabled[0]] + [c for c in candidates if c != enabled[0]]
             tried = set()
 
             def has_key(p: str) -> bool:
@@ -767,9 +929,18 @@ Remember: Be truthful about the system's current state rather than creating fals
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return None
     
+    def _network_enabled(self) -> bool:
+        try:
+            return os.getenv("AGENTS_NETWORK_ENABLED", "1") == "1"
+        except Exception:
+            return True
+
     async def _call_ollama_turbo(self, messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
         """Call Ollama with priority: 1) ollama.com API, 2) local proxy, 3) MCP."""
         try:
+            if not self._network_enabled():
+                logger.info("Network disabled by AGENTS_NETWORK_ENABLED=0")
+                return None
             logger.info("Starting ollama-turbo call chain")
             import httpx
             
@@ -1016,6 +1187,8 @@ Remember: Be truthful about the system's current state rather than creating fals
     async def _call_openai(self, messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
         """Call OpenAI via standard API (fallback if no MCP client)."""
         try:
+            if not self._network_enabled():
+                return None
             import openai
             
             # Use OpenAI API key from environment or config
@@ -1071,6 +1244,8 @@ Remember: Be truthful about the system's current state rather than creating fals
     async def _call_openrouter(self, messages: List[Dict[str, str]], enable_tools: bool = True) -> Optional[Dict[str, Any]]:
         """Call OpenRouter chat completions API (OpenAI-compatible schema)."""
         try:
+            if not self._network_enabled():
+                return None
             import httpx
             api_key = self._get_api_key("openrouter")
             if not api_key:
@@ -1109,6 +1284,8 @@ Remember: Be truthful about the system's current state rather than creating fals
         input_schema. This implementation maps our OpenAI-style tools when present.
         """
         try:
+            if not self._network_enabled():
+                return None
             import httpx
             api_key = self._get_api_key("anthropic")
             if not api_key:
@@ -1353,19 +1530,22 @@ Remember: Be truthful about the system's current state rather than creating fals
         from pathlib import Path
         
         try:
+            # Helper: ensure paths are within the launch directory (project root)
+            def _within_root(p: Path) -> Path:
+                root = Path.cwd().resolve()
+                candidate = (p if p.is_absolute() else (root / p)).resolve()
+                if str(candidate) == str(root) or str(candidate).startswith(str(root) + os.sep):
+                    return candidate
+                raise PermissionError(f"Path outside project root: {p}")
+
             if tool_name == "read_file":
                 file_path = parameters.get("file_path", "")
                 try:
-                    path = Path(file_path)
-                    if not path.is_absolute():
-                        path = Path.cwd() / path
-                    
+                    path = _within_root(Path(file_path))
                     if not path.exists():
                         return f"Error: File '{file_path}' does not exist."
-                    
                     if path.is_dir():
                         return f"Error: '{file_path}' is a directory, not a file."
-                    
                     content = path.read_text(encoding='utf-8')
                     return f"Contents of {file_path}:\n\n{content}"
                 except Exception as e:
@@ -1374,16 +1554,11 @@ Remember: Be truthful about the system's current state rather than creating fals
             elif tool_name == "list_directory":
                 dir_path = parameters.get("path", ".")
                 try:
-                    path = Path(dir_path)
-                    if not path.is_absolute():
-                        path = Path.cwd() / path
-                    
+                    path = _within_root(Path(dir_path))
                     if not path.exists():
                         return f"Error: Directory '{dir_path}' does not exist."
-                    
                     if not path.is_dir():
                         return f"Error: '{dir_path}' is not a directory."
-                    
                     items = []
                     for item in sorted(path.iterdir()):
                         if item.is_dir():
@@ -1391,7 +1566,6 @@ Remember: Be truthful about the system's current state rather than creating fals
                         else:
                             size = item.stat().st_size
                             items.append(f"{item.name} ({size} bytes)")
-                    
                     return f"Contents of {dir_path}:\n" + "\n".join(items)
                 except Exception as e:
                     return f"Error listing directory '{dir_path}': {str(e)}"
@@ -1400,14 +1574,10 @@ Remember: Be truthful about the system's current state rather than creating fals
                 pattern = parameters.get("pattern", "")
                 search_path = parameters.get("path", ".")
                 try:
-                    base_path = Path(search_path)
-                    if not base_path.is_absolute():
-                        base_path = Path.cwd() / base_path
-                    
+                    base_path = _within_root(Path(search_path))
                     matches = list(base_path.rglob(pattern))
                     if not matches:
                         return f"No files found matching pattern '{pattern}' in '{search_path}'"
-                    
                     results = []
                     for match in sorted(matches)[:20]:  # Limit to first 20 results
                         rel_path = match.relative_to(base_path)
@@ -1416,7 +1586,6 @@ Remember: Be truthful about the system's current state rather than creating fals
                         else:
                             size = match.stat().st_size
                             results.append(f"{rel_path} ({size} bytes)")
-                    
                     return f"Files matching '{pattern}' in '{search_path}':\n" + "\n".join(results)
                 except Exception as e:
                     return f"Error searching for '{pattern}': {str(e)}"
@@ -1424,13 +1593,9 @@ Remember: Be truthful about the system's current state rather than creating fals
             elif tool_name == "get_file_info":
                 file_path = parameters.get("path", "")
                 try:
-                    path = Path(file_path)
-                    if not path.is_absolute():
-                        path = Path.cwd() / path
-                    
+                    path = _within_root(Path(file_path))
                     if not path.exists():
                         return f"Error: Path '{file_path}' does not exist."
-                    
                     stat = path.stat()
                     info = [
                         f"Path: {path}",
@@ -1438,7 +1603,6 @@ Remember: Be truthful about the system's current state rather than creating fals
                         f"Size: {stat.st_size} bytes",
                         f"Modified: {stat.st_mtime}",
                     ]
-                    
                     if path.is_file():
                         try:
                             with open(path, 'r', encoding='utf-8') as f:
@@ -1446,13 +1610,146 @@ Remember: Be truthful about the system's current state rather than creating fals
                             info.append(f"Lines: {lines}")
                         except:
                             pass
-                    
                     return "\n".join(info)
                 except Exception as e:
                     return f"Error getting info for '{file_path}': {str(e)}"
+            elif tool_name == "write_file":
+                file_path = parameters.get("file_path", "")
+                content = parameters.get("content", "")
+                encoding = parameters.get("encoding", "utf-8")
+                try:
+                    # Stage changes for review instead of writing directly
+                    root = Path.cwd().resolve()
+                    staged_root = root / "build" / "staging"
+                    target = _within_root(Path(file_path))
+                    stage_target = staged_root / target.relative_to(root)
+                    stage_target.parent.mkdir(parents=True, exist_ok=True)
+                    stage_target.write_text(content, encoding=encoding)
+                    return f"STAGED: {len(content)} bytes -> {stage_target} (pending approval)"
+                except Exception as e:
+                    return f"Error staging file '{file_path}': {str(e)}"
+            
+            elif tool_name == "run_shell":
+                cmd = parameters.get("command", "")
+                timeout = int(parameters.get("timeout", 60))
+                try:
+                    import subprocess
+                    proc = subprocess.run(
+                        cmd,
+                        cwd=str(Path.cwd()),
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=max(1, timeout)
+                    )
+                    return (
+                        f"exit_code={proc.returncode}\n"
+                        f"stdout:\n{proc.stdout}\n"
+                        f"stderr:\n{proc.stderr}"
+                    )
+                except subprocess.TimeoutExpired:
+                    return f"exit_code=124\nstdout:\n\nstderr:\nTimeout after {timeout}s running: {cmd}"
+                except Exception as e:
+                    return f"exit_code=1\nstdout:\n\nstderr:\n{str(e)}"
+            elif tool_name == "list_staged_changes":
+                try:
+                    root = Path.cwd().resolve()
+                    staged_root = root / "build" / "staging"
+                    if not staged_root.exists():
+                        return "No staged changes."
+                    items = []
+                    for p in staged_root.rglob('*'):
+                        if p.is_file():
+                            items.append(str(p.relative_to(staged_root)))
+                    return "Staged files:\n" + ("\n".join(items) if items else "(none)")
+                except Exception as e:
+                    return f"Error listing staged changes: {e}"
+            elif tool_name == "approve_changes":
+                try:
+                    root = Path.cwd().resolve()
+                    staged_root = root / "build" / "staging"
+                    if not staged_root.exists():
+                        return "No staged changes to approve."
+                    # Apply staged files into working tree
+                    applied = []
+                    for p in staged_root.rglob('*'):
+                        if p.is_file():
+                            rel = p.relative_to(staged_root)
+                            dest = root / rel
+                            dest.parent.mkdir(parents=True, exist_ok=True)
+                            dest.write_text(p.read_text(encoding='utf-8'), encoding='utf-8')
+                            applied.append(str(rel))
+                    # Optional: git add + commit
+                    commit_message = parameters.get('commit_message', 'chore: apply reviewed changes')
+                    try:
+                        import subprocess
+                        subprocess.run('git add .', shell=True, cwd=str(root))
+                        subprocess.run(f'git commit -m "{commit_message}"', shell=True, cwd=str(root))
+                    except Exception:
+                        pass
+                    # Clear staging
+                    for p in sorted(staged_root.rglob('*'), reverse=True):
+                        try:
+                            p.unlink() if p.is_file() else p.rmdir()
+                        except Exception:
+                            pass
+                    return "Approved and applied:\n" + ("\n".join(applied) if applied else "(none)")
+                except Exception as e:
+                    return f"Error approving changes: {e}"
+            elif tool_name == "discard_staged_changes":
+                try:
+                    root = Path.cwd().resolve()
+                    staged_root = root / "build" / "staging"
+                    if not staged_root.exists():
+                        return "No staged changes."
+                    for p in sorted(staged_root.rglob('*'), reverse=True):
+                        try:
+                            p.unlink() if p.is_file() else p.rmdir()
+                        except Exception:
+                            pass
+                    return "Discarded all staged changes."
+                except Exception as e:
+                    return f"Error discarding staged changes: {e}"
+            elif tool_name == "git_status":
+                try:
+                    import subprocess
+                    proc = subprocess.run(
+                        ['git','status','--porcelain=v1'], cwd=str(Path.cwd()), capture_output=True, text=True
+                    )
+                    return proc.stdout or "(clean)"
+                except Exception as e:
+                    return f"git_status error: {e}"
+            elif tool_name == "git_diff":
+                try:
+                    import subprocess
+                    path = parameters.get('path')
+                    args = ['git','diff'] + ([path] if path else [])
+                    proc = subprocess.run(args, cwd=str(Path.cwd()), capture_output=True, text=True)
+                    return proc.stdout or "(no diff)"
+                except Exception as e:
+                    return f"git_diff error: {e}"
+            elif tool_name == "github_create_pull_request":
+                try:
+                    import subprocess
+                    title = parameters.get('title')
+                    body = parameters.get('body', 'Automated PR')
+                    base = parameters.get('base', 'main')
+                    head = parameters.get('head', 'auto/agentsmcp')
+                    subprocess.run(['git','checkout','-B',head], cwd=str(Path.cwd()))
+                    subprocess.run(['git','push','-u','origin',head], cwd=str(Path.cwd()))
+                    proc = subprocess.run(['gh','pr','create','--title',title,'--body',body,'--base',base,'--head',head], cwd=str(Path.cwd()), capture_output=True, text=True)
+                    if proc.returncode == 0:
+                        return proc.stdout.strip() or 'Pull request created.'
+                    return f"gh pr create failed: {proc.stderr.strip()}"
+                except Exception as e:
+                    return f"github_create_pull_request error: {e}"
             
             else:
-                return f"Unknown tool: {tool_name}"
+                # Fallback: try registry tools if available
+                try:
+                    return await self._execute_tool(tool_name, parameters)
+                except Exception:
+                    return f"Unknown tool: {tool_name}"
                 
         except Exception as e:
             return f"Tool execution error: {str(e)}"

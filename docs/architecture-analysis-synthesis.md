@@ -1,4 +1,8 @@
-# AgentsMCP Architecture Review and Synthesis (2025-08-26)
+# AgentsMCP Architecture Review and Synthesis (Archived)
+
+Reference only. For current architecture priorities, see `docs/backlog.md`, `docs/work-plan.md`, and `docs/decision-log.md`.
+
+---
 
 This document synthesizes a fresh architectural/code analysis of AgentsMCP with prior inputs from Claude’s reports (notably docs/RECENT_CHANGES_ANALYSIS.md and PERFORMANCE_ANALYSIS_REPORT.md). It consolidates practical, production-focused recommendations with concrete next steps.
 

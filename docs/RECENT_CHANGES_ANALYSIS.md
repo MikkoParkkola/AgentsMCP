@@ -1,4 +1,9 @@
-# AgentsMCP Recent Changes Analysis & Improvement Roadmap
+# AgentsMCP Recent Changes Analysis & Improvement Roadmap (Archived)
+
+Superseded by `docs/changelog.md`. Use the changelog as the single source of truth for what has changed.
+
+---
+
 
 *Generated: 2025-08-26*
 

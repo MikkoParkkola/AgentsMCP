@@ -30,7 +30,7 @@ from .coder import CoderRole
 from .qa import QARole
 from .merge_bot import MergeBotRole
 from .docs import DocsRole
-from .process_coach import ProcessCoachRole
+from .agile_coach import AgileCoachRole
 from .metrics import MetricsCollectorRole
 
 
@@ -41,7 +41,7 @@ ROLE_REGISTRY: Dict[RoleName, Type[BaseRole]] = {
     RoleName.QA: QARole,
     RoleName.MERGE_BOT: MergeBotRole,
     RoleName.DOCS: DocsRole,
-    RoleName.PROCESS_COACH: ProcessCoachRole,
+    RoleName.PROCESS_COACH: AgileCoachRole,
     RoleName.METRICS_COLLECTOR: MetricsCollectorRole,
 }
 

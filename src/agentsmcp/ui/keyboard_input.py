@@ -1,13 +1,13 @@
-"""
+'''\
 Cross-platform keyboard input handler for terminal applications.
 
 Provides unified keyboard input handling across Windows, macOS, and Linux
 with support for arrow keys, escape sequences, and special keys.
-"""
+'''\
 
 import sys
 import os
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 from enum import Enum
 
 class InputMode(Enum):
@@ -33,6 +33,16 @@ class KeyCode(Enum):
     PAGE_UP = "page_up"
     PAGE_DOWN = "page_down"
 
+# ---------------------------------------------------------------------------
+# New enum for mouse events – added to support scrolling and clicks
+# ---------------------------------------------------------------------------
+class MouseEvent(Enum):
+    """Simple mouse event abstraction used by the TUI"""
+    SCROLL_UP = "scroll_up"
+    SCROLL_DOWN = "scroll_down"
+    CLICK_LEFT = "click_left"
+    CLICK_RIGHT = "click_right"
+    MOVE = "move"
 
 class KeyboardInput:
     """Cross-platform keyboard input handler"""
@@ -42,6 +52,9 @@ class KeyboardInput:
         self.is_unix = not self.is_windows
         self.is_interactive = self._detect_interactive_capability()
         self.hybrid_mode = False  # Enable enhanced line-based mode
+        self._fd = None                # Cached file descriptor for /dev/tty or stdin
+        self._orig_settings = None     # Original termios settings (Unix only)
+        self._buffer: List[str] = []   # Simple line buffer for backspace handling
         
         # Platform-specific modules
         if self.is_windows:
@@ -60,6 +73,77 @@ class KeyboardInput:
                 self.select = select
             except ImportError:
                 raise RuntimeError("termios/tty not available on this Unix system")
+            # ---------------------------------------------------------
+            # Cache terminal descriptor once during construction – this avoids
+            # opening /dev/tty on every key press and reduces system‑call
+            # overhead.
+            # ---------------------------------------------------------
+            self._initialize_unix_fd()
+            # Enable mouse reporting (SGR mode) for scrolling support
+            if self._fd is not None:
+                try:
+                    os.write(self._fd, b'\x1b[?1000h\x1b[?1006h')  # Enable mouse tracking and SGR encoding
+                except Exception:
+                    pass
+    
+    # -------------------------------------------------------------------
+    # Unix helper: open /dev/tty (or fall back to stdin) and store the fd
+    # -------------------------------------------------------------------
+    def _initialize_unix_fd(self):
+        """Open the appropriate input stream and cache its file descriptor.
+        The descriptor is kept open for the lifetime of the KeyboardInput
+        instance and will be closed when ``close()`` is called or the object is
+        garbage‑collected.
+        """
+        try:
+            if os.path.exists('/dev/tty'):
+                # Open in binary mode to get raw bytes without any decoding
+                self._fd_file = open('/dev/tty', 'rb', buffering=0)
+                self._fd = self._fd_file.fileno()
+            else:
+                raise FileNotFoundError
+        except Exception:
+            # Fallback to stdin – this works in many CI environments
+            try:
+                self._fd = sys.stdin.fileno()
+                self._fd_file = sys.stdin.buffer
+            except Exception:
+                self._fd = None
+                self._fd_file = None
+                return
+        # Store original terminal attributes so we can restore them later
+        try:
+            self._orig_settings = self.termios.tcgetattr(self._fd)
+        except Exception:
+            self._orig_settings = None
+    
+    def close(self):
+        """Restore terminal settings and close any opened file descriptors.
+        Users should call this when the TUI is shutting down to avoid leaving the
+        terminal in raw mode.
+        """
+        if self.is_unix and self._fd is not None and self._orig_settings is not None:
+            try:
+                self.termios.tcsetattr(self._fd, self.termios.TCSADRAIN, self._orig_settings)
+            except Exception:
+                pass
+        # Disable mouse reporting if it was enabled
+        if self.is_unix and self._fd is not None:
+            try:
+                os.write(self._fd, b'\x1b[?1000l\x1b[?1006l')
+            except Exception:
+                pass
+        if hasattr(self, "_fd_file") and self._fd_file not in (sys.stdin, sys.stdout, sys.stderr):
+            try:
+                self._fd_file.close()
+            except Exception:
+                pass
+        self._fd = None
+        self._orig_settings = None
+    
+    def __del__(self):
+        # Ensure resources are cleaned up even if the caller forgets ``close``
+        self.close()
     
     def _detect_interactive_capability(self) -> bool:
         """
@@ -120,7 +204,7 @@ class KeyboardInput:
         
         return False
     
-    def get_key(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str], InputMode]:
+    def get_key(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str], InputMode, Optional[MouseEvent]]:
         """
         Get a single keypress from the terminal.
         
@@ -128,28 +212,29 @@ class KeyboardInput:
             timeout: Optional timeout in seconds. None for blocking wait.
             
         Returns:
-            Tuple of (KeyCode, character, mode). One of KeyCode/character will be None.
-            - For special keys: (KeyCode.*, None, PER_KEY)
-            - For regular characters: (None, character, PER_KEY)
-            - For timeout/no input: (None, None, TIMEOUT)
-            - For fallback to line-based: (None, None, LINE_BASED)
+            Tuple of (KeyCode, character, mode, mouse_event). One of KeyCode/character will be None.
+            - For special keys: (KeyCode.*, None, PER_KEY, None)
+            - For regular characters: (None, character, PER_KEY, None)
+            - For mouse events: (None, None, PER_KEY, MouseEvent.*)
+            - For timeout/no input: (None, None, TIMEOUT, None)
+            - For fallback to line-based: (None, None, LINE_BASED, None)
         """
         # Fallback for non-interactive environments
         if not self.is_interactive:
-            return None, None, InputMode.LINE_BASED
-            
+            return None, None, InputMode.LINE_BASED, None
+        
         if self.is_windows:
             return self._get_key_windows(timeout)
         else:
             return self._get_key_unix(timeout)
     
-    def _get_key_windows(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str], InputMode]:
+    def _get_key_windows(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str], InputMode, Optional[MouseEvent]]:
         """Windows implementation of get_key"""
         if timeout is not None:
             # Windows doesn't have easy timeout support for getch
             # For now, just do non-blocking check
             if not self.msvcrt.kbhit():
-                return None, None, InputMode.TIMEOUT
+                return None, None, InputMode.TIMEOUT, None
         
         # Get first character
         ch = self.msvcrt.getch()
@@ -168,265 +253,182 @@ class KeyboardInput:
                 b'Q': KeyCode.PAGE_DOWN,
                 b'S': KeyCode.DELETE,
             }
-            return key_map.get(ch2), None, InputMode.PER_KEY
+            return key_map.get(ch2), None, InputMode.PER_KEY, None
         
         # Handle regular special characters
         if ch == b'\r' or ch == b'\n':
-            return KeyCode.ENTER, None, InputMode.PER_KEY
+            return KeyCode.ENTER, None, InputMode.PER_KEY, None
         elif ch == b'\x1b':  # ESC
-            return KeyCode.ESCAPE, None, InputMode.PER_KEY
+            return KeyCode.ESCAPE, None, InputMode.PER_KEY, None
         elif ch == b'\x08':  # Backspace
-            return KeyCode.BACKSPACE, None, InputMode.PER_KEY
+            # Update internal buffer
+            if self._buffer:
+                self._buffer.pop()
+            return KeyCode.BACKSPACE, None, InputMode.PER_KEY, None
         elif ch == b'\t':    # Tab
-            return KeyCode.TAB, None, InputMode.PER_KEY
+            return KeyCode.TAB, None, InputMode.PER_KEY, None
         elif ch == b' ':     # Space
-            return KeyCode.SPACE, None, InputMode.PER_KEY
+            self._buffer.append(' ')
+            return KeyCode.SPACE, None, InputMode.PER_KEY, None
         else:
             # Regular character
             try:
-                return None, ch.decode('utf-8', errors='ignore'), InputMode.PER_KEY
+                char = ch.decode('utf-8', errors='ignore')
+                self._buffer.append(char)
+                return None, char, InputMode.PER_KEY, None
             except:
-                return None, None, InputMode.TIMEOUT
+                return None, None, InputMode.TIMEOUT, None
     
-    # REMOVED: _get_key_fallback method that used blocking input()
-    # This was causing the "looks interactive but acts line-based" issue
-    
-    def _get_key_unix(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str], InputMode]:
+    def _get_key_unix(self, timeout: Optional[float] = None) -> Tuple[Optional[KeyCode], Optional[str], InputMode, Optional[MouseEvent]]:
         """Unix implementation of get_key"""
-        # CRITICAL FIX: Try /dev/tty first if stdin fails, then fall back to stdin
-        input_file = None
-        fd = None
-        old_settings = None
-        
-        # Try /dev/tty first (works in subprocess environments)
-        try:
-            if os.path.exists('/dev/tty'):
-                # Open TTY in binary for robust, exact key decoding (macOS/iTerm2 friendly)
-                input_file = open('/dev/tty', 'rb', buffering=0)
-                fd = input_file.fileno()
-                old_settings = self.termios.tcgetattr(fd)
-        except (self.termios.error, OSError, FileNotFoundError):
-            pass
-        
-        # Fall back to stdin if /dev/tty failed
-        if fd is None:
-            try:
-                fd = sys.stdin.fileno()
-                old_settings = self.termios.tcgetattr(fd)
-                # Use buffered binary reader on stdin as well
-                input_file = sys.stdin.buffer
-            except (self.termios.error, OSError) as e:
-                # CRITICAL FIX: If we can't access terminal attributes, signal line-based mode
-                return None, None, InputMode.LINE_BASED
+        if self._fd is None:
+            # Critical fallback – we cannot read raw keys, so use line based mode
+            return None, None, InputMode.LINE_BASED, None
         
         try:
-            # Set terminal to raw mode
-            self.tty.setraw(fd)
+            # Set terminal to raw mode (only once per instance – cached settings are restored on close)
+            self.tty.setraw(self._fd)
             
-            # FIXED: Reduce timeout precision to prevent first character drops
             # Check for input availability with timeout
             if timeout is not None:
-                ready, _, _ = self.select.select([input_file], [], [], timeout)
+                ready, _, _ = self.select.select([self._fd_file], [], [], timeout)
                 if not ready:
-                    return None, None, InputMode.TIMEOUT
+                    return None, None, InputMode.TIMEOUT, None
             
-            # Read first character - this should be immediate
-            ch_bytes = input_file.read(1)
+            # Read first byte
+            ch_bytes = self._fd_file.read(1)
             if not ch_bytes:
-                return None, None, InputMode.TIMEOUT
-            # Decode single byte to text safely for processing
+                return None, None, InputMode.TIMEOUT, None
             ch = ch_bytes.decode('utf-8', errors='ignore')
             
-            # FIXED: Handle slash character immediately without delay
-            if ch == '/':
-                return None, ch, InputMode.PER_KEY
-            
-            # Handle escape sequences
+            # Handle escape sequences (reduced timeout for faster response)
             if ch == '\x1b':  # ESC
-                # FIXED: Shorter timeout to prevent input lag
-                ready, _, _ = self.select.select([input_file], [], [], 0.05)  # Reduced from 0.1
+                # Peek to see if this is a mouse event (SGR format starts with "[<")
+                ready, _, _ = self.select.select([self._fd_file], [], [], 0.05)
                 if ready:
-                    ch2_b = input_file.read(1)
-                    if not ch2_b:
-                        return KeyCode.ESCAPE, None, InputMode.PER_KEY
-                    ch2 = ch2_b.decode('utf-8', errors='ignore')
-                    if ch2 == '[':
-                        # ANSI escape sequence
-                        ch3 = input_file.read(1).decode('utf-8', errors='ignore')
-                        key_map = {
-                            'A': KeyCode.UP,
-                            'B': KeyCode.DOWN,
-                            'C': KeyCode.RIGHT,
-                            'D': KeyCode.LEFT,
-                            'H': KeyCode.HOME,
-                            'F': KeyCode.END,
-                        }
-                        special_key = key_map.get(ch3)
-                        if special_key:
-                            return special_key, None, InputMode.PER_KEY
-                        
-                        # Multi-character sequences (Page Up/Down, Delete, etc.)
-                        if ch3 in '0123456789':
-                            # Read until we find the final character
-                            sequence = ch3
+                    nxt_b = self._fd_file.read(1)
+                    if not nxt_b:
+                        return KeyCode.ESCAPE, None, InputMode.PER_KEY, None
+                    nxt = nxt_b.decode('utf-8', errors='ignore')
+                    if nxt == '[':
+                        # Could be mouse event or normal CSI sequence
+                        rest = self._fd_file.read(1).decode('utf-8', errors='ignore')
+                        if rest == '<':
+                            # SGR mouse event – read until final M or m
+                            seq = ''
                             while True:
-                                # FIXED: Shorter timeout for sequence reading
-                                ready, _, _ = self.select.select([input_file], [], [], 0.05)
-                                if not ready:
+                                part = self._fd_file.read(1).decode('utf-8', errors='ignore')
+                                if not part:
                                     break
-                                next_ch_b = input_file.read(1)
-                                if not next_ch_b:
+                                seq += part
+                                if part in ('M', 'm'):
                                     break
-                                next_ch = next_ch_b.decode('utf-8', errors='ignore')
-                                sequence += next_ch
-                                if next_ch in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ~':
-                                    break
-                            
-                            # Map common sequences
-                            if sequence == '5~':
-                                return KeyCode.PAGE_UP, None, InputMode.PER_KEY
-                            elif sequence == '6~':
-                                return KeyCode.PAGE_DOWN, None, InputMode.PER_KEY
-                            elif sequence == '3~':
-                                return KeyCode.DELETE, None, InputMode.PER_KEY
-                
-                # Just ESC key
-                return KeyCode.ESCAPE, None, InputMode.PER_KEY
-            
-            # Handle other special characters
-            elif ch == '\n' or ch == '\r':
-                return KeyCode.ENTER, None, InputMode.PER_KEY
-            elif ch == '\x7f' or ch == '\x08':  # DEL or Backspace
-                return KeyCode.BACKSPACE, None, InputMode.PER_KEY
-            elif ch == '\t':
-                return KeyCode.TAB, None, InputMode.PER_KEY
-            elif ch == ' ':
-                return KeyCode.SPACE, None, InputMode.PER_KEY
-            else:
-                # FIXED: Regular character - return immediately
-                return None, ch, InputMode.PER_KEY
-                
+                            # seq now looks like "64;10;20M" etc.
+                            try:
+                                button_str, _, _ = seq.partition('M')
+                                button_code = int(button_str.split(';')[0])
+                                if button_code == 64:
+                                    return None, None, InputMode.PER_KEY, MouseEvent.SCROLL_UP
+                                elif button_code == 65:
+                                    return None, None, InputMode.PER_KEY, MouseEvent.SCROLL_DOWN
+                            except Exception:
+                                pass
+                        # Not a mouse event – fall back to normal CSI handling
+                        ch2 = rest
+                    else:
+                        ch2 = nxt
+                else:
+                    # No further bytes – plain ESC key
+                    return KeyCode.ESCAPE, None, InputMode.PER_KEY, None
+                # Normal CSI handling for arrow keys etc.
+                if ch2 == '[':
+                    ch3 = self._fd_file.read(1).decode('utf-8', errors='ignore')
+                    key_map = {
+                        'A': KeyCode.UP,
+                        'B': KeyCode.DOWN,
+                        'C': KeyCode.RIGHT,
+                        'D': KeyCode.LEFT,
+                        'H': KeyCode.HOME,
+                        'F': KeyCode.END,
+                    }
+                    special_key = key_map.get(ch3)
+                    if special_key:
+                        return special_key, None, InputMode.PER_KEY, None
+                    # Multi‑character sequences (Page Up/Down, Delete, etc.)
+                    if ch3 in '0123456789':
+                        sequence = ch3
+                        while True:
+                            ready, _, _ = self.select.select([self._fd_file], [], [], 0.05)
+                            if not ready:
+                                break
+                            nxt_b = self._fd_file.read(1)
+                            if not nxt_b:
+                                break
+                            nxt = nxt_b.decode('utf-8', errors='ignore')
+                            sequence += nxt
+                            if nxt in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ~':
+                                break
+                        if sequence == '5~':
+                            return KeyCode.PAGE_UP, None, InputMode.PER_KEY, None
+                        elif sequence == '6~':
+                            return KeyCode.PAGE_DOWN, None, InputMode.PER_KEY, None
+                        elif sequence == '3~':
+                            return KeyCode.DELETE, None, InputMode.PER_KEY, None
+                # If we got here the ESC was solitary
+                return KeyCode.ESCAPE, None, InputMode.PER_KEY, None
+            # Other special characters
+            if ch in ('\n', '\r'):
+                return KeyCode.ENTER, None, InputMode.PER_KEY, None
+            if ch in ('\x7f', '\x08'):
+                # Backspace – modify buffer
+                if self._buffer:
+                    self._buffer.pop()
+                return KeyCode.BACKSPACE, None, InputMode.PER_KEY, None
+            if ch == '\t':
+                return KeyCode.TAB, None, InputMode.PER_KEY, None
+            if ch == ' ':
+                self._buffer.append(' ')
+                return KeyCode.SPACE, None, InputMode.PER_KEY, None
+            # Regular printable character
+            self._buffer.append(ch)
+            return None, ch, InputMode.PER_KEY, None
         finally:
-            # Restore original terminal settings
-            self.termios.tcsetattr(fd, self.termios.TCSADRAIN, old_settings)
-            # Close /dev/tty file if we opened it
-            if input_file and input_file != sys.stdin:
+            # Restore original terminal settings (if we cached them)
+            if self._orig_settings is not None:
                 try:
-                    input_file.close()
-                except:
+                    self.termios.tcsetattr(self._fd, self.termios.TCSADRAIN, self._orig_settings)
+                except Exception:
                     pass
+    
+    def get_current_line(self) -> str:
+        """Return the current line buffer as a string. Useful for UI rendering."""
+        return ''.join(self._buffer)
     
     def flush_input(self):
         """Clear any pending input from the buffer"""
         if not self.is_interactive:
             return  # No need to flush in non-interactive mode
-            
+        
         if self.is_windows:
             while self.msvcrt.kbhit():
                 self.msvcrt.getch()
         else:
-            # Unix: set non-blocking and read all available
-            fd = sys.stdin.fileno()
+            # Unix: read all pending bytes in non‑blocking mode
+            if self._fd is None:
+                return
             try:
-                old_settings = self.termios.tcgetattr(fd)
-                self.tty.setraw(fd)
+                old = self.termios.tcgetattr(self._fd)
+                self.tty.setraw(self._fd)
                 while True:
-                    ready, _, _ = self.select.select([sys.stdin], [], [], 0)
+                    ready, _, _ = self.select.select([self._fd_file], [], [], 0)
                     if not ready:
                         break
-                    sys.stdin.read(1)
-            except self.termios.error:
-                pass  # Terminal not available
+                    self._fd_file.read(1)
+            except Exception:
+                pass
             finally:
-                try:
-                    self.termios.tcsetattr(fd, self.termios.TCSADRAIN, old_settings)
-                except self.termios.error:
-                    pass
-
-
-class MenuSelector:
-    """
-    Generic menu selection component with arrow key navigation.
-    
-    Provides a reusable interface for selecting items from a list
-    with visual highlighting and keyboard navigation.
-    """
-    
-    def __init__(self, keyboard_input: Optional[KeyboardInput] = None):
-        self.keyboard = keyboard_input or KeyboardInput()
-        
-    def select_from_options(self, options: list, current_index: int = 0, 
-                          allow_escape: bool = True) -> Tuple[Optional[bool], int]:
-        """
-        Display a menu and let user select with arrow keys.
-        
-        Args:
-            options: List of options to display
-            current_index: Initial selected index
-            allow_escape: Whether to allow ESC key to cancel
-            
-        Returns:
-            Tuple of (success, selected_index)
-            - (True, index) if user selected an option
-            - (False, -1) if user cancelled/escaped
-            - (None, index) if navigation occurred (caller should redraw)
-        """
-        if not options:
-            return False, -1
-        
-        selected_index = max(0, min(current_index, len(options) - 1))
-        
-        # Clear any pending input
-        self.keyboard.flush_input()
-        
-        # Get next keypress
-        key_code, char, input_mode = self.keyboard.get_key()
-        
-        if key_code == KeyCode.UP:
-            selected_index = (selected_index - 1) % len(options)
-            return None, selected_index  # Navigation occurred
-            
-        elif key_code == KeyCode.DOWN:
-            selected_index = (selected_index + 1) % len(options)
-            return None, selected_index  # Navigation occurred
-            
-        elif key_code == KeyCode.ENTER:
-            return True, selected_index
-            
-        elif key_code == KeyCode.ESCAPE and allow_escape:
-            return False, -1
-            
-        elif char and char.lower() == 'q' and allow_escape:
-            return False, -1
-            
-        # No action taken
-        return None, selected_index
-    
-    def get_single_key(self, allowed_keys: list = None, allow_escape: bool = True) -> Tuple[bool, str]:
-        """
-        Wait for a single key press from allowed keys.
-        
-        Args:
-            allowed_keys: List of allowed character keys. None for any key.
-            allow_escape: Whether to allow ESC key to cancel
-            
-        Returns:
-            Tuple of (success, key)
-            - (True, key) if valid key pressed
-            - (False, "") if cancelled/escaped
-        """
-        while True:
-            key_code, char, input_mode = self.keyboard.get_key()
-            
-            if key_code == KeyCode.ESCAPE and allow_escape:
-                return False, ""
-            
-            if key_code == KeyCode.ENTER:
-                return True, "enter"
-            
-            if char:
-                if char.lower() == 'q' and allow_escape:
-                    return False, ""
-                    
-                if allowed_keys is None or char.lower() in [k.lower() for k in allowed_keys]:
-                    return True, char
+                if old is not None:
+                    try:
+                        self.termios.tcsetattr(self._fd, self.termios.TCSADRAIN, old)
+                    except Exception:
+                        pass

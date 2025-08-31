@@ -1,4 +1,9 @@
-# AgentsMCP Architecture Analysis & Assessment
+# AgentsMCP Architecture Analysis & Assessment (Archived)
+
+This analysis is retained as reference. For current architecture tasks and decisions, consult `docs/backlog.md`, `docs/work-plan.md`, and `docs/decision-log.md`.
+
+---
+
 *Date: January 2025*
 
 ## Executive Summary
