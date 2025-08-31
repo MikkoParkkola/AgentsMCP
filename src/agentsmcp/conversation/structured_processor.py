@@ -876,7 +876,7 @@ Keep it concise but comprehensive.
                 # Team-level
                 update_team_instructions(joint)
                 # Role-level (refresh latest with joint improvements)
-                for role_name, role_cls in RoleRegistry.ROLE_CLASSES.items():
+                for role_name, role_cls in RoleRegistry().ROLE_CLASSES.items():
                     default_prompt = ""
                     try:
                         if hasattr(role_cls, "default_prompt"):

@@ -73,7 +73,7 @@ Template:
 - **Decision Date:** 2025-08-23
 - **Outcome:** Split documentation into generic, AI-specific, and product-specific best practices plus status and details files.
 - **Rationale:** Provide a clearer blueprint template for future projects.
-- **Details:** See [docs/generic-best-practices.md](generic-best-practices.md), [docs/ai-agent-best-practices.md](ai-agent-best-practices.md), [docs/product-best-practices.md](product-best-practices.md), [docs/product-status.md](product-status.md), and [docs/product-details.md](product-details.md).
+- Note: Consolidated; refer to `docs/backlog.md` (improvements), `docs/changelog.md` (changes), and `docs/AGENTIC_ARCHITECTURE.md` (architecture).
 
 ## [0007] - Fix CI lint and Danger configuration
 ## 2025-08-26 — Default Model/Agent Selection
@@ -101,7 +101,7 @@ Template:
 - **Decision Date:** 2025-08-26
 - **Outcome:** Adopt two-phase UI/UX uplift: Phase A (stabilize + professional polish) and Phase B (delight + advanced), delivering feature parity across TUI and Web UI with professional tone and performance.
 - **Rationale:** Improve usability, completeness, performance, and visual consistency across entry points; address breakages and missing parity.
-- **Details:** See [docs/ui-ux-review.md](ui-ux-review.md).
+- Note: Superseded by consolidated backlog items.
 
 ## [0002] - Define CODEOWNERS and maintainer list
 - **Date Added:** 2025-08-21
@@ -119,3 +119,16 @@ Template:
 - Rationale: Immediate security hardening without heavy infra dependencies; preserves performance for non-critical operations.
 - Alternatives: External queue (Redis), DB-backed audit, cookie sessions. Deferred to future phases to keep scope tight.
 - Impact: Critical ops now blocked pending human approval; audit trail created; non-critical ops unchanged.
+## 2025-08-31 — Docs consolidation decisions
+
+Context: Reduce duplication and ensure a single source of truth for each documentation area.
+
+Decisions:
+- CLI canon: Keep `docs/cli-client.md`; delete `CLI_README.md`.
+- Architecture canon: Keep `docs/AGENTIC_ARCHITECTURE.md`; delete `docs/ARCHITECTURE_ANALYSIS_2025.md` (already archived).
+- Interfaces doc: Merge ICD policy into `docs/interfaces/README.md`; delete duplicate `interfaces/README.md`.
+- Provider docs: Merge `CLAUDE.md`, `GEMINI.md`, `QWEN.md` guidance into `docs/models.md`; delete the separate files.
+- TUI issues: Move valid items into `docs/backlog.md` (P0/P1) and remove `docs/tui_issues.md`, `IMMEDIATE_TUI_FIX.md`, `CRITICAL_TUI_FIXES_SUMMARY.md`.
+- Ideation/strategy: Promote viable items into `docs/backlog.md` (Later/P2) and remove the separate ideation docs.
+
+Rationale: Single source per topic improves maintainability and reduces drift. Operational logs record changes.

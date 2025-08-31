@@ -17,8 +17,12 @@ AGENTS.md v2 Two-Tier Orchestration System with:
 Legacy systems (seamless, emotional, symphony) remain for backward compatibility.
 """
 
-# Core orchestration components
-from .team_runner import run_team  # Original team runner for backward compatibility
+# Core orchestration components - Dynamic team runner v2 is now the default
+from .team_runner_v2 import run_team  # Enhanced team runner with dynamic orchestration
+from .team_runner import run_team as run_team_legacy  # Legacy team runner for fallback
+
+# NEW: Strict Orchestrator-Only Communication Architecture
+from .orchestrator import Orchestrator, OrchestratorConfig, OrchestratorMode, OrchestratorResponse
 from .task_classifier import TaskClassifier
 from .team_composer import TeamComposer
 from .dynamic_orchestrator import DynamicOrchestrator
@@ -70,7 +74,14 @@ except ImportError:
 # Export list - prioritize dynamic orchestration components
 __all__ = [
     # Core team running functions (backward compatible)
-    "run_team",
+    "run_team",  # Now uses dynamic orchestration v2
+    "run_team_legacy",  # Original team runner
+    
+    # NEW: Strict Orchestrator-Only Communication Architecture
+    "Orchestrator",
+    "OrchestratorConfig", 
+    "OrchestratorMode",
+    "OrchestratorResponse",
     
     # Dynamic orchestration components
     "TaskClassifier",
@@ -128,8 +139,9 @@ __api_version__ = "v3"
 
 # Compatibility notes
 COMPATIBILITY_NOTES = {
-    "run_team": "Original team runner API maintained for backward compatibility",
+    "run_team": "Enhanced team runner v2 with dynamic orchestration and intelligent task classification (default)",
+    "run_team_legacy": "Original team runner API maintained for backward compatibility",
     "dynamic_orchestration": "New v3 API with intelligent task classification and team composition",
-    "agile_integration": "Built-in agile coach for planning and retrospectives",
+    "agile_integration": "Built-in agile coach for planning and retrospectives", 
     "continuous_improvement": "Automated retrospectives and performance optimization"
 }

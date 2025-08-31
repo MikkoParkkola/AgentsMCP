@@ -2,31 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Tuple, Type
+import logging
 
+from ..lazy_loading import lazy_import, LazyRegistry, memoized_property
 from .base import BaseRole, RoleName, ModelAssignment
-from .architect import ArchitectRole
-from .coder import CoderRole
-from .qa import QARole
-from .merge_bot import MergeBotRole
-from .human_specialists import (
-    BusinessAnalystRole,
-    BackendEngineerRole,
-    WebFrontendEngineerRole,
-    APIEngineerRole,
-    TUIFrontendEngineerRole,
-    BackendQARole,
-    WebFrontendQARole,
-    TUIFrontendQARole,
-    ChiefQARole,
-    ITLawyerRole,
-    MarketingManagerRole,
-    CICDEngineerRole,
-    DevToolingEngineerRole,
-    DataAnalystRole,
-    DataScientistRole,
-    MLSicentistRole,
-    MLEngineerRole,
-)
+
+# Lazy imports for role classes to avoid loading heavy modules at startup
+architect = lazy_import('.architect', __package__)
+coder = lazy_import('.coder', __package__)
+qa = lazy_import('.qa', __package__)
+merge_bot = lazy_import('.merge_bot', __package__)
+human_specialists = lazy_import('.human_specialists', __package__)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -44,30 +32,38 @@ class RoleRegistry:
     - Use objective length and presence of design keywords for complexity
     - Prefer 'codex' for complex reasoning; 'ollama' for basic/automation
     """
-
-    ROLE_CLASSES: dict[RoleName, Type[BaseRole]] = {
-        RoleName.ARCHITECT: ArchitectRole,
-        RoleName.CODER: CoderRole,
-        RoleName.QA: QARole,
-        RoleName.MERGE_BOT: MergeBotRole,
-        RoleName.BUSINESS_ANALYST: BusinessAnalystRole,
-        RoleName.BACKEND_ENGINEER: BackendEngineerRole,
-        RoleName.WEB_FRONTEND_ENGINEER: WebFrontendEngineerRole,
-        RoleName.API_ENGINEER: APIEngineerRole,
-        RoleName.TUI_FRONTEND_ENGINEER: TUIFrontendEngineerRole,
-        RoleName.BACKEND_QA_ENGINEER: BackendQARole,
-        RoleName.WEB_FRONTEND_QA_ENGINEER: WebFrontendQARole,
-        RoleName.TUI_FRONTEND_QA_ENGINEER: TUIFrontendQARole,
-        RoleName.CHIEF_QA_ENGINEER: ChiefQARole,
-        RoleName.IT_LAWYER: ITLawyerRole,
-        RoleName.MARKETING_MANAGER: MarketingManagerRole,
-        RoleName.CI_CD_ENGINEER: CICDEngineerRole,
-        RoleName.DEV_TOOLING_ENGINEER: DevToolingEngineerRole,
-        RoleName.DATA_ANALYST: DataAnalystRole,
-        RoleName.DATA_SCIENTIST: DataScientistRole,
-        RoleName.ML_SCIENTIST: MLSicentistRole,
-        RoleName.ML_ENGINEER: MLEngineerRole,
-    }
+    
+    def __init__(self):
+        self._lazy_registry = LazyRegistry()
+        self._role_classes_loaded = False
+    
+    @memoized_property
+    def ROLE_CLASSES(self) -> dict[RoleName, Type[BaseRole]]:
+        """Lazy-loaded role classes mapping."""
+        logger.debug("Loading role classes for the first time")
+        return {
+            RoleName.ARCHITECT: architect.ArchitectRole,
+            RoleName.CODER: coder.CoderRole,
+            RoleName.QA: qa.QARole,
+            RoleName.MERGE_BOT: merge_bot.MergeBotRole,
+            RoleName.BUSINESS_ANALYST: human_specialists.BusinessAnalystRole,
+            RoleName.BACKEND_ENGINEER: human_specialists.BackendEngineerRole,
+            RoleName.WEB_FRONTEND_ENGINEER: human_specialists.WebFrontendEngineerRole,
+            RoleName.API_ENGINEER: human_specialists.APIEngineerRole,
+            RoleName.TUI_FRONTEND_ENGINEER: human_specialists.TUIFrontendEngineerRole,
+            RoleName.BACKEND_QA_ENGINEER: human_specialists.BackendQARole,
+            RoleName.WEB_FRONTEND_QA_ENGINEER: human_specialists.WebFrontendQARole,
+            RoleName.TUI_FRONTEND_QA_ENGINEER: human_specialists.TUIFrontendQARole,
+            RoleName.CHIEF_QA_ENGINEER: human_specialists.ChiefQARole,
+            RoleName.IT_LAWYER: human_specialists.ITLawyerRole,
+            RoleName.MARKETING_MANAGER: human_specialists.MarketingManagerRole,
+            RoleName.CI_CD_ENGINEER: human_specialists.CICDEngineerRole,
+            RoleName.DEV_TOOLING_ENGINEER: human_specialists.DevToolingEngineerRole,
+            RoleName.DATA_ANALYST: human_specialists.DataAnalystRole,
+            RoleName.DATA_SCIENTIST: human_specialists.DataScientistRole,
+            RoleName.ML_SCIENTIST: human_specialists.MLSicentistRole,
+            RoleName.ML_ENGINEER: human_specialists.MLEngineerRole,
+        }
 
     KEYWORD_TO_ROLE = {
         "design": RoleName.ARCHITECT,
@@ -155,3 +151,7 @@ class RoleRegistry:
         reason = "complex reasoning" if agent_type == "codex" else "basic automation"
         inst = self.instantiate(role, agent_type=agent_type)
         return inst, RoutingDecision(role=role, agent_type=agent_type, reason=reason)
+
+
+# Note: Class-level direct access to ROLE_CLASSES is intentionally not supported
+# to preserve lazy initialization. Always use RoleRegistry().ROLE_CLASSES.

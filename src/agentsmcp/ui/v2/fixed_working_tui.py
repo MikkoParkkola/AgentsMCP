@@ -153,6 +153,7 @@ class FixedWorkingTUI:
                     break
                 elif ord(char) == 13 or ord(char) == 10:  # Enter
                     sys.stdout.write('\r\n')
+                    sys.stdout.flush()
                     await self.process_line(self.input_buffer)
                     self.input_buffer = ""
                     self.show_prompt()
@@ -180,75 +181,85 @@ class FixedWorkingTUI:
             try:
                 from ...runtime_config import Config
                 cfg = Config.load()
-                sys.stdout.write('\nConfigured agents:\n')
+                sys.stdout.write('\r\nConfigured agents:\r\n')
                 for name, ac in cfg.agents.items():
                     prov = getattr(ac.provider, 'value', str(ac.provider))
-                    sys.stdout.write(f"- {name}: provider={prov} model={ac.model}\\n")
+                    sys.stdout.write(f"\r- {name}: provider={prov} model={ac.model}\r\n")
                 sys.stdout.flush()
             except Exception as e:
-                sys.stdout.write(f"Error reading config: {e}\\n")
+                sys.stdout.write(f"\rError reading config: {e}\r\n")
             self.show_prompt()
             return
         if line.lower() in ['/quit', '/exit', 'quit', 'exit']:
             self.running = False
-            sys.stdout.write('\n👋 Goodbye!\n')
+            sys.stdout.write('\r\n👋 Goodbye!\r\n')
             return
         if line.lower() == '/help':
-            sys.stdout.write('\n📚 Commands:\n')
-            sys.stdout.write('  /help   - Show this help\n')
-            sys.stdout.write('  /quit   - Exit TUI\n')
-            sys.stdout.write('  /clear  - Clear conversation history\n')
-            sys.stdout.write('  /agents - List configured agents\n')
-            sys.stdout.write('  Ctrl+C  - Exit TUI\n')
-            sys.stdout.write('\n💬 Just type normally to chat with the LLM!\n')
+            sys.stdout.write('\r\n📚 Commands:\r\n')
+            sys.stdout.write('\r  /help   - Show this help\r\n')
+            sys.stdout.write('\r  /quit   - Exit TUI\r\n')
+            sys.stdout.write('\r  /clear  - Clear conversation history\r\n')
+            sys.stdout.write('\r  /agents - List configured agents\r\n')
+            sys.stdout.write('\r  Ctrl+C  - Exit TUI\r\n')
+            sys.stdout.write('\r\n💬 Just type normally to chat with the LLM!\r\n')
             return
         if line.lower() == '/clear':
             if self.llm_client:
                 self.llm_client.clear_history()
-                sys.stdout.write('\n🧹 Conversation history cleared!\n')
+                sys.stdout.write('\r\n🧹 Conversation history cleared!\r\n')
             else:
-                sys.stdout.write('\n⚠️  LLM client not available\n')
+                sys.stdout.write('\r\n⚠️  LLM client not available\r\n')
             return
         if not line:
             return
         # Thinking indicator
-        sys.stdout.write('\n\r🤔 Thinking...\n')
+        sys.stdout.write('\r\n🤔 Thinking...\r\n')
         sys.stdout.flush()
         try:
             if self.llm_client:
-                from ...orchestration.team_runner import run_team, DEFAULT_TEAM
+                from ...orchestration import Orchestrator, OrchestratorConfig, OrchestratorMode
+                
                 cols, _ = shutil.get_terminal_size(fallback=(100, 40))
-                sys.stdout.write('\r🚩 Orchestrating team: ' + ', '.join(DEFAULT_TEAM) + '\n')
+                
+                # Use the orchestrator for single-point communication
+                sys.stdout.write('\r🤔 Processing your request...\r\n')
                 sys.stdout.flush()
-                async def progress(ev, data):
-                    t = data.get('time','')
-                    agent = data.get('agent','')
-                    if ev.endswith('spawned'):
-                        msg = f"[{t}] ▶ {agent} started"
-                    elif ev.endswith('completed'):
-                        msg = f"[{t}] ✅ {agent} completed"
-                    else:
-                        msg = f"[{t}] {ev} {agent}"
-                    sys.stdout.write(f'\r{msg}\n')
-                    sys.stdout.flush()
-                results = await run_team(line, DEFAULT_TEAM, progress_callback=progress)
+                
+                # Initialize orchestrator with strict isolation mode
+                config = OrchestratorConfig(
+                    mode=OrchestratorMode.STRICT_ISOLATION,
+                    enable_smart_classification=True,
+                    fallback_to_simple_response=True
+                )
+                orchestrator = Orchestrator(config=config, conversation_manager=self.llm_client)
+                
+                # Process the user input through the orchestrator
+                response = await orchestrator.process_user_input(line)
+                
+                # Display the orchestrator's single response
                 from .ansi_markdown_processor import render_markdown_lines
                 safe_width = max(20, cols - 2)
-                for role, out in results.items():
-                    sys.stdout.write(f'\r🧩 {role}:\n')
-                    try:
-                        for ln in render_markdown_lines(out or '(no output)', width=safe_width, indent=''):
-                            sys.stdout.write(f'\r{ln}\n')
-                    except Exception:
-                        for ln in (out or '(no output)').split('\\n'):
-                            sys.stdout.write(f'\r{ln}\n')
+                
+                sys.stdout.write(f'\r🤖 AgentsMCP:\r\n')
+                try:
+                    for ln in render_markdown_lines(response.content or 'No response generated', width=safe_width, indent=''):
+                        sys.stdout.write(f'\r{ln}\r\n')
+                except Exception:
+                    for ln in (response.content or 'No response generated').split('\n'):
+                        sys.stdout.write(f'\r{ln}\r\n')
+                
+                # Optional: Show metadata in debug mode
+                if response.agents_consulted:
+                    sys.stdout.write(f'\r\n💡 Consulted: {", ".join(response.agents_consulted)} '
+                                   f'({response.response_type}, {response.processing_time_ms}ms)\r\n')
+                
             else:
-                sys.stdout.write(f"\r⚠️  LLM client unavailable. You said: \"{line}\"\n")
-                sys.stdout.write('\r   Try restarting the TUI to reconnect.\n')
+                sys.stdout.write(f"\r⚠️  LLM client unavailable. You said: \"{line}\"\r\n")
+                sys.stdout.write('\r   Try restarting the TUI to reconnect.\r\n')
         except Exception as e:
             logger.error(f"Error processing message: {e}")
-            sys.stdout.write(f"\r❌ Error: {str(e)}\n")
-            sys.stdout.write('\r   Please try again or use /help for commands.\n')
+            sys.stdout.write(f"\r❌ Error: {str(e)}\r\n")
+            sys.stdout.write('\r   Please try again or use /help for commands.\r\n')
         sys.stdout.flush()
 
     async def run(self):
@@ -283,7 +294,7 @@ class FixedWorkingTUI:
             await self.handle_input()
         
         except KeyboardInterrupt:
-            sys.stdout.write('\n👋 Goodbye!\n')
+            sys.stdout.write('\r\n👋 Goodbye!\r\n')
         
         finally:
             if terminal_setup:

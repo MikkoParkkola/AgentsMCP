@@ -42,8 +42,8 @@ from agentsmcp.api.nlp_processor import (
     NLPProcessor, CommandIntent, ConfidenceLevel, IntentPrediction
 )
 from agentsmcp.api.base import APIBase, APIResponse, APIError
-from agentsmcp.api.performance import PerformanceMonitor
-from agentsmcp.api.security import SecurityManager
+from agentsmcp.api.performance import PerformanceMonitoring
+from agentsmcp.api.security import SecurityAPI
 
 
 @pytest.fixture
@@ -74,13 +74,13 @@ async def nlp_processor():
 @pytest.fixture
 def performance_monitor():
     """Create performance monitor for testing."""
-    return PerformanceMonitor()
+    return PerformanceMonitoring()
 
 
 @pytest.fixture
 def security_manager():
     """Create security manager for testing."""
-    return SecurityManager()
+    return SecurityAPI()
 
 
 class TestIntentRecognitionService:

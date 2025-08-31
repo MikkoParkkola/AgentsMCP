@@ -30,8 +30,8 @@ from pathlib import Path
 
 # Import tool registry for tool execution
 from ..tools.base_tools import tool_registry
-# Import tools to ensure they're registered
-from ..tools import file_tools
+# Ensure default tools are registered only when client is instantiated
+from ..tools import ensure_default_tools_registered
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,10 @@ class LLMClient:
         self._model_capabilities: Optional[ModelCapabilities] = None
         self._capabilities_cache = {}
         # Initialize MCP tools for file system access
+        try:
+            ensure_default_tools_registered()
+        except Exception:
+            pass
         self.mcp_tools = self._get_mcp_tools()
         
     def _load_config(self, config_path: Optional[Path] = None) -> Dict[str, Any]:

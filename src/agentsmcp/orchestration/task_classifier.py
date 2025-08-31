@@ -1,813 +1,441 @@
-"""Task classification system for dynamic agent loading.
+"""
+Task Classifier for Smart Agent Orchestration
 
-This module implements the TaskClassifier that analyzes objectives and context
-to determine appropriate task classifications, complexity levels, required roles,
-and technology stacks.
+Intelligently classifies user tasks to determine whether:
+1. Simple response (no agents needed) - handle directly with orchestrator
+2. Single agent needed - delegate to one specialized agent  
+3. Multi-agent needed - coordinate multiple agents for complex tasks
+
+This prevents unnecessary agent spawning for simple interactions like greetings,
+while ensuring complex tasks get appropriate agent resources.
 """
 
-from __future__ import annotations
-
-import hashlib
 import re
-import time
-from typing import Dict, List, Optional, Set, Tuple
-from datetime import datetime, timezone
+import logging
+import asyncio
+from typing import Dict, List, Optional, Set
+from dataclasses import dataclass
+from enum import Enum
 
-from .models import (
-    TaskClassification,
-    TaskType,
-    ComplexityLevel,
-    RiskLevel,
-    TechnologyStack,
-    ClassificationCache,
-    InvalidObjective,
-    InsufficientContext,
-    UnsupportedTaskType,
-)
+logger = logging.getLogger(__name__)
+
+
+class TaskClassification(Enum):
+    """Types of task classifications."""
+    SIMPLE_RESPONSE = "simple_response"
+    SINGLE_AGENT_NEEDED = "single_agent_needed"  
+    MULTI_AGENT_NEEDED = "multi_agent_needed"
+
+
+@dataclass
+class ClassificationResult:
+    """Result of task classification."""
+    classification: TaskClassification
+    confidence: float  # 0.0 - 1.0
+    required_agents: List[str]
+    reasoning: str
+    task_complexity: str  # "trivial", "simple", "moderate", "complex"
+    estimated_response_time: str  # "immediate", "quick", "moderate", "extended"
 
 
 class TaskClassifier:
-    """Classifier for analyzing tasks and determining appropriate agent assignments."""
+    """
+    Intelligent task classifier that determines appropriate response strategy.
     
-    # Keyword mappings for task type detection with weighted priority
-    TASK_TYPE_KEYWORDS = {
-        TaskType.DESIGN: {
-            "high": ["design", "architecture", "blueprint", "wireframe", "plan system", "architect"],
-            "medium": ["plan", "diagram", "schema", "structure", "layout", "mockup", "prototype", "concept"]
-        },
-        TaskType.IMPLEMENTATION: {
-            "high": ["implement", "build", "create", "develop", "code", "write code", "develop system"],
-            "medium": ["construct", "generate", "produce", "make", "establish", "write"]
-        },
-        TaskType.REVIEW: {
-            "high": ["review", "audit", "inspect", "evaluate", "audit security", "check quality", "check code"],
-            "medium": ["check", "examine", "assess", "validate", "verify", "analyze quality"]
-        },
-        TaskType.ANALYSIS: {
-            "high": ["analyze", "analysis", "study", "investigate"],
-            "medium": ["research", "explore", "understand", "breakdown", "dissect", "examine"]
-        },
-        TaskType.TESTING: {
-            "high": ["test", "testing", "qa", "quality assurance", "unit test", "integration test", "e2e"],
-            "medium": ["verify", "validate", "check"]
-        },
-        TaskType.DOCUMENTATION: {
-            "high": ["document", "documentation", "docs", "readme", "write guide", "write manual"],
-            "medium": ["guide", "manual", "tutorial", "help", "explain", "describe"]
-        },
-        TaskType.REFACTORING: {
-            "high": ["refactor", "refactoring", "restructure", "modernize"],
-            "medium": ["cleanup", "optimize", "improve", "reorganize", "simplify"]
-        },
-        TaskType.BUG_FIX: {
-            "high": ["fix bug", "fix error", "debug", "troubleshoot", "fix memory leak"],
-            "medium": ["fix", "bug", "error", "issue", "problem", "resolve", "correct", "patch"]
-        },
-        TaskType.MAINTENANCE: {
-            "high": ["maintenance", "migrate", "upgrade", "housekeeping"],
-            "medium": ["maintain", "update", "patch", "cleanup", "dependency"]
-        },
-        TaskType.RESEARCH: {
-            "high": ["research", "investigate", "explore", "proof of concept"],
-            "medium": ["discover", "learn", "study", "experiment", "prototype"]
-        }
-    }
-    
-    # Role keyword mappings
-    ROLE_KEYWORDS = {
-        "architect": [
-            "design", "architecture", "system", "plan", "structure",
-            "blueprint", "strategy", "framework", "pattern"
-        ],
-        "coder": [
-            "implement", "code", "develop", "build", "create",
-            "function", "class", "module", "script", "program"
-        ],
-        "backend_engineer": [
-            "backend", "server", "api", "database", "service",
-            "microservice", "rest", "graphql", "endpoint"
-        ],
-        "web_frontend_engineer": [
-            "frontend", "web", "react", "javascript", "typescript",
-            "html", "css", "ui", "interface", "component"
-        ],
-        "tui_frontend_engineer": [
-            "tui", "terminal", "cli", "console", "command line",
-            "textual", "curses", "ncurses", "terminal ui"
-        ],
-        "api_engineer": [
-            "api", "rest", "graphql", "endpoint", "route",
-            "openapi", "swagger", "postman", "http"
-        ],
-        "qa": [
-            "test", "qa", "quality", "verify", "validate",
-            "check", "review", "audit", "inspect"
-        ],
-        "backend_qa_engineer": [
-            "backend test", "api test", "integration test",
-            "database test", "server test", "service test"
-        ],
-        "web_frontend_qa_engineer": [
-            "frontend test", "ui test", "web test", "e2e test",
-            "component test", "browser test", "selenium"
-        ],
-        "tui_frontend_qa_engineer": [
-            "tui test", "terminal test", "cli test",
-            "console test", "command test"
-        ],
-        "chief_qa_engineer": [
-            "comprehensive test", "test strategy", "quality assurance",
-            "test plan", "qa lead", "testing framework"
-        ],
-        "business_analyst": [
-            "requirement", "analysis", "business", "stakeholder",
-            "specification", "user story", "acceptance criteria"
-        ],
-        "docs": [
-            "documentation", "readme", "guide", "manual",
-            "tutorial", "help", "explain", "document"
-        ],
-        "ci_cd_engineer": [
-            "ci", "cd", "pipeline", "deploy", "deployment",
-            "build", "automation", "github actions", "docker"
-        ],
-        "dev_tooling_engineer": [
-            "tooling", "devtools", "developer tools", "automation",
-            "scripts", "utilities", "cli tools", "workflow"
-        ],
-        "data_analyst": [
-            "data", "analytics", "sql", "query", "report",
-            "dashboard", "metrics", "statistics", "visualization"
-        ],
-        "data_scientist": [
-            "data science", "machine learning", "statistics",
-            "analysis", "modeling", "prediction", "algorithm"
-        ],
-        "ml_scientist": [
-            "machine learning research", "ml research", "deep learning",
-            "neural network", "ai research", "model research"
-        ],
-        "ml_engineer": [
-            "ml engineering", "model deployment", "training",
-            "inference", "mlops", "feature engineering"
-        ],
-        "it_lawyer": [
-            "legal", "compliance", "gdpr", "privacy", "license",
-            "copyright", "terms", "policy", "regulation"
-        ],
-        "marketing_manager": [
-            "marketing", "seo", "content", "promotion",
-            "branding", "outreach", "communication"
-        ]
-    }
-    
-    # Technology stack detection
-    TECHNOLOGY_KEYWORDS = {
-        TechnologyStack.PYTHON: [
-            "python", "py", "pip", "conda", "django", "flask",
-            "fastapi", "pydantic", "pandas", "numpy", "pytest"
-        ],
-        TechnologyStack.JAVASCRIPT: [
-            "javascript", "js", "npm", "yarn", "node", "v8",
-            "es6", "es2015", "babel", "webpack"
-        ],
-        TechnologyStack.TYPESCRIPT: [
-            "typescript", "ts", "tsc", "type", "interface",
-            "generic", "decorator", "ambient"
-        ],
-        TechnologyStack.REACT: [
-            "react", "jsx", "tsx", "component", "hook",
-            "state", "props", "redux", "context"
-        ],
-        TechnologyStack.NODEJS: [
-            "node", "nodejs", "npm", "express", "koa",
-            "hapi", "nestjs", "socket.io"
-        ],
-        TechnologyStack.API: [
-            "api", "rest", "restful", "graphql", "grpc",
-            "openapi", "swagger", "endpoint", "route"
-        ],
-        TechnologyStack.DATABASE: [
-            "database", "db", "sql", "nosql", "postgres",
-            "mysql", "mongodb", "redis", "elasticsearch"
-        ],
-        TechnologyStack.DEVOPS: [
-            "devops", "docker", "kubernetes", "aws", "gcp",
-            "azure", "ci", "cd", "pipeline", "terraform"
-        ],
-        TechnologyStack.TESTING: [
-            "test", "testing", "unittest", "pytest", "jest",
-            "mocha", "cypress", "selenium", "testcafe"
-        ],
-        TechnologyStack.DOCUMENTATION: [
-            "docs", "documentation", "markdown", "sphinx",
-            "gitbook", "readme", "wiki", "guide"
-        ],
-        TechnologyStack.TUI: [
-            "tui", "terminal", "console", "cli", "textual",
-            "curses", "ncurses", "command line"
-        ],
-        TechnologyStack.CLI: [
-            "cli", "command line", "terminal", "shell",
-            "bash", "zsh", "script", "command"
-        ],
-        TechnologyStack.MACHINE_LEARNING: [
-            "ml", "machine learning", "ai", "neural network",
-            "deep learning", "tensorflow", "pytorch", "scikit"
-        ],
-        TechnologyStack.DATA_ANALYSIS: [
-            "data analysis", "analytics", "pandas", "numpy",
-            "matplotlib", "seaborn", "plotly", "jupyter"
-        ]
-    }
-    
-    # Complexity indicators
-    COMPLEXITY_INDICATORS = {
-        ComplexityLevel.TRIVIAL: {
-            "keywords": ["simple", "basic", "small", "quick", "minor"],
-            "max_length": 50,
-            "max_effort": 10
-        },
-        ComplexityLevel.LOW: {
-            "keywords": ["easy", "straightforward", "standard", "routine"],
-            "max_length": 150,
-            "max_effort": 25
-        },
-        ComplexityLevel.MEDIUM: {
-            "keywords": ["moderate", "regular", "typical", "standard"],
-            "max_length": 300,
-            "max_effort": 50
-        },
-        ComplexityLevel.HIGH: {
-            "keywords": ["complex", "advanced", "sophisticated", "comprehensive"],
-            "max_length": 600,
-            "max_effort": 80
-        },
-        ComplexityLevel.CRITICAL: {
-            "keywords": ["critical", "enterprise", "large-scale", "mission-critical"],
-            "max_length": float('inf'),
-            "max_effort": 100
-        }
-    }
+    Uses pattern matching, keyword analysis, and heuristics to classify tasks
+    into categories that determine whether agents are needed and which ones.
+    """
     
     def __init__(self):
-        """Initialize the task classifier with caching support."""
-        self._classification_cache: Dict[str, ClassificationCache] = {}
-        self._cache_ttl = 3600  # 1 hour cache TTL
-    
-    def classify(
-        self,
-        objective: str,
-        context: Optional[Dict] = None,
-        constraints: Optional[Dict] = None
-    ) -> TaskClassification:
-        """Classify a task and determine required roles and technologies.
+        """Initialize the task classifier."""
+        self.simple_patterns = self._build_simple_patterns()
+        self.agent_mapping = self._build_agent_mapping()
+        self.complexity_indicators = self._build_complexity_indicators()
+        self.multi_agent_indicators = self._build_multi_agent_indicators()
         
-        Args:
-            objective: The task objective/description
-            context: Additional context including repository info, file paths, etc.
-            constraints: Resource and other constraints
-            
-        Returns:
-            TaskClassification with detected roles, technologies, and complexity
-            
-        Raises:
-            InvalidObjective: If objective is empty or invalid
-            InsufficientContext: If context is insufficient for classification
-            UnsupportedTaskType: If task type is not supported
-        """
-        start_time = time.time()
-        
-        # Validate inputs
-        if not objective or not objective.strip():
-            raise InvalidObjective("Objective cannot be empty")
-        
-        objective = objective.strip()
-        context = context or {}
-        constraints = constraints or {}
-        
-        # Check cache
-        cache_key = self._generate_cache_key(objective, context)
-        cached = self._get_cached_classification(cache_key)
-        if cached:
-            cached.hit_count += 1
-            return cached.classification
-        
-        try:
-            # Extract keywords and normalize text
-            text_to_analyze = self._prepare_text_for_analysis(objective, context)
-            keywords = self._extract_keywords(text_to_analyze)
-            
-            # Classify task type
-            task_type = self._detect_task_type(keywords, objective)
-            
-            # Assess complexity and effort
-            complexity = self._assess_complexity(objective, keywords, context)
-            effort = self._estimate_effort(complexity, keywords, len(objective))
-            
-            # Determine risk level
-            risk_level = self._assess_risk(complexity, task_type, keywords)
-            
-            # Identify required and optional roles
-            required_roles, optional_roles = self._determine_roles(
-                task_type, keywords, complexity, context
-            )
-            
-            # Detect technology stacks
-            technologies = self._detect_technologies(keywords, context)
-            
-            # Calculate confidence
-            confidence = self._calculate_confidence(
-                keywords, task_type, required_roles, technologies
-            )
-            
-            # Create classification
-            classification = TaskClassification(
-                task_type=task_type,
-                complexity=complexity,
-                required_roles=required_roles,
-                optional_roles=optional_roles,
-                technologies=technologies,
-                estimated_effort=effort,
-                risk_level=risk_level,
-                keywords=keywords,
-                confidence=confidence
-            )
-            
-            # Cache the result
-            self._cache_classification(cache_key, classification)
-            
-            # Performance check
-            duration = time.time() - start_time
-            if duration > 0.2:  # 200ms threshold
-                print(f"Warning: Classification took {duration:.3f}s, exceeding 200ms threshold")
-            
-            return classification
-            
-        except Exception as e:
-            if isinstance(e, (InvalidObjective, InsufficientContext, UnsupportedTaskType)):
-                raise
-            raise UnsupportedTaskType(f"Classification failed: {str(e)}") from e
-    
-    def _prepare_text_for_analysis(self, objective: str, context: Dict) -> str:
-        """Prepare and combine text for analysis."""
-        text_parts = [objective.lower()]
-        
-        # Add context information
-        if context.get('repo'):
-            text_parts.append(str(context['repo']).lower())
-        
-        if context.get('module'):
-            text_parts.append(str(context['module']).lower())
-        
-        if context.get('file_paths'):
-            paths = context['file_paths']
-            if isinstance(paths, list):
-                text_parts.extend(path.lower() for path in paths if isinstance(path, str))
-        
-        if context.get('technologies'):
-            techs = context['technologies']
-            if isinstance(techs, list):
-                text_parts.extend(tech.lower() for tech in techs if isinstance(tech, str))
-        
-        return ' '.join(text_parts)
-    
-    def _extract_keywords(self, text: str) -> List[str]:
-        """Extract meaningful keywords from text."""
-        # Remove common stop words
-        stop_words = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-            'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-            'should', 'may', 'might', 'must', 'shall', 'can', 'this', 'that',
-            'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they'
+        # Statistics
+        self.classifications_made = 0
+        self.classification_stats = {
+            TaskClassification.SIMPLE_RESPONSE: 0,
+            TaskClassification.SINGLE_AGENT_NEEDED: 0,
+            TaskClassification.MULTI_AGENT_NEEDED: 0
         }
-        
-        # Extract words and clean them
-        words = re.findall(r'\b[a-z]+\b', text.lower())
-        keywords = []
-        
-        for word in words:
-            if len(word) > 2 and word not in stop_words:
-                keywords.append(word)
-        
-        # Add multi-word phrases
-        phrases = self._extract_phrases(text)
-        keywords.extend(phrases)
-        
-        return list(set(keywords))  # Remove duplicates
     
-    def _extract_phrases(self, text: str) -> List[str]:
-        """Extract meaningful multi-word phrases."""
-        phrases = []
-        
-        # Common technical phrases
-        phrase_patterns = [
-            r'\b(?:machine learning|data science|deep learning|neural network)\b',
-            r'\b(?:api design|rest api|graphql api)\b',
-            r'\b(?:frontend development|backend development)\b',
-            r'\b(?:unit test|integration test|e2e test)\b',
-            r'\b(?:code review|security audit)\b',
-            r'\b(?:ci/cd|continuous integration|continuous deployment)\b',
-            r'\b(?:user interface|user experience|ui/ux)\b',
-            r'\b(?:database design|schema design)\b',
-            r'\b(?:terminal ui|command line interface)\b',
-            r'\b(?:quality assurance|test automation)\b'
-        ]
-        
-        for pattern in phrase_patterns:
-            matches = re.findall(pattern, text.lower())
-            phrases.extend(matches)
-        
-        return phrases
-    
-    def _detect_task_type(self, keywords: List[str], objective: str) -> TaskType:
-        """Detect the primary task type based on weighted keywords."""
-        scores = {}
-        
-        # Check keywords with weighted scoring
-        for task_type, priority_keywords in self.TASK_TYPE_KEYWORDS.items():
-            score = 0
+    def _build_simple_patterns(self) -> List[Dict]:
+        """Build patterns for simple tasks that don't need agents."""
+        return [
+            # Greetings and pleasantries
+            {
+                "patterns": [r'\bhello\b', r'\bhi\b', r'\bhey\b', r'\bgood (morning|afternoon|evening)\b'],
+                "confidence": 0.95,
+                "reasoning": "Simple greeting"
+            },
             
-            # High priority keywords get more weight
-            for keyword in keywords:
-                for high_keyword in priority_keywords["high"]:
-                    if high_keyword in keyword or keyword in high_keyword:
-                        score += 3  # High priority weight
-                
-                for medium_keyword in priority_keywords["medium"]:
-                    if medium_keyword in keyword or keyword in medium_keyword:
-                        score += 1  # Medium priority weight
+            # Status and health checks
+            {
+                "patterns": [r'\bstatus\b', r'\bhow are you\b', r'\bworking\b', r'\bup\b', r'\bonline\b'],
+                "confidence": 0.90,
+                "reasoning": "Status inquiry"
+            },
             
-            scores[task_type] = score
-        
-        # If no clear winner from keywords, analyze objective directly
-        if max(scores.values()) == 0:
-            objective_lower = objective.lower()
-            for task_type, priority_keywords in self.TASK_TYPE_KEYWORDS.items():
-                # Check high priority keywords in objective
-                for high_keyword in priority_keywords["high"]:
-                    if high_keyword in objective_lower:
-                        scores[task_type] += 5  # Even higher weight for direct objective matches
-                
-                # Check medium priority keywords in objective
-                for medium_keyword in priority_keywords["medium"]:
-                    if medium_keyword in objective_lower:
-                        scores[task_type] += 2
-        
-        # Special case handling for ambiguous cases
-        objective_lower = objective.lower()
-        
-        # If both design and implement are present, determine primary intent FIRST
-        if ("design" in objective_lower and "implement" in objective_lower and 
-            len(objective_lower) > 80):  # Long objectives with both design and implement
-            # Check which comes first or has more context
-            design_pos = objective_lower.find("design")
-            implement_pos = objective_lower.find("implement") 
-            if design_pos < implement_pos and design_pos != -1:
-                return TaskType.DESIGN
-            elif implement_pos < design_pos and implement_pos != -1:
-                # If implement comes first, it's likely an implementation task
-                return TaskType.IMPLEMENTATION
-        
-        # Strong indicators that override scoring - but after design/implement check
-        if "comprehensive testing" in objective_lower or ("test" in objective_lower and "comprehensive" in objective_lower and 
-                                                         not ("design" in objective_lower or "implement" in objective_lower)):
-            return TaskType.TESTING
-        
-        # Audit + security should be review, not implementation 
-        if "audit" in objective_lower and "security" in objective_lower:
-            return TaskType.REVIEW
-        
-        if max(scores.values()) == 0:
-            return TaskType.IMPLEMENTATION  # Default fallback
-        
-        return max(scores, key=scores.get)
-    
-    def _assess_complexity(
-        self,
-        objective: str,
-        keywords: List[str],
-        context: Dict
-    ) -> ComplexityLevel:
-        """Assess task complexity based on multiple factors."""
-        obj_length = len(objective)
-        
-        # Check for explicit complexity indicators first
-        for level, indicators in self.COMPLEXITY_INDICATORS.items():
-            for indicator in indicators["keywords"]:
-                if indicator in objective.lower():
-                    return level
-        
-        # Adjust based on keyword complexity first (higher priority than length)
-        complexity_boosters = [
-            "enterprise", "scalable", "distributed", "microservice",
-            "architecture", "framework", "comprehensive", "advanced",
-            "optimization", "performance", "security", "integration",
-            "authentication", "authorization", "e-commerce", "platform",
-            "memory leak", "session management", "database", "production",
-            "critical", "system", "concurrent", "threading"
-        ]
-        
-        boost_count = sum(1 for keyword in keywords if any(
-            booster in keyword for booster in complexity_boosters
-        ))
-        
-        # Also check the objective text directly for complex patterns
-        objective_lower = objective.lower()
-        if ("memory" in keywords and "leak" in keywords) or "memory leak" in objective_lower:
-            boost_count += 1
-        if ("session" in keywords and "management" in keywords) or "session management" in objective_lower:
-            boost_count += 1
-        
-        # Strong boost for complex keywords
-        if boost_count >= 4:
-            return ComplexityLevel.CRITICAL
-        elif boost_count >= 3:
-            return ComplexityLevel.HIGH
-        elif boost_count >= 2:
-            return ComplexityLevel.MEDIUM
-        elif boost_count >= 1:
-            # If we have complexity boosters but short text, still boost from trivial
-            if obj_length <= 50:
-                return ComplexityLevel.LOW
-            else:
-                return ComplexityLevel.MEDIUM
-        
-        # Length-based assessment (fallback when no complexity boosters)
-        if obj_length <= 20:  # Very short objectives like "Fix typo"
-            return ComplexityLevel.TRIVIAL
-        elif obj_length <= 50:
-            return ComplexityLevel.TRIVIAL
-        elif obj_length <= 150:
-            return ComplexityLevel.LOW
-        elif obj_length <= 300:
-            return ComplexityLevel.MEDIUM
-        elif obj_length <= 600:
-            return ComplexityLevel.HIGH
-        else:
-            return ComplexityLevel.CRITICAL
-    
-    def _estimate_effort(
-        self,
-        complexity: ComplexityLevel,
-        keywords: List[str],
-        objective_length: int
-    ) -> int:
-        """Estimate effort on a 1-100 scale."""
-        base_effort = {
-            ComplexityLevel.TRIVIAL: 5,
-            ComplexityLevel.LOW: 15,
-            ComplexityLevel.MEDIUM: 35,
-            ComplexityLevel.HIGH: 65,
-            ComplexityLevel.CRITICAL: 85
-        }[complexity]
-        
-        # Adjust based on keyword density and objective length
-        keyword_factor = min(len(keywords) / 10, 0.3)  # Max 30% adjustment
-        length_factor = min(objective_length / 500, 0.2)  # Max 20% adjustment
-        
-        adjusted_effort = base_effort * (1 + keyword_factor + length_factor)
-        
-        return min(int(adjusted_effort), 100)
-    
-    def _assess_risk(
-        self,
-        complexity: ComplexityLevel,
-        task_type: TaskType,
-        keywords: List[str]
-    ) -> RiskLevel:
-        """Assess risk level based on complexity and task characteristics."""
-        base_risk = {
-            ComplexityLevel.TRIVIAL: RiskLevel.LOW,
-            ComplexityLevel.LOW: RiskLevel.LOW,
-            ComplexityLevel.MEDIUM: RiskLevel.MEDIUM,
-            ComplexityLevel.HIGH: RiskLevel.HIGH,
-            ComplexityLevel.CRITICAL: RiskLevel.CRITICAL
-        }[complexity]
-        
-        # High-risk task types
-        high_risk_types = {TaskType.REFACTORING, TaskType.MAINTENANCE}
-        if task_type in high_risk_types:
-            risk_levels = list(RiskLevel)
-            current_idx = risk_levels.index(base_risk)
-            if current_idx < len(risk_levels) - 1:
-                base_risk = risk_levels[current_idx + 1]
-        
-        # High-risk keywords
-        high_risk_keywords = [
-            "security", "production", "database", "migration",
-            "breaking", "legacy", "critical", "enterprise"
-        ]
-        
-        risk_count = sum(1 for keyword in keywords if any(
-            risk_keyword in keyword for risk_keyword in high_risk_keywords
-        ))
-        
-        if risk_count >= 2:
-            risk_levels = list(RiskLevel)
-            current_idx = risk_levels.index(base_risk)
-            if current_idx < len(risk_levels) - 1:
-                base_risk = risk_levels[current_idx + 1]
-        
-        return base_risk
-    
-    def _determine_roles(
-        self,
-        task_type: TaskType,
-        keywords: List[str],
-        complexity: ComplexityLevel,
-        context: Dict
-    ) -> Tuple[List[str], List[str]]:
-        """Determine required and optional roles for the task."""
-        role_scores = {}
-        
-        # Score roles based on keywords
-        for role, role_keywords in self.ROLE_KEYWORDS.items():
-            score = 0
-            for keyword in keywords:
-                for role_keyword in role_keywords:
-                    if role_keyword in keyword or keyword in role_keyword:
-                        score += 1
-            role_scores[role] = score
-        
-        # Add base roles based on task type
-        base_roles = {
-            TaskType.DESIGN: ["architect"],
-            TaskType.IMPLEMENTATION: ["coder"],
-            TaskType.REVIEW: ["qa"],
-            TaskType.ANALYSIS: ["business_analyst"],
-            TaskType.TESTING: ["qa"],
-            TaskType.DOCUMENTATION: ["docs"],
-            TaskType.REFACTORING: ["coder", "architect"],
-            TaskType.BUG_FIX: ["coder"],
-            TaskType.MAINTENANCE: ["coder"],
-            TaskType.RESEARCH: ["business_analyst"]
-        }
-        
-        required_roles = base_roles.get(task_type, ["coder"])
-        
-        # Add high-scoring roles to required
-        threshold = max(2, len(keywords) // 5)  # Dynamic threshold
-        for role, score in role_scores.items():
-            if score >= threshold and role not in required_roles:
-                required_roles.append(role)
-        
-        # Optional roles (lower scoring but still relevant)
-        optional_threshold = max(1, threshold // 2)
-        optional_roles = []
-        for role, score in role_scores.items():
-            if optional_threshold <= score < threshold and role not in required_roles:
-                optional_roles.append(role)
-        
-        # Add complexity-based roles
-        if complexity in {ComplexityLevel.HIGH, ComplexityLevel.CRITICAL}:
-            if "architect" not in required_roles and "architect" not in optional_roles:
-                optional_roles.append("architect")
-            if "chief_qa_engineer" not in required_roles and "chief_qa_engineer" not in optional_roles:
-                optional_roles.append("chief_qa_engineer")
-        
-        return required_roles, optional_roles
-    
-    def _detect_technologies(self, keywords: List[str], context: Dict) -> List[TechnologyStack]:
-        """Detect relevant technology stacks."""
-        tech_scores = {}
-        
-        for tech, tech_keywords in self.TECHNOLOGY_KEYWORDS.items():
-            score = 0
-            for keyword in keywords:
-                for tech_keyword in tech_keywords:
-                    if tech_keyword in keyword or keyword in tech_keyword:
-                        score += 1
-            tech_scores[tech] = score
-        
-        # Add technologies from context
-        if context.get('technologies'):
-            context_techs = context['technologies']
-            if isinstance(context_techs, list):
-                for tech_str in context_techs:
-                    try:
-                        tech = TechnologyStack(tech_str.lower())
-                        tech_scores[tech] = tech_scores.get(tech, 0) + 2
-                    except ValueError:
-                        pass  # Unknown technology
-        
-        # Return technologies with scores > 0
-        return [tech for tech, score in tech_scores.items() if score > 0]
-    
-    def _calculate_confidence(
-        self,
-        keywords: List[str],
-        task_type: TaskType,
-        required_roles: List[str],
-        technologies: List[TechnologyStack]
-    ) -> float:
-        """Calculate classification confidence score."""
-        confidence = 0.5  # Base confidence
-        
-        # Keyword quality (more specific keywords = higher confidence)
-        if len(keywords) >= 5:
-            confidence += 0.2
-        elif len(keywords) >= 3:
-            confidence += 0.1
-        
-        # Role determination confidence
-        if len(required_roles) > 0:
-            confidence += 0.2
-        
-        # Technology detection confidence
-        if len(technologies) > 0:
-            confidence += 0.1
-        
-        # Task type confidence (some types are easier to detect)
-        high_confidence_types = {
-            TaskType.TESTING, TaskType.DOCUMENTATION,
-            TaskType.BUG_FIX, TaskType.REVIEW
-        }
-        if task_type in high_confidence_types:
-            confidence += 0.1
-        
-        return min(confidence, 1.0)
-    
-    def _generate_cache_key(self, objective: str, context: Dict) -> str:
-        """Generate a cache key for the classification."""
-        content = f"{objective}|{sorted(context.items())}"
-        return hashlib.sha256(content.encode()).hexdigest()
-    
-    def _get_cached_classification(self, cache_key: str) -> Optional[ClassificationCache]:
-        """Retrieve cached classification if available and not expired."""
-        if cache_key not in self._classification_cache:
-            return None
-        
-        cached = self._classification_cache[cache_key]
-        if cached.is_expired(self._cache_ttl):
-            del self._classification_cache[cache_key]
-            return None
-        
-        return cached
-    
-    def _cache_classification(self, cache_key: str, classification: TaskClassification):
-        """Cache a classification result."""
-        cache_entry = ClassificationCache(
-            objective_hash=cache_key[:16],  # Shortened hash for display
-            context_hash=cache_key[16:32],
-            classification=classification,
-            created_at=datetime.now(timezone.utc),
-            hit_count=1
-        )
-        
-        self._classification_cache[cache_key] = cache_entry
-        
-        # Cleanup old entries if cache gets too large
-        if len(self._classification_cache) > 1000:
-            self._cleanup_cache()
-    
-    def _cleanup_cache(self):
-        """Remove expired and least used cache entries."""
-        now = datetime.now(timezone.utc)
-        
-        # Remove expired entries
-        expired_keys = [
-            key for key, entry in self._classification_cache.items()
-            if entry.is_expired(self._cache_ttl)
-        ]
-        
-        for key in expired_keys:
-            del self._classification_cache[key]
-        
-        # If still too large, remove least used entries
-        if len(self._classification_cache) > 800:
-            sorted_entries = sorted(
-                self._classification_cache.items(),
-                key=lambda x: (x[1].hit_count, x[1].created_at)
-            )
+            # Basic help requests
+            {
+                "patterns": [r'\bhelp\b(?!\s+\w+\s+\w+)', r'\bwhat can you do\b', r'\bcapabilities\b'],
+                "confidence": 0.85,
+                "reasoning": "General help request"
+            },
             
-            # Remove bottom 20%
-            remove_count = len(sorted_entries) // 5
-            for key, _ in sorted_entries[:remove_count]:
-                del self._classification_cache[key]
-    
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """Get cache performance statistics."""
-        total_entries = len(self._classification_cache)
-        total_hits = sum(entry.hit_count for entry in self._classification_cache.values())
-        
-        if total_entries == 0:
-            return {
-                "total_entries": 0,
-                "total_hits": 0,
-                "average_hits": 0,
-                "cache_size_mb": 0
+            # Simple questions without complexity
+            {
+                "patterns": [r'^\w{1,20}\?$', r'^(what|who|when|where|why|how)\s+\w{1,30}\?$'],
+                "confidence": 0.70,
+                "reasoning": "Simple question"
+            },
+            
+            # Acknowledgments and confirmations
+            {
+                "patterns": [r'\b(ok|okay|yes|no|thanks|thank you)\b$'],
+                "confidence": 0.80,
+                "reasoning": "Simple acknowledgment"
             }
-        
-        average_hits = total_hits / total_entries
-        
-        # Rough cache size estimation
-        cache_size_mb = total_entries * 2  # Rough estimate: 2KB per entry
-        
+        ]
+    
+    def _build_agent_mapping(self) -> Dict[str, Dict]:
+        """Build mapping of task types to appropriate agents."""
         return {
-            "total_entries": total_entries,
-            "total_hits": total_hits,
-            "average_hits": round(average_hits, 2),
-            "cache_size_mb": cache_size_mb / 1024  # Convert to MB
+            "code": {
+                "agents": ["codex", "claude"],  # Prefer codex for coding
+                "patterns": [
+                    r'\b(write|create|implement|code|program|script|function|class|method)\b',
+                    r'\b(debug|fix|error|bug|issue)\b',
+                    r'\b(refactor|optimize|improve|enhance)\b',
+                    r'\b(python|javascript|java|c\+\+|rust|go|typescript)\b'
+                ],
+                "confidence": 0.85
+            },
+            
+            "analysis": {
+                "agents": ["claude", "codex"],  # Prefer claude for analysis
+                "patterns": [
+                    r'\b(analyze|review|examine|assess|evaluate)\b',
+                    r'\b(explain|describe|documentation|docs)\b',
+                    r'\b(architecture|design|structure|pattern)\b',
+                    r'\b(performance|optimization|efficiency)\b',
+                    r'\b(suggest.*improvement|recommend)\b'
+                ],
+                "confidence": 0.85
+            },
+            
+            "local_tasks": {
+                "agents": ["ollama"],  # Use ollama for simple local tasks
+                "patterns": [
+                    r'\b(local|offline|private|secure)\b',
+                    r'\b(simple|quick|basic|straightforward)\b',
+                    r'\btest\b(?!\s+(suite|framework|automation))'
+                ],
+                "confidence": 0.75
+            },
+            
+            "complex_projects": {
+                "agents": ["claude", "codex"],  # Large context needs
+                "patterns": [
+                    r'\b(create|build).*\b(project|application|system|platform|website|app)\b',
+                    r'\b(web application|mobile app|desktop app|full stack)\b',
+                    r'\b(with.*authentication|with.*database|with.*api)\b',
+                    r'\b(project|application|system|platform)\b',
+                    r'\b(migrate|integrate|deploy|configure)\b',
+                    r'\b(enterprise|production|scale)\b'
+                ],
+                "confidence": 0.80
+            }
+        }
+    
+    def _build_complexity_indicators(self) -> Dict[str, List[str]]:
+        """Build indicators of task complexity."""
+        return {
+            "high": [
+                "create application", "build system", "implement framework",
+                "design architecture", "multi-step", "enterprise", "production",
+                "integrate with", "migrate from", "full stack", "end-to-end"
+            ],
+            
+            "moderate": [
+                "write function", "create script", "implement feature", 
+                "analyze code", "debug issue", "optimize performance",
+                "configure setup", "write tests", "documentation"
+            ],
+            
+            "low": [
+                "explain", "show example", "quick fix", "simple question",
+                "what is", "how to", "basic", "tutorial"
+            ]
+        }
+    
+    def _build_multi_agent_indicators(self) -> List[str]:
+        """Build indicators that suggest multiple agents may be needed."""
+        return [
+            # Multiple action words
+            r'\b(and|also|plus|additionally|furthermore|moreover)\b',
+            
+            # Complex project indicators
+            r'\b(frontend and backend|full stack|end-to-end)\b',
+            r'\b(design and implement|create and deploy|build and test)\b',
+            
+            # Architecture complexity indicators
+            r'\b(microservices|distributed system|multi-tier|architecture)\b',
+            r'\b(scalable|enterprise|production-ready)\b',
+            
+            # Multiple technology mentions
+            r'\b(react|vue|angular).*(node|express|django|flask)\b',
+            r'\b(database|api|ui|frontend|backend|deployment)\b.*\b(database|api|ui|frontend|backend|deployment)\b',
+            
+            # Process indicators
+            r'\b(first.*then|step by step|phase|stage|workflow)\b',
+            
+            # Coordination words
+            r'\b(coordinate|orchestrate|manage|oversee)\b'
+        ]
+    
+    def classify(self, user_input: str, context: Dict = None) -> ClassificationResult:
+        """Classify a user task and determine orchestration strategy (synchronous version)."""
+        if context is None:
+            context = {}
+        
+        # Try to run in existing event loop, or create new one if needed
+        try:
+            loop = asyncio.get_running_loop()
+            # If we're in an event loop, use create_task and wait
+            task = loop.create_task(self.classify_task(user_input, context))
+            # This is a bit tricky - we need to run the task synchronously
+            # For now, let's just run the classification logic directly
+            return self._classify_task_sync(user_input, context)
+        except RuntimeError:
+            # No running event loop, we can use asyncio.run
+            return asyncio.run(self.classify_task(user_input, context))
+    
+    def _classify_task_sync(self, user_input: str, context: Dict) -> ClassificationResult:
+        """Synchronous version of the classification logic."""
+        self.classifications_made += 1
+        
+        user_input_clean = user_input.strip().lower()
+        
+        # Step 1: Check for simple patterns first
+        simple_result = self._check_simple_patterns(user_input_clean)
+        if simple_result:
+            self.classification_stats[TaskClassification.SIMPLE_RESPONSE] += 1
+            return simple_result
+        
+        # Step 2: Check for multi-agent indicators
+        multi_agent_score = self._calculate_multi_agent_score(user_input_clean)
+        if multi_agent_score > 0.6:
+            agents = self._determine_multi_agent_team(user_input_clean)
+            result = ClassificationResult(
+                classification=TaskClassification.MULTI_AGENT_NEEDED,
+                confidence=multi_agent_score,
+                required_agents=agents,
+                reasoning=f"Multi-agent coordination needed (score: {multi_agent_score:.2f})",
+                task_complexity=self._assess_complexity(user_input_clean),
+                estimated_response_time="extended"
+            )
+            self.classification_stats[TaskClassification.MULTI_AGENT_NEEDED] += 1
+            return result
+        
+        # Step 3: Determine single agent need
+        agent_match = self._find_best_agent_match(user_input_clean)
+        if agent_match:
+            result = ClassificationResult(
+                classification=TaskClassification.SINGLE_AGENT_NEEDED,
+                confidence=agent_match["confidence"],
+                required_agents=[agent_match["agent"]],
+                reasoning=f"Single agent task: {agent_match['reason']}",
+                task_complexity=self._assess_complexity(user_input_clean),
+                estimated_response_time="moderate"
+            )
+            self.classification_stats[TaskClassification.SINGLE_AGENT_NEEDED] += 1
+            return result
+        
+        # Step 4: Fallback to simple response with low confidence
+        result = ClassificationResult(
+            classification=TaskClassification.SIMPLE_RESPONSE,
+            confidence=0.3,
+            required_agents=[],
+            reasoning="No clear agent match, defaulting to simple response",
+            task_complexity="simple",
+            estimated_response_time="immediate"
+        )
+        self.classification_stats[TaskClassification.SIMPLE_RESPONSE] += 1
+        return result
+    
+    async def classify_task(self, user_input: str, context: Dict) -> ClassificationResult:
+        """Classify a user task and determine orchestration strategy."""
+        self.classifications_made += 1
+        
+        user_input_clean = user_input.strip().lower()
+        
+        # Step 1: Check for simple patterns first
+        simple_result = self._check_simple_patterns(user_input_clean)
+        if simple_result:
+            self.classification_stats[TaskClassification.SIMPLE_RESPONSE] += 1
+            return simple_result
+        
+        # Step 2: Check for multi-agent indicators
+        multi_agent_score = self._calculate_multi_agent_score(user_input_clean)
+        if multi_agent_score > 0.6:
+            agents = self._determine_multi_agent_team(user_input_clean)
+            result = ClassificationResult(
+                classification=TaskClassification.MULTI_AGENT_NEEDED,
+                confidence=multi_agent_score,
+                required_agents=agents,
+                reasoning=f"Multi-agent coordination needed (score: {multi_agent_score:.2f})",
+                task_complexity=self._assess_complexity(user_input_clean),
+                estimated_response_time="extended"
+            )
+            self.classification_stats[TaskClassification.MULTI_AGENT_NEEDED] += 1
+            return result
+        
+        # Step 3: Determine single agent need
+        agent_match = self._find_best_agent_match(user_input_clean)
+        if agent_match:
+            result = ClassificationResult(
+                classification=TaskClassification.SINGLE_AGENT_NEEDED,
+                confidence=agent_match["confidence"],
+                required_agents=[agent_match["agent"]],
+                reasoning=f"Single agent task: {agent_match['reason']}",
+                task_complexity=self._assess_complexity(user_input_clean),
+                estimated_response_time="moderate"
+            )
+            self.classification_stats[TaskClassification.SINGLE_AGENT_NEEDED] += 1
+            return result
+        
+        # Step 4: Fallback to simple response with low confidence
+        result = ClassificationResult(
+            classification=TaskClassification.SIMPLE_RESPONSE,
+            confidence=0.3,
+            required_agents=[],
+            reasoning="No clear agent match, defaulting to simple response",
+            task_complexity="simple",
+            estimated_response_time="immediate"
+        )
+        self.classification_stats[TaskClassification.SIMPLE_RESPONSE] += 1
+        return result
+    
+    def _check_simple_patterns(self, user_input: str) -> Optional[ClassificationResult]:
+        """Check if input matches simple task patterns."""
+        
+        # First check if this looks like a complex task that should override simple patterns
+        complexity_overrides = [
+            r'\b(write|create|implement|code|program|script|function|class|method)\b',
+            r'\b(analyze|review|examine|assess|evaluate)\b.*(code|performance|system|data|algorithm|structure)',
+            r'\b(debug|fix|error|bug|issue|problem)\b',
+            r'\b(optimize|improve|enhance|refactor)\b',
+            r'\b(build|deploy|configure|setup|install)\b',
+            r'\b(performance|efficiency|speed|memory|cpu)\b',
+            r'\b(suggest.*improvement|recommend.*change)\b'
+        ]
+        
+        for override_pattern in complexity_overrides:
+            if re.search(override_pattern, user_input, re.IGNORECASE):
+                return None  # Don't classify as simple if it matches complexity override
+        
+        for pattern_group in self.simple_patterns:
+            for pattern in pattern_group["patterns"]:
+                if re.search(pattern, user_input, re.IGNORECASE):
+                    return ClassificationResult(
+                        classification=TaskClassification.SIMPLE_RESPONSE,
+                        confidence=pattern_group["confidence"],
+                        required_agents=[],
+                        reasoning=pattern_group["reasoning"],
+                        task_complexity="trivial",
+                        estimated_response_time="immediate"
+                    )
+        return None
+    
+    def _calculate_multi_agent_score(self, user_input: str) -> float:
+        """Calculate score indicating likelihood of multi-agent need."""
+        score = 0.0
+        
+        # Check multi-agent indicators
+        for indicator in self.multi_agent_indicators:
+            if re.search(indicator, user_input, re.IGNORECASE):
+                score += 0.2
+        
+        # Check for multiple technology/domain mentions
+        domains = ["frontend", "backend", "database", "api", "ui", "deployment", "testing"]
+        domain_mentions = sum(1 for domain in domains if domain in user_input)
+        if domain_mentions >= 2:
+            score += 0.3
+        
+        # Check for complexity indicators
+        if any(indicator in user_input for indicator in self.complexity_indicators["high"]):
+            score += 0.3
+        
+        # Length heuristic (longer requests often need more coordination)
+        if len(user_input) > 200:
+            score += 0.1
+        
+        return min(score, 1.0)
+    
+    def _find_best_agent_match(self, user_input: str) -> Optional[Dict]:
+        """Find the best agent match for a single-agent task."""
+        best_match = None
+        best_score = 0.0
+        
+        for task_type, config in self.agent_mapping.items():
+            score = 0.0
+            
+            # Check pattern matches
+            pattern_matches = 0
+            for pattern in config["patterns"]:
+                if re.search(pattern, user_input, re.IGNORECASE):
+                    pattern_matches += 1
+                    score += 0.3  # Increased from 0.2 to make it easier to reach threshold
+            
+            if pattern_matches > 0:
+                score = min(score * config["confidence"], 0.95)  # Apply confidence but cap it
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = {
+                        "agent": config["agents"][0],  # Preferred agent
+                        "confidence": score,
+                        "reason": f"Best match for {task_type} task"
+                    }
+        
+        return best_match if best_score > 0.25 else None
+    
+    def _determine_multi_agent_team(self, user_input: str) -> List[str]:
+        """Determine which agents to include in multi-agent team."""
+        agents = set()
+        
+        # Add agents based on detected patterns
+        for task_type, config in self.agent_mapping.items():
+            for pattern in config["patterns"]:
+                if re.search(pattern, user_input, re.IGNORECASE):
+                    agents.update(config["agents"])
+        
+        # Ensure we have at least a basic agent
+        if not agents:
+            agents.add("codex")  # Default fallback
+        
+        # Limit team size
+        return list(agents)[:4]  # Max 4 agents to avoid chaos
+    
+    def _assess_complexity(self, user_input: str) -> str:
+        """Assess the complexity of the task."""
+        for complexity, indicators in self.complexity_indicators.items():
+            if any(indicator in user_input for indicator in indicators):
+                return complexity
+        return "simple"
+    
+    def get_classification_stats(self) -> Dict:
+        """Get classification statistics."""
+        return {
+            "total_classifications": self.classifications_made,
+            "classification_breakdown": {
+                k.value: v for k, v in self.classification_stats.items()
+            },
+            "simple_response_rate": (
+                self.classification_stats[TaskClassification.SIMPLE_RESPONSE] / 
+                max(self.classifications_made, 1)
+            )
         }

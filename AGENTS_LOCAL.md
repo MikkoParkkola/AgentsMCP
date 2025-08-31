@@ -32,7 +32,7 @@ Implications:
 | Metrics Collector | `ollama-turbo` | `ollama` | Publish weekly metric packets |
 
 Notes:
-- Codex/Claude/Gemini are optional and disabled by default. Enable only after configuring credentials per `CLAUDE.md`, `GEMINI.md`. Keep `ollama-turbo` as the default due to speed/cost.
+- Codex/Claude/Gemini are optional and disabled by default. Enable only after configuring credentials (see provider guidance in `docs/models.md`). Keep `ollama-turbo` as the default due to speed/cost.
 - Overflow coding: if `ollama-turbo` rate-limits, spill to local `ollama`.
 
 ---
@@ -164,7 +164,7 @@ Classes of service
 - Context bundles: `context_bundles/` (git-ignored if large).
 - Ownership & locks: `ownership_map.json`, `path_locks.json` (root).
 - Plans/specs: `plan.json`, `shards.json`, `icds/*.json`, `golden_tests/*.json`.
-- Operational logs: `docs/changelog.md`, `docs/open-issues.md`, `docs/decision-log.md`, `docs/coordination-log.md`.
+- Operational logs: `docs/changelog.md`, `docs/decision-log.md`.
 
 ---
 
@@ -204,16 +204,15 @@ Gates (suggested local commands)
 ---
 
 ## Enabling Optional Cloud Models (Off by default)
-- Claude/Gemini: see `CLAUDE.md`, `GEMINI.md` for credentials and enabling. After enabling, update routing:
+- Claude/Gemini: see `docs/models.md` for provider credentials and enabling. After enabling, update routing:
   - Architect/QA → Claude/Gemini for whole‑repo or long contracts.
   - Keep `ollama-turbo` as default for day‑to‑day speed/cost.
 
 ---
 
 ## References (local context)
-- Delegation/process: `docs/delegation.md`, `docs/work-plan.md`, `docs/product-status.md`
-- Benchmarks & UX: `PERFORMANCE_ANALYSIS_REPORT.md`, `ui-ux-review.md`
-- Model notes: `CLAUDE.md`, `GEMINI.md`, `QWEN.md`, `ORCHESTRATOR_MODELS.md`
+- Delegation/process: see `docs/backlog.md` (single source for improvements)
+ 
 
 Confidence: 90% (tailored to current repo + environment; revisit after enabling any cloud models or changing sandbox/approval policy).
 

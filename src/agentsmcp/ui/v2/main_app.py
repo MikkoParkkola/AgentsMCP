@@ -1732,84 +1732,18 @@ class TUILauncher:
         self.app: Optional[MainTUIApp] = None
     
     async def launch_tui(self, cli_config: Optional[CLIConfig] = None) -> int:
-        """Launch the TUI with fallback handling.
+        """Launch the TUI using the single working implementation.
         
         Args:
-            cli_config: CLI configuration
+            cli_config: CLI configuration (currently not used by fixed implementation)
             
         Returns:
             Exit code
         """
-        # Check for emergency minimal TUI mode or immediate fix mode
-        import os
-        use_fixed = (
-            os.getenv("AGENTS_TUI_MINIMAL_EMERGENCY", "0") == "1" or
-            os.getenv("AGENTS_TUI_IMMEDIATE_FIX", "1") == "1"  # Default to immediate fix
-        )
-        if use_fixed:
-            sys.stdout.write("\r🔧 Using fixed working TUI with real LLM connection\n")
-            sys.stdout.flush()
-            from .fixed_working_tui import launch_fixed_working_tui
-            return await launch_fixed_working_tui()
-        
-        try:
-            # Try to launch v2 TUI
-            self.app = MainTUIApp(cli_config)
-            return await self.app.run()
-            
-        except Exception as e:
-            logger.exception(f"Failed to launch TUI v2: {e}")
-            
-            # Emergency fallback to minimal TUI for immediate usability
-            print("⚠️  TUI v2 failed, using minimal emergency TUI for immediate typing fix")
-            try:
-                from .minimal_working_tui import launch_minimal_tui
-                return await launch_minimal_tui()
-            except Exception as fallback_error:
-                logger.exception(f"Emergency TUI also failed: {fallback_error}")
-            
-            # Respect no-fallback mode for development
-            import os as _os
-            if _os.getenv("AGENTS_TUI_V2_NO_FALLBACK", "0") == "1":
-                print("❌ TUI v2 failed and fallback disabled (AGENTS_TUI_V2_NO_FALLBACK=1)")
-                return 1
-            
-            # Fallback to v1 TUI if v2 fails
-            try:
-                logger.warning("Falling back to legacy TUI v1...")
-                return await self._fallback_to_v1(cli_config)
-            except Exception as fallback_error:
-                logger.exception(f"Fallback to v1 also failed: {fallback_error}")
-                print("❌ Both TUI v2 and v1 failed to start")
-                print(f"Error: {e}")
-                return 1
+        logger.info("Launching fixed working TUI - the only supported TUI implementation")
+        from .fixed_working_tui import launch_fixed_working_tui
+        return await launch_fixed_working_tui()
     
-    async def _fallback_to_v1(self, cli_config: Optional[CLIConfig]) -> int:
-        """Fallback to v1 TUI system.
-        
-        Args:
-            cli_config: CLI configuration
-            
-        Returns:
-            Exit code
-        """
-        try:
-            from ..modern_tui import ModernTUI, TUIConfig
-            
-            # Convert CLI config to TUI config
-            tui_config = TUIConfig(
-                theme=cli_config.theme_mode if cli_config else "auto",
-                show_welcome=cli_config.show_welcome if cli_config else True,
-                agent_type=cli_config.agent_type if cli_config else "ollama-turbo-coding"
-            )
-            
-            tui = ModernTUI(tui_config)
-            await tui.run()
-            return 0
-            
-        except Exception as e:
-            logger.exception(f"V1 fallback failed: {e}")
-            raise
 
 
 # Convenience function for CLI integration

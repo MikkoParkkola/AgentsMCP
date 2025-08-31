@@ -79,3 +79,12 @@ This file records notable changes to the project. Keep entries in reverse chrono
   - Audit trail persisted to `build/hitl_audit.log` (JSONL).
   - Rate limiting on decision endpoint and security headers.
   - Zero-impact fast path for non-critical ops.
+## 2025-08-31 — Documentation consolidation
+
+- Consolidated Markdown docs to one source of truth per topic.
+- Canonical CLI doc is now `docs/cli-client.md` (removed `CLI_README.md`).
+- Removed archived/superseded docs: `docs/ARCHITECTURE_ANALYSIS_2025.md`, `docs/ui-ux-improvement-plan.md`.
+- Merged provider guidance (Claude, Gemini, Qwen) into `docs/models.md`; removed `CLAUDE.md`, `GEMINI.md`, `QWEN.md`.
+- Merged ICD policy into `docs/interfaces/README.md`; removed duplicate `interfaces/README.md`.
+- Moved TUI issue items into `docs/backlog.md` (top P0/P1); removed `docs/tui_issues.md`, `IMMEDIATE_TUI_FIX.md`, `CRITICAL_TUI_FIXES_SUMMARY.md`.
+- Promoted viable ideation items to backlog (Later/P2) and removed the separate ideation docs.

@@ -19,12 +19,7 @@ import time
 
 from .theme_manager import ThemeManager, Fore
 
-# The modern TUI is introduced in a later task. Import lazily so that the
-# package can still be imported when the class is not yet present.
-try:
-    from .modern_tui import ModernTUI  # type: ignore
-except Exception:  # pragma: no cover – import may legitimately fail now
-    ModernTUI = None
+# Legacy modern TUI removed - using only the working TUI implementation
 from .ui_components import UIComponents
 from .status_dashboard import StatusDashboard
 from .command_interface import CommandInterface
@@ -225,7 +220,7 @@ class CLIApp:
             elif self.current_mode == "stats":
                 await self._run_statistics_mode()
             elif self.current_mode == "tui":
-                # Modern world-class TUI – prefer v2 even if ModernTUI import fails.
+                # Launch the single working TUI implementation
                 try:
                     await self._run_modern_tui()
                 except Exception as exc:  # pragma: no cover – defensive
@@ -323,36 +318,12 @@ class CLIApp:
         await self.status_dashboard.start_dashboard()
     
     async def _run_tui_shell(self):
-        """Run a minimal Rich-based TUI shell (scaffold)."""
-        try:
-            from .tui_shell import TUIShell
-            # Ensure a real terminal is available for the TUI
-            try:
-                import sys as _sys
-                if not (_sys.stdin.isatty() and _sys.stdout.isatty()):
-                    raise RuntimeError("TUI requires a TTY (stdin/stdout not a terminal)")
-            except Exception:
-                # If detection failed assume not suitable
-                raise RuntimeError("TUI requires a TTY (terminal not detected)")
-            # Provide chat handler that routes to the existing conversation manager
-            async def _chat_handler(text: str) -> str:
-                try:
-                    if hasattr(self, 'command_interface') and hasattr(self.command_interface, 'conversation_manager'):
-                        resp = await self.command_interface.conversation_manager.process_input(text)
-                        return resp or "✅ Message processed successfully"
-                    else:
-                        return "⚠️ Conversation manager not available"
-                except Exception as e:
-                    return f"❌ Chat error: {str(e)}"
-
-            shell = TUIShell(theme_manager=self.theme_manager, chat_handler=_chat_handler)
-            self._current_tui_shell = shell
-            try:
-                await shell.run()
-            finally:
-                self._current_tui_shell = None
-        except Exception as e:
-            await self._show_error(f"TUI shell not available: {e}")
+        """Launch the fixed working TUI (replaces old tui_shell)."""
+        print("🚀 Launching TUI (fixed working implementation)...")
+        from .v2 import launch_main_tui
+        exit_code = await launch_main_tui(self.config)
+        if exit_code != 0:
+            await self._show_error(f"TUI failed with exit code: {exit_code}")
 
     async def _run_statistics_mode(self):
         """Run the statistics display"""
@@ -374,59 +345,16 @@ class CLIApp:
         await self.statistics_display.start_display()
 
     async def _run_modern_tui(self):
-        """Start the new TUI - v2 with v1 fallback.
+        """Launch the fixed working TUI (single implementation).
 
-        This method first attempts to launch the new v2 TUI system which fixes
-        the typing and scrollback issues. If that fails, it falls back to the
-        v1 ModernTUI for compatibility.
+        This method launches the only supported TUI implementation which fixes
+        the typing and scrollback issues. All fallbacks have been removed.
         """
-        import os
-        # Default to v2; allow opt-out via env
-        # - AGENTS_TUI_ENABLE_V2: defaults to "1" (enabled)
-        # - AGENTS_TUI_DISABLE_V2: when set to "1", force v1 fallback
-        enable_v2 = (os.getenv("AGENTS_TUI_ENABLE_V2", "1") == "1") and (os.getenv("AGENTS_TUI_DISABLE_V2", "0") != "1")
-        try:
-            if enable_v2:
-                # Ensure sane defaults for v2 behavior when launched via ./agentsmcp tui
-                try:
-                    os.environ.setdefault("AGENTS_TUI_SUPPRESS_TIPS", "1")  # keep exit clean
-                    # Prefer full v2 UI by default for rich features; raw minimal mode opt-in
-                    os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "0")
-                    os.environ.setdefault("AGENTS_TUI_V2_BACKEND", "1")     # connect backend by default
-                    os.environ.setdefault("AGENTS_TUI_V2_BACKEND_PREWARM", "1")
-                except Exception:
-                    pass
-                # Try v2 TUI first - the new and improved system
-                from .v2 import launch_main_tui
-                # Use proper cursor reset to prevent progressive indentation
-                sys.stdout.write("\r🚀 Starting TUI v2...\n")
-                sys.stdout.flush()
-                exit_code = await launch_main_tui(self.config)
-                if exit_code != 0:
-                    raise RuntimeError(f"TUI v2 failed with exit code: {exit_code}")
-            else:
-                raise RuntimeError("TUI v2 disabled (default)")
-        except Exception as v2_error:
-            print(f"⚠️  TUI v2 failed: {v2_error}")
-            print("🔄 Falling back to TUI v1...")
-            
-            # Fallback to v1 TUI (ModernTUI)
-            if ModernTUI is None:
-                raise RuntimeError("Both TUI v2 and v1 are not available")
-
-            # Pull known arguments from config
-            theme = self.config.theme_mode
-            no_welcome = not self.config.show_welcome
-
-            tui = ModernTUI(
-                config=self.config,
-                theme_manager=self.theme_manager,
-                conversation_manager=self.command_interface.conversation_manager,
-                orchestration_manager=self.orchestration_manager,
-                theme=theme,
-                no_welcome=no_welcome,
-            )
-            await tui.run()
+        print("🚀 Starting fixed working TUI...")
+        from .v2 import launch_main_tui
+        exit_code = await launch_main_tui(self.config)
+        if exit_code != 0:
+            raise RuntimeError(f"TUI failed with exit code: {exit_code}")
     
     async def _show_error(self, error_message: str):
         """Display error message beautifully"""

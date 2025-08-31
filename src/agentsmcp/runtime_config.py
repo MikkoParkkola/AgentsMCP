@@ -7,9 +7,22 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import yaml
-from pydantic import BaseModel, Field, field_validator
-from pydantic_settings import BaseSettings
+from .lazy_loading import lazy_import, memoized_property
+
+# Lazy imports for heavy dependencies
+yaml = lazy_import('yaml')
+pydantic = lazy_import('pydantic')
+pydantic_settings = lazy_import('pydantic_settings')
+
+
+def _setup_yaml_representers():
+    """Setup YAML representers for enum types to ensure proper serialization."""
+    def represent_enum(dumper, data):
+        return dumper.represent_scalar('tag:yaml.org,2002:str', data.value)
+    
+    yaml.add_representer(StorageType, represent_enum)
+    yaml.add_representer(TransportType, represent_enum)
+    yaml.add_representer(ProviderType, represent_enum)
 
 
 def generate_local_jwt_secret() -> str:
@@ -31,30 +44,30 @@ class StorageType(str, Enum):
     REDIS = "redis"
 
 
-class ServerConfig(BaseModel):
-    host: str = Field(default="localhost", description="Server host")
-    port: int = Field(default=8000, description="Server port")
-    cors_origins: List[str] = Field(
+class ServerConfig(pydantic.BaseModel):
+    host: str = pydantic.Field(default="localhost", description="Server host")
+    port: int = pydantic.Field(default=8000, description="Server port")
+    cors_origins: List[str] = pydantic.Field(
         default_factory=lambda: ["*"], description="CORS allowed origins"
     )
 
-    @field_validator("port")
+    @pydantic.field_validator("port")
     def validate_port(cls, v):
         if not 1 <= v <= 65535:
             raise ValueError("Port must be between 1 and 65535")
         return v
 
 
-class TransportConfig(BaseModel):
+class TransportConfig(pydantic.BaseModel):
     type: TransportType = TransportType.HTTP
-    config: Dict[str, Any] = Field(default_factory=dict)
+    config: Dict[str, Any] = pydantic.Field(default_factory=dict)
 
 
-class StorageConfig(BaseModel):
+class StorageConfig(pydantic.BaseModel):
     type: StorageType = StorageType.MEMORY
-    config: Dict[str, Any] = Field(default_factory=dict)
+    config: Dict[str, Any] = pydantic.Field(default_factory=dict)
 
-    @field_validator("config")
+    @pydantic.field_validator("config")
     def validate_storage_config(cls, v, info):
         storage_type = info.data.get("type") if info.data else None
         if storage_type == StorageType.SQLITE:
@@ -73,10 +86,10 @@ class StorageConfig(BaseModel):
         return v
 
 
-class ToolConfig(BaseModel):
+class ToolConfig(pydantic.BaseModel):
     name: str
     type: str
-    config: Dict[str, Any] = Field(default_factory=dict)
+    config: Dict[str, Any] = pydantic.Field(default_factory=dict)
     enabled: bool = True
 
 
@@ -88,13 +101,17 @@ class ProviderType(str, Enum):
     CUSTOM = "custom"
 
 
-class ProviderConfig(BaseModel):
+# Initialize YAML representers after enum definitions
+_setup_yaml_representers()
+
+
+class ProviderConfig(pydantic.BaseModel):
     name: ProviderType
     api_key: Optional[str] = None
     api_base: Optional[str] = None
 
 
-class MCPServerConfig(BaseModel):
+class MCPServerConfig(pydantic.BaseModel):
     """Config for a single MCP server.
 
     Supports simple stdio (command) or URL-based transports (sse/websocket).
@@ -102,95 +119,95 @@ class MCPServerConfig(BaseModel):
 
     name: str
     enabled: bool = True
-    transport: Optional[str] = Field(
+    transport: Optional[str] = pydantic.Field(
         default="stdio", description="Transport: stdio|sse|websocket"
     )
-    command: Optional[List[str]] = Field(
+    command: Optional[List[str]] = pydantic.Field(
         default=None, description="Executable + args for stdio transport"
     )
-    url: Optional[str] = Field(default=None, description="URL for sse/websocket")
-    env: Dict[str, str] = Field(default_factory=dict)
+    url: Optional[str] = pydantic.Field(default=None, description="URL for sse/websocket")
+    env: Dict[str, str] = pydantic.Field(default_factory=dict)
     cwd: Optional[str] = None
 
 
     # moved up
 
 
-class AgentConfig(BaseModel):
+class AgentConfig(pydantic.BaseModel):
     type: str
     model: Optional[str] = None
     # Optional prioritized list of models; first is preferred when no explicit model is set
-    model_priority: List[str] = Field(default_factory=list)
-    provider: ProviderType = Field(default=ProviderType.OPENAI)
-    api_base: Optional[str] = Field(
+    model_priority: List[str] = pydantic.Field(default_factory=list)
+    provider: ProviderType = pydantic.Field(default=ProviderType.OPENAI)
+    api_base: Optional[str] = pydantic.Field(
         default=None,
         description="Override API base URL (e.g., OpenRouter: https://openrouter.ai/api/v1)",
     )
-    api_key_env: Optional[str] = Field(
+    api_key_env: Optional[str] = pydantic.Field(
         default=None, description="Env var name to read API key from (for CUSTOM)"
     )
 
-    max_tokens: int = Field(
+    max_tokens: int = pydantic.Field(
         default=4000, description="Maximum tokens for agent responses"
     )
-    temperature: float = Field(default=0.7, description="Model temperature")
-    timeout: int = Field(default=300, description="Agent timeout in seconds")
-    tools: List[str] = Field(
+    temperature: float = pydantic.Field(default=0.7, description="Model temperature")
+    timeout: int = pydantic.Field(default=300, description="Agent timeout in seconds")
+    tools: List[str] = pydantic.Field(
         default_factory=list, description="Available tools for this agent"
     )
     system_prompt: Optional[str] = None
-    mcp: List[str] = Field(
+    mcp: List[str] = pydantic.Field(
         default_factory=list,
         description=(
             "List of MCP server names this agent can access via the generic mcp_call tool."
         ),
     )
 
-    @field_validator("temperature")
+    @pydantic.field_validator("temperature")
     def validate_temperature(cls, v):
         if not 0 <= v <= 2:
             raise ValueError("Temperature must be between 0 and 2")
         return v
 
-    @field_validator("timeout")
+    @pydantic.field_validator("timeout")
     def validate_timeout(cls, v):
         if v <= 0:
             raise ValueError("Timeout must be positive")
         return v
 
 
-class RAGConfig(BaseModel):
-    embedding_model: str = Field(default="sentence-transformers/all-MiniLM-L6-v2")
-    chunk_size: int = Field(default=512, description="Document chunk size")
-    chunk_overlap: int = Field(default=50, description="Chunk overlap size")
-    max_results: int = Field(default=10, description="Maximum retrieval results")
-    similarity_threshold: float = Field(
+class RAGConfig(pydantic.BaseModel):
+    embedding_model: str = pydantic.Field(default="sentence-transformers/all-MiniLM-L6-v2")
+    chunk_size: int = pydantic.Field(default=512, description="Document chunk size")
+    chunk_overlap: int = pydantic.Field(default=50, description="Chunk overlap size")
+    max_results: int = pydantic.Field(default=10, description="Maximum retrieval results")
+    similarity_threshold: float = pydantic.Field(
         default=0.7, description="Similarity threshold for retrieval"
     )
 
-    @field_validator("chunk_size")
+    @pydantic.field_validator("chunk_size")
     def validate_chunk_size(cls, v):
         if v <= 0:
             raise ValueError("Chunk size must be positive")
         return v
 
-    @field_validator("similarity_threshold")
+    @pydantic.field_validator("similarity_threshold")
     def validate_similarity_threshold(cls, v):
         if not 0 <= v <= 1:
             raise ValueError("Similarity threshold must be between 0 and 1")
         return v
 
 
-class Config(BaseSettings):
+class Config(pydantic_settings.BaseSettings):
     """Main configuration for AgentsMCP."""
 
-    server: ServerConfig = Field(default_factory=ServerConfig)
-    transport: TransportConfig = Field(default_factory=TransportConfig)
-    storage: StorageConfig = Field(default_factory=StorageConfig)
-    rag: RAGConfig = Field(default_factory=RAGConfig)
+    server: ServerConfig = pydantic.Field(default_factory=ServerConfig)
+    transport: TransportConfig = pydantic.Field(default_factory=TransportConfig)
+    storage: StorageConfig = pydantic.Field(default_factory=StorageConfig)
+    rag: RAGConfig = pydantic.Field(default_factory=RAGConfig)
 
     # Optional per-provider credentials/base URLs
-    providers: Dict[str, ProviderConfig] = Field(
+    providers: Dict[str, ProviderConfig] = pydantic.Field(
         default_factory=lambda: {
             ProviderType.OLLAMA_TURBO.value: ProviderConfig(
                 name=ProviderType.OLLAMA_TURBO,
@@ -200,7 +217,7 @@ class Config(BaseSettings):
         }
     )
 
-    agents: Dict[str, AgentConfig] = Field(
+    agents: Dict[str, AgentConfig] = pydantic.Field(
         default_factory=lambda: {
             "business_analyst": AgentConfig(type="business_analyst", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a business analyst. Elicit requirements, define acceptance criteria, clarify scope, and translate needs into engineering-ready tasks.", tools=["filesystem"]),
             "backend_engineer": AgentConfig(type="backend_engineer", model="gpt-oss:120b", provider=ProviderType.OLLAMA_TURBO, api_base="https://ollama.com/", system_prompt="You are a backend engineer. Design and implement robust services, data models, persistence layers, and APIs with performance and security in mind.", tools=["filesystem", "git", "bash"]),
@@ -222,7 +239,7 @@ class Config(BaseSettings):
         }
     )
 
-    tools: List[ToolConfig] = Field(
+    tools: List[ToolConfig] = pydantic.Field(
         default_factory=lambda: [
             ToolConfig(
                 name="filesystem",
@@ -236,38 +253,38 @@ class Config(BaseSettings):
     )
 
     # Optional MCP servers (disabled by default)
-    mcp: List[MCPServerConfig] = Field(default_factory=list)
+    mcp: List[MCPServerConfig] = pydantic.Field(default_factory=list)
     # Expose REST endpoints for MCP management (/mcp) when true
-    mcp_api_enabled: bool = Field(default=False, description="Enable /mcp REST API for managing MCP servers")
+    mcp_api_enabled: bool = pydantic.Field(default=False, description="Enable /mcp REST API for managing MCP servers")
     # Transport feature flags
-    mcp_stdio_enabled: bool = Field(default=True, description="Allow stdio transport for MCP")
-    mcp_ws_enabled: bool = Field(default=False, description="Allow WebSocket transport for MCP")
-    mcp_sse_enabled: bool = Field(default=False, description="Allow SSE transport for MCP")
+    mcp_stdio_enabled: bool = pydantic.Field(default=True, description="Allow stdio transport for MCP")
+    mcp_ws_enabled: bool = pydantic.Field(default=False, description="Allow WebSocket transport for MCP")
+    mcp_sse_enabled: bool = pydantic.Field(default=False, description="Allow SSE transport for MCP")
 
     # Discovery & coordination flags (AD5)
-    discovery_enabled: bool = Field(default=False, description="Enable local discovery announcer/registry")
-    discovery_allowlist: List[str] = Field(default_factory=list, description="Allowed agent IDs or names for coordination")
-    discovery_token: Optional[str] = Field(default=None, description="Optional shared secret for discovery entries")
-    discovery_registry_endpoint: Optional[str] = Field(default=None, description="Remote registry HTTP API endpoint")
-    discovery_registry_token: Optional[str] = Field(default=None, description="Authentication token for remote registry")
+    discovery_enabled: bool = pydantic.Field(default=False, description="Enable local discovery announcer/registry")
+    discovery_allowlist: List[str] = pydantic.Field(default_factory=list, description="Allowed agent IDs or names for coordination")
+    discovery_token: Optional[str] = pydantic.Field(default=None, description="Optional shared secret for discovery entries")
+    discovery_registry_endpoint: Optional[str] = pydantic.Field(default=None, description="Remote registry HTTP API endpoint")
+    discovery_registry_token: Optional[str] = pydantic.Field(default=None, description="Authentication token for remote registry")
     
     # Security configuration (AD5)
-    security_enabled: bool = Field(default=True, description="Enable security features (signatures, TLS validation)")
-    private_key_path: Optional[str] = Field(default=None, description="Path to PEM-encoded private key file")
-    public_key_path: Optional[str] = Field(default=None, description="Path to PEM-encoded public key file")
-    key_rotation_interval_hours: int = Field(default=24, description="Key rotation interval in hours")
-    tls_cert_path: Optional[str] = Field(default=None, description="Path to TLS certificate file")
-    tls_key_path: Optional[str] = Field(default=None, description="Path to TLS private key file")
-    require_tls: bool = Field(default=False, description="Require TLS for all connections")
-    jwt_secret: str = Field(
+    security_enabled: bool = pydantic.Field(default=True, description="Enable security features (signatures, TLS validation)")
+    private_key_path: Optional[str] = pydantic.Field(default=None, description="Path to PEM-encoded private key file")
+    public_key_path: Optional[str] = pydantic.Field(default=None, description="Path to PEM-encoded public key file")
+    key_rotation_interval_hours: int = pydantic.Field(default=24, description="Key rotation interval in hours")
+    tls_cert_path: Optional[str] = pydantic.Field(default=None, description="Path to TLS certificate file")
+    tls_key_path: Optional[str] = pydantic.Field(default=None, description="Path to TLS private key file")
+    require_tls: bool = pydantic.Field(default=False, description="Require TLS for all connections")
+    jwt_secret: str = pydantic.Field(
         default_factory=generate_local_jwt_secret,
         description="JWT signing secret - auto-generated for local dev, set JWT_SECRET for production"
     )
-    jwt_issuer: str = Field(default="agents-mcp", description="JWT issuer name")
-    jwt_expiry_minutes: int = Field(default=60, description="JWT token expiry in minutes")
-    trust_store_path: Optional[str] = Field(default=None, description="Path to trusted public keys directory")
+    jwt_issuer: str = pydantic.Field(default="agents-mcp", description="JWT issuer name")
+    jwt_expiry_minutes: int = pydantic.Field(default=60, description="JWT token expiry in minutes")
+    trust_store_path: Optional[str] = pydantic.Field(default=None, description="Path to trusted public keys directory")
 
-    @field_validator("jwt_secret")
+    @pydantic.field_validator("jwt_secret")
     @classmethod
     def validate_jwt_secret(cls, v: str) -> str:
         """Enforce a strong JWT secret, auto-generating for local development."""
@@ -302,7 +319,7 @@ class Config(BaseSettings):
         return v
 
     # Web UI (WUI6): enable/disable minimal built-in dashboard
-    ui_enabled: bool = Field(default=False, description="Mount /ui static dashboard when true")
+    ui_enabled: bool = pydantic.Field(default=False, description="Mount /ui static dashboard when true")
 
     @classmethod
     def from_file(cls, path: Path) -> "Config":

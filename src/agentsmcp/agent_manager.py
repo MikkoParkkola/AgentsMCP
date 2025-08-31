@@ -8,15 +8,21 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, Optional, List
 
+from .lazy_loading import lazy_import, LazyFactory, register_lazy_component, get_lazy_component, memoized_property
 from .agents.base import BaseAgent
-from .agents.claude_agent import ClaudeAgent
-from .agents.codex_agent import CodexAgent
-from .agents.ollama_agent import OllamaAgent
 from .config import Config
 from .models import JobState, JobStatus, TaskEnvelopeV1, ResultEnvelopeV1, EnvelopeStatus
 from .events import EventBus
 from .storage.base import BaseStorage
-from .storage.memory import MemoryStorage
+
+# Lazy imports for storage backends
+memory_storage = lazy_import('.storage.memory', __package__)
+sqlite_storage = lazy_import('.storage.sqlite', __package__)  
+postgresql_storage = lazy_import('.storage.postgresql', __package__)
+redis_storage = lazy_import('.storage.redis', __package__)
+
+# Lazy imports for agent types
+agents_module = lazy_import('.agents', __package__)
 
 
 @dataclass
@@ -37,7 +43,7 @@ class AgentManager:
         self.config = config
         self.log = logging.getLogger(__name__)
         self.jobs: Dict[str, AgentJob] = {}
-        self.storage = self._create_storage()
+        self._storage_factory = LazyFactory(self._create_storage_backend)
         self.events = events
         # Optional typed event bus from agentsmcp.orchestration
         self.orchestrator_bus = orchestrator_bus
@@ -68,8 +74,41 @@ class AgentManager:
         }
 
         # Agent type mapping – disable legacy MCP agents; use SelfAgent for all
-        from .agents.self_agent import SelfAgent  # noqa: F401
-        self.agent_classes = {}
+        # Lazy load SelfAgent to avoid importing heavy dependencies at startup
+        self._self_agent_factory = LazyFactory(self._load_self_agent_class)
+
+    @property
+    def storage(self) -> BaseStorage:
+        """Get storage backend, creating it lazily if needed."""
+        return self._storage_factory.get()
+
+    def _create_storage_backend(self) -> BaseStorage:
+        """Create storage backend based on configuration."""
+        storage_type = self.config.storage.type
+        storage_config = self.config.storage.config
+        
+        self.log.debug(f"Creating storage backend of type: {storage_type}")
+
+        if (
+            str(storage_type) == "StorageType.MEMORY"
+            or storage_type == getattr(type(storage_type), "MEMORY", None)
+            or getattr(storage_type, "value", storage_type) == "memory"
+        ):
+            return memory_storage.MemoryStorage()
+        elif getattr(storage_type, "value", storage_type) == "sqlite":
+            return sqlite_storage.SQLiteStorage(storage_config.get("database_path", "agentsmcp.db"))
+        elif getattr(storage_type, "value", storage_type) == "postgresql":
+            return postgresql_storage.PostgreSQLStorage(storage_config)
+        elif getattr(storage_type, "value", storage_type) == "redis":
+            return redis_storage.RedisStorage(storage_config)
+        else:
+            raise ValueError(f"Unknown storage type: {storage_type}")
+
+    def _load_self_agent_class(self):
+        """Lazily load the SelfAgent class."""
+        self.log.debug("Loading SelfAgent class for the first time")
+        from .agents.self_agent import SelfAgent
+        return SelfAgent
 
     # -----------------------------
     # Role-based execution (P1)
@@ -147,40 +186,17 @@ class AgentManager:
                     pass
             return ResultEnvelopeV1(status=EnvelopeStatus.ERROR, notes=str(e))
 
-    def _create_storage(self) -> BaseStorage:
-        """Create storage backend based on configuration."""
-        storage_type = self.config.storage.type
-        storage_config = self.config.storage.config
-
-        if (
-            str(storage_type) == "StorageType.MEMORY"
-            or storage_type == getattr(type(storage_type), "MEMORY", None)
-            or getattr(storage_type, "value", storage_type) == "memory"
-        ):
-            return MemoryStorage()
-        elif getattr(storage_type, "value", storage_type) == "sqlite":
-            from .storage.sqlite import SQLiteStorage
-
-            return SQLiteStorage(storage_config.get("database_path", "agentsmcp.db"))
-        elif getattr(storage_type, "value", storage_type) == "postgresql":
-            from .storage.postgresql import PostgreSQLStorage
-
-            return PostgreSQLStorage(storage_config)
-        elif getattr(storage_type, "value", storage_type) == "redis":
-            from .storage.redis import RedisStorage
-
-            return RedisStorage(storage_config)
-        else:
-            raise ValueError(f"Unknown storage type: {storage_type}")
 
     def _create_agent(self, agent_type: str) -> BaseAgent:
         """Create an agent instance based on type."""
         agent_config = self.config.get_agent_config(agent_type)
         if not agent_config:
             raise ValueError(f"No configuration found for agent type: {agent_type}")
-        # Use SelfAgent for all configured agent types
-        from .agents.self_agent import SelfAgent
+        
+        # Use lazy-loaded SelfAgent for all configured agent types
+        SelfAgent = self._self_agent_factory.get()
         agent = SelfAgent(agent_config, self.config)
+        
         # Inject event bus if available so agent can emit progress
         try:
             if self.events is not None:

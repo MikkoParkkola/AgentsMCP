@@ -1,32 +1,39 @@
-"""
-Revolutionary CLI UI System for AgentsMCP
+"""UI package with lazy-loading for heavy components.
 
-Beautiful, adaptive, and intelligent command-line interfaces inspired by:
-- Claude Code's elegant interaction patterns
-- Codex CLI's responsive design principles  
-- Gemini CLI's sophisticated status displays
-
-Features:
-- Adaptive dark/light theme detection
-- Real-time status and statistics
-- Interactive dashboards
-- Smooth animations and transitions
-- Revolutionary Apple-style user experience
+This module avoids importing large UI submodules at startup. Access classes via
+attributes (e.g., ``from agentsmcp.ui import CommandInterface``) to trigger a
+lazy import on first use.
 """
 
-from .theme_manager import ThemeManager, Theme
-from .status_dashboard import StatusDashboard
-from .command_interface import CommandInterface
-from .statistics_display import StatisticsDisplay
-from .ui_components import UIComponents
-from .cli_app import CLIApp
+from ..lazy_loading import lazy_import
+
+_theme_manager = lazy_import('.theme_manager', __package__)
+_status_dashboard = lazy_import('.status_dashboard', __package__)
+_command_interface = lazy_import('.command_interface', __package__)
+_statistics_display = lazy_import('.statistics_display', __package__)
+_ui_components = lazy_import('.ui_components', __package__)
+_cli_app = lazy_import('.cli_app', __package__)
+
+
+def _attr_map():
+    return {
+        'ThemeManager': _theme_manager.ThemeManager,
+        'Theme': _theme_manager.Theme,
+        'StatusDashboard': _status_dashboard.StatusDashboard,
+        'CommandInterface': _command_interface.CommandInterface,
+        'StatisticsDisplay': _statistics_display.StatisticsDisplay,
+        'UIComponents': _ui_components.UIComponents,
+        'CLIApp': _cli_app.CLIApp,
+    }
+
+
+def __getattr__(name):  # PEP 562 lazy attribute access for modules
+    m = _attr_map()
+    if name in m:
+        return m[name]
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
 __all__ = [
-    'ThemeManager',
-    'Theme', 
-    'StatusDashboard',
-    'CommandInterface',
-    'StatisticsDisplay',
-    'UIComponents',
-    'CLIApp'
+    'ThemeManager', 'Theme', 'StatusDashboard', 'CommandInterface',
+    'StatisticsDisplay', 'UIComponents', 'CLIApp'
 ]

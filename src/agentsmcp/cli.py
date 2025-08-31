@@ -14,41 +14,40 @@ from typing import Optional
 
 import click
 
-from agentsmcp import __version__
-from agentsmcp.errors import (
-    AgentsMCPError,
-    ConfigError,
-    NetworkError,
-    TaskExecutionError,
-    AuthenticationError,
-    MissingParameterError,
-    require_option,
-    InvalidCommandError,
-    PermissionError,
-    ResourceNotFoundError,
-    VersionCompatibilityError,
-    RateLimitError,
-    suggest_command
-)
-from agentsmcp.intelligent_suggestions import get_suggestion_system, display_suggestions
-from agentsmcp.progressive_disclosure import (
-    ProgressiveDisclosureGroup,
-    advanced_option,
-    SmartDefaults
-)
-from agentsmcp.onboarding import detect_and_run_onboarding
-from agentsmcp.agent_manager import AgentManager
-from agentsmcp.config import Config
-from agentsmcp.orchestrator_factory import OrchestratorFactory
-from agentsmcp.logging_config import configure_logging
-from agentsmcp.settings import AppSettings
-from agentsmcp.commands.mcp import mcp as mcp_group
-from agentsmcp.commands.roles import roles as roles_group
-from agentsmcp.commands.setup import setup as setup_cmd
-from agentsmcp.commands.rag import rag_group
-from agentsmcp.paths import pid_file_path, ensure_dirs
+# Import lazy loading utilities
+from .lazy_loading import lazy_import, get_performance_monitor
 
-PID_FILE = pid_file_path()
+# Lazy imports to improve startup time
+agentsmcp_module = lazy_import('agentsmcp')
+errors_module = lazy_import('.errors', __package__)
+suggestions_module = lazy_import('.intelligent_suggestions', __package__)
+disclosure_module = lazy_import('.progressive_disclosure', __package__)  
+onboarding_module = lazy_import('.onboarding', __package__)
+agent_manager_module = lazy_import('.agent_manager', __package__)
+config_module = lazy_import('.config', __package__)
+orchestrator_module = lazy_import('.orchestrator_factory', __package__)
+logging_config_module = lazy_import('.logging_config', __package__)
+settings_module = lazy_import('.settings', __package__)
+paths_module = lazy_import('.paths', __package__)
+
+# Lazy imports for command groups
+mcp_commands = lazy_import('.commands.mcp', __package__)
+roles_commands = lazy_import('.commands.roles', __package__)
+setup_commands = lazy_import('.commands.setup', __package__)
+rag_commands = lazy_import('.commands.rag', __package__)
+
+# Start performance monitoring if enabled
+perf_monitor = get_performance_monitor()
+if os.getenv("AGENTSMCP_BENCHMARK_STARTUP", "").lower() in ("1", "true", "yes"):
+    perf_monitor.start_startup_benchmark()
+
+def get_pid_file():
+    """Get PID file path lazily."""
+    return paths_module.pid_file_path()
+
+def get_version():
+    """Get version lazily."""
+    return agentsmcp_module.__version__
 
 
 class EnhancedAgentsMCPCLI(click.Group):
@@ -69,7 +68,7 @@ class EnhancedAgentsMCPCLI(click.Group):
             click.echo()  # Extra spacing
             display_suggestions(suggestions, "💡 Did you mean?")
         
-        raise InvalidCommandError(cmd_name)
+        raise errors_module.InvalidCommandError(cmd_name)
 
     def invoke(self, ctx):
         """Wrap the regular invoke with enhanced error handling."""
@@ -78,7 +77,7 @@ class EnhancedAgentsMCPCLI(click.Group):
         
         except click.ClickException as ce:
             # Already a ClickException – check if it's our enhanced type
-            if isinstance(ce, AgentsMCPError):
+            if isinstance(ce, errors_module.AgentsMCPError):
                 ce.show()
             else:
                 # Unknown ClickException – add a gentle tip
@@ -246,27 +245,27 @@ def check_config_exists(config_path: Optional[str] = None) -> Path:
     return path
 
 
-def _load_config(config_path: Optional[str]) -> Config:
-    env = AppSettings()
-    base: Config
+def _load_config(config_path: Optional[str]):
+    """Load configuration lazily."""
+    env = settings_module.AppSettings()
+    base_config = None
     if config_path and Path(config_path).exists():
-        base = Config.from_file(Path(config_path))
+        base_config = config_module.Config.from_file(Path(config_path))
     else:
         # Prefer per-user config under ~/.agentsmcp
-        from agentsmcp.paths import default_user_config_path
-        user_cfg = default_user_config_path()
+        user_cfg = paths_module.default_user_config_path()
         if user_cfg.exists():
-            base = Config.from_file(user_cfg)
+            base_config = config_module.Config.from_file(user_cfg)
         elif Path("agentsmcp.yaml").exists():
-            base = Config.from_file(Path("agentsmcp.yaml"))
+            base_config = config_module.Config.from_file(Path("agentsmcp.yaml"))
         else:
-            base = Config()
+            base_config = config_module.Config()
             # First-run: persist defaults to ~/.agentsmcp/agentsmcp.yaml
             try:
-                base.save_to_file(user_cfg)
+                base_config.save_to_file(user_cfg)
             except Exception:
                 pass
-    return env.to_runtime_config(base)
+    return env.to_runtime_config(base_config)
 
 class _Spinner:
     def __init__(self, msg: str):
@@ -297,7 +296,7 @@ class _Spinner:
 # Root CLI Group
 # =====================================================================
 
-class AgentsMCPProgressiveGroup(ProgressiveDisclosureGroup, EnhancedAgentsMCPCLI):
+class AgentsMCPProgressiveGroup(disclosure_module.ProgressiveDisclosureGroup, EnhancedAgentsMCPCLI):
     """Combined progressive disclosure and enhanced error handling group."""
     pass
 
@@ -305,7 +304,7 @@ class AgentsMCPProgressiveGroup(ProgressiveDisclosureGroup, EnhancedAgentsMCPCLI
     cls=AgentsMCPProgressiveGroup,
     context_settings={"help_option_names": ["-h", "--help"]}
 )
-@click.version_option(version=__version__, prog_name="agentsmcp")
+@click.version_option(version=get_version(), prog_name="agentsmcp")
 @click.option("--log-level", default=None, help="Log level (override env)")
 @click.option("--log-format", default=None, type=click.Choice(["json", "text"]))
 @click.option("--config", "config_path", default=None, help="Path to YAML config")
@@ -331,11 +330,11 @@ def main(
     try:
         # Create user data directories on demand (avoid import-time side effects)
         try:
-            ensure_dirs()
+            paths_module.ensure_dirs()
         except Exception:
             pass
         config = _load_config(config_path)
-        configure_logging(log_level or "INFO", log_format or "text")
+        logging_config_module.configure_logging(log_level or "INFO", log_format or "text")
     finally:
         spinner.stop("Initialized")
 
@@ -523,16 +522,16 @@ def run_group():
 
 @run_group.command("simple")
 @click.argument("task")
-@advanced_option("--complexity", default=SmartDefaults.get_complexity_default(), 
+@disclosure_module.advanced_option("--complexity", default=disclosure_module.SmartDefaults.get_complexity_default(), 
                 type=click.Choice(["simple", "moderate", "complex"]), 
                 advanced=False, help="Task complexity level")
-@advanced_option("--cost-sensitive", is_flag=True, advanced=False,
+@disclosure_module.advanced_option("--cost-sensitive", is_flag=True, advanced=False,
                 help="Prefer cost-effective models")
-@advanced_option("--timeout", default=SmartDefaults.get_timeout_default(), 
+@disclosure_module.advanced_option("--timeout", default=disclosure_module.SmartDefaults.get_timeout_default(), 
                 type=int, advanced=True, help="Task timeout in seconds")
-@advanced_option("--max-retries", default=3, type=int, advanced=True,
+@disclosure_module.advanced_option("--max-retries", default=3, type=int, advanced=True,
                 help="Maximum retry attempts on failure")
-@advanced_option("--enable-debug", is_flag=True, advanced=True,
+@disclosure_module.advanced_option("--enable-debug", is_flag=True, advanced=True,
                 help="Enable verbose debug output")
 @click.pass_context
 @handle_common_errors
@@ -587,15 +586,15 @@ def run_simple(ctx, task: str, complexity: str, cost_sensitive: bool, timeout: i
     asyncio.run(run_task())
 
 @run_group.command("interactive")
-@advanced_option("--theme", default="auto", type=click.Choice(["auto", "light", "dark"]),
+@disclosure_module.advanced_option("--theme", default="auto", type=click.Choice(["auto", "light", "dark"]),
                 advanced=False, help="Interface theme")
-@advanced_option("--no-welcome", is_flag=True, advanced=True,
+@disclosure_module.advanced_option("--no-welcome", is_flag=True, advanced=True,
                 help="Skip welcome screen")
-@advanced_option("--refresh-interval", default=2.0, type=float, advanced=True,
+@disclosure_module.advanced_option("--refresh-interval", default=2.0, type=float, advanced=True,
                 help="Auto-refresh interval")
-@advanced_option("--orchestrator-model", default="gpt-5", advanced=True,
+@disclosure_module.advanced_option("--orchestrator-model", default="gpt-5", advanced=True,
                 help="Orchestrator model (default: gpt-5)")
-@advanced_option("--agent", "agent_type", default="ollama-turbo-coding", advanced=True,
+@disclosure_module.advanced_option("--agent", "agent_type", default="ollama-turbo-coding", advanced=True,
                 help="Default AI agent (ollama-turbo-coding/ollama-turbo-general/codex/claude/ollama)")
 @click.option(
     "--legacy",
@@ -661,12 +660,12 @@ def monitor_group():
     pass
 
 @monitor_group.command("costs")
-@advanced_option("--detailed", is_flag=True, advanced=False,
+@disclosure_module.advanced_option("--detailed", is_flag=True, advanced=False,
                 help="Show detailed cost breakdown")
-@advanced_option("--format", "fmt", default="table", 
+@disclosure_module.advanced_option("--format", "fmt", default="table", 
                 type=click.Choice(["table", "json"]), advanced=True,
                 help="Output format")
-@advanced_option("--days", default=7, type=int, advanced=True,
+@disclosure_module.advanced_option("--days", default=7, type=int, advanced=True,
                 help="Number of days to include in cost analysis")
 @with_intelligent_suggestions
 def monitor_costs(detailed: bool, fmt: str, days: int, advanced: bool = False):
@@ -1015,16 +1014,16 @@ def config_validate():
 # Add flat command aliases for backward compatibility
 @main.command("simple", hidden=True)
 @click.argument("task")
-@advanced_option("--complexity", default=SmartDefaults.get_complexity_default(), 
+@disclosure_module.advanced_option("--complexity", default=disclosure_module.SmartDefaults.get_complexity_default(), 
                 type=click.Choice(["simple", "moderate", "complex"]), 
                 advanced=False, help="Task complexity level")
-@advanced_option("--cost-sensitive", is_flag=True, advanced=False,
+@disclosure_module.advanced_option("--cost-sensitive", is_flag=True, advanced=False,
                 help="Prefer cost-effective models")
-@advanced_option("--timeout", default=SmartDefaults.get_timeout_default(), 
+@disclosure_module.advanced_option("--timeout", default=disclosure_module.SmartDefaults.get_timeout_default(), 
                 type=int, advanced=True, help="Task timeout in seconds")
-@advanced_option("--max-retries", default=3, type=int, advanced=True,
+@disclosure_module.advanced_option("--max-retries", default=3, type=int, advanced=True,
                 help="Maximum retry attempts on failure")
-@advanced_option("--enable-debug", is_flag=True, advanced=True,
+@disclosure_module.advanced_option("--enable-debug", is_flag=True, advanced=True,
                 help="Enable verbose debug output")
 @click.pass_context
 def simple_alias(ctx, task: str, complexity: str, cost_sensitive: bool, timeout: int,
@@ -1398,13 +1397,120 @@ def team_group():
 def team_run(objective: str, roles: str | None = None):
     """Run a team of agents against an objective."""
     import asyncio
-    from agentsmcp.orchestration.team_runner import run_team, DEFAULT_TEAM
+    from agentsmcp.orchestration import run_team
+    from agentsmcp.orchestration.team_runner_v2 import DEFAULT_TEAM
     rlist = [r.strip() for r in (roles.split(',') if roles else DEFAULT_TEAM)]
-    results = asyncio.run(run_team(objective, rlist))
-    click.echo("
-🎯 Objective: " + objective)
-    for role, out in results.items():
-        click.echo(f"
-🧩 {role}:
-{out}
-")
+    
+    # Log team composition for visibility
+    # Use orchestrator for strict communication isolation
+    try:
+        from .orchestration.orchestrator import Orchestrator, OrchestratorConfig, OrchestratorMode
+        from .orchestration.task_classifier import TaskClassification
+        
+        # Initialize orchestrator for CLI use
+        orchestrator_config = OrchestratorConfig(
+            mode=OrchestratorMode.STRICT_ISOLATION,
+            enable_smart_classification=True,
+            fallback_to_simple_response=True,
+            orchestrator_persona="AgentsMCP CLI assistant"
+        )
+        
+        orchestrator = Orchestrator(config=orchestrator_config)
+        
+        # Process through orchestrator - users see only consolidated response
+        click.echo("🤖 Processing your request...")
+        response = asyncio.run(orchestrator.process_user_input(objective, {"source": "cli"}))
+        
+        # Display only the orchestrator's consolidated response
+        click.echo(f"\n🎯 {response.content}")
+        
+        # Optional: Show orchestrator stats if requested
+        if objective.lower().startswith("debug") or "--verbose" in objective:
+            stats = response.metadata
+            click.echo(f"\n📊 Response type: {response.response_type}")
+            if response.agents_consulted:
+                click.echo(f"📊 Processing involved: {len(response.agents_consulted)} specialized components")
+            click.echo(f"📊 Processing time: {response.processing_time_ms}ms")
+        
+    except ImportError:
+        # Fallback to legacy team runner if orchestrator not available
+        click.echo(f"🚀 Using legacy team orchestration...")
+        results = asyncio.run(run_team(objective, rlist))
+        
+        # Even in fallback, consolidate the response to maintain architecture
+        if results:
+            # Pick the best response instead of showing all individual agents
+            best_response = list(results.values())[0]  # Use first response
+            click.echo(f"\n🎯 Objective: {objective}")
+            click.echo(f"\n{best_response}")
+        else:
+            click.echo("\n🎯 I can help you with that request. Please provide more details about what you'd like to accomplish.")
+    
+    except Exception as e:
+        # Graceful error handling with orchestrator perspective
+        click.echo(f"\n🎯 I encountered an issue processing your request: {str(e)}")
+        click.echo("Please try rephrasing your request or use the 'chat' command for interactive assistance.")
+
+
+# Lazy registration of command groups to avoid loading heavy modules at startup
+def _register_command_groups():
+    """Register command groups lazily."""
+    try:
+        main.add_command(mcp_commands.mcp, "mcp")
+    except Exception:
+        pass
+    
+    try:
+        main.add_command(roles_commands.roles, "roles")  
+    except Exception:
+        pass
+    
+    try:
+        main.add_command(setup_commands.setup, "setup")
+    except Exception:
+        pass
+    
+    try:
+        main.add_command(rag_commands.rag_group, "rag")
+    except Exception:
+        pass
+
+
+# Register commands when the main group is accessed
+_commands_registered = False
+
+def ensure_commands_registered():
+    """Ensure command groups are registered."""
+    global _commands_registered
+    if not _commands_registered:
+        _register_command_groups()
+        _commands_registered = True
+
+
+# Override main group's list_commands to ensure lazy registration
+original_list_commands = main.list_commands
+
+def lazy_list_commands(ctx):
+    ensure_commands_registered()
+    return original_list_commands(ctx)
+
+main.list_commands = lazy_list_commands
+
+# Override main group's get_command to ensure lazy registration
+original_get_command = main.get_command
+
+def lazy_get_command(ctx, name):
+    ensure_commands_registered()
+    return original_get_command(ctx, name)
+
+main.get_command = lazy_get_command
+
+
+if __name__ == "__main__":
+    # Performance monitoring for direct invocation
+    if os.getenv("AGENTSMCP_BENCHMARK_STARTUP", "").lower() in ("1", "true", "yes"):
+        from .performance import log_startup_performance
+        import atexit
+        atexit.register(log_startup_performance)
+    
+    main()

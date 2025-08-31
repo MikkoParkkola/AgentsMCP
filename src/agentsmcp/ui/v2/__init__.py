@@ -31,7 +31,7 @@ from .chat_interface import ChatInterface, ChatInterfaceConfig, create_chat_inte
 from .components import ChatInput, ChatHistory, ChatMessage, MessageRole, create_chat_input, create_chat_history
 
 # Main application
-from .main_app import MainTUIApp, TUILauncher, launch_main_tui
+from .main_app import TUILauncher, launch_main_tui
 
 # Convenience functions
 from .terminal_manager import create_terminal_manager, get_terminal_manager
@@ -56,7 +56,7 @@ __all__ = [
     'create_chat_input', 'create_chat_history',
     
     # Main application
-    'MainTUIApp', 'TUILauncher', 'launch_main_tui',
+    'TUILauncher', 'launch_main_tui',
     
     # Convenience functions
     'create_terminal_manager', 'get_terminal_manager',

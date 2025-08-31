@@ -2,58 +2,35 @@
 
 This is the canonical source of truth for upcoming work. Keep it current. If you find contradictions in other docs, update this file and add a note in the older document.
 
-Purpose: break work into parallelizable units, each expected to be 500 lines of code (LOC) or less, with tight boundaries and clear acceptance criteria. Reference the high-level goals in `docs/work-plan.md`.
+Purpose: break work into parallelizable units, each expected to be 500 lines of code (LOC) or less, with tight boundaries and clear acceptance criteria.
 
 Legend: [Size] S ≤200 LOC, M ≤500 LOC, D = docs-only.
 
 ## Now / Next / Later
 - Now (P0)
   - TUI v2 input reliability: single input path, echo/ICANON control, fallback reader; ensure chat input renders typed characters; exit via /quit and Ctrl+C. [S]
+  - TUI: terminal resize support — handle SIGWINCH and recompute layout; ensure immediate reflow without artifacts. [S]
+  - TUI: guarantee terminal state restoration on crash/TERM — install signal handlers and always restore cooked mode. [S]
+  - TUI: integrate mouse wheel scroll events into scrollable panes (history/log views). [S]
   - CLI standardization: single entry path, consistent command schema, Problem+Solution error format. [S]
   - Setup wizard: interactive first‑run for API keys/config + test connection. [M]
 - Next (P1)
-  - Providers/model discovery facade and `/models` UX (B1–B6, C1–C4). [S/M]
+  - TUI: Unicode grapheme-aware backspace/delete behavior. [S]
+  - TUI: mouse click mapping to UI actions (selection, focus). [S]
   - MCP version negotiation + downconvert (M1–M3). [S]
-  - Context window management + `/context` (X1–X2). [S]
-  - Streaming interface + adapters + `/stream` (S1–S3). [S/M]
+  - Streaming adapters + `/stream` (S2) — complete provider wiring. [M]
 - Later (P2)
+  - TUI: theme consistency — remove raw ANSI in components and route via ThemeManager. [S]
+  - TUI: Smart Suggestions panel (context-aware quick actions). [M]
+  - TUI: Zen/Dashboard/Command Center layout modes (adaptive layouts). [M]
+  - Intelligent model routing and cost optimization with OpenRouter (task-aware selection, telemetry). [M]
   - SSE event bus + minimal web dashboard (WUI1–WUI3). [S/M]
   - Discovery announcer/client/handshake (AD1–AD4). [S/M]
   - Packaging + E2E smoke (P1–P2). [S]
 
 ## Providers & Models
 
-Delight & Automation: Auto-detect available providers from env; on failure, show a one-line fix. Cache model lists with gentle refresh; highlight recommended defaults. Zero-config works for Ollama localhost.
-
-B1. Providers module skeleton [S] [Done]
-- Scope: Add `src/agentsmcp/providers.py` with types (`ProviderType`, `ProviderConfig`, `Model`) and error classes; no HTTP calls yet.
-- Files: new providers.py only.
-- Acceptance: module imports; types available; no runtime behavior.
-
-B2. OpenAI list_models adapter [M] [Done]
-- Scope: Implement `openai_list_models(config)` + normalization; simple bearer auth; handle `api_base`.
-- Files: providers.py only.
-- Acceptance: returns non-empty list with valid key; errors map to ProviderAuth/Network/Protocol.
-
-B3. OpenRouter list_models adapter [M] [Done]
-- Scope: Implement `openrouter_list_models(config)`; bearer auth; `api_base` support.
-- Files: providers.py only.
-- Acceptance: returns list with valid key; proper error mapping.
-
-B4. Ollama list_models adapter [S] [Done]
-- Scope: Implement `ollama_list_models(config)` using `/api/tags`; no key for localhost.
-- Files: providers.py only.
-- Acceptance: returns list if daemon running; Network error otherwise.
-
-B5. Facade `list_models(provider, config)` [S] [Done]
-- Scope: Route to per-provider functions; unify errors; add minimal logging hooks.
-- Files: providers.py only.
-- Acceptance: switching provider yields expected calls; consistent exceptions.
-
-B6. Agent hook `discover_models()` [S] [Todo]
-- Scope: In Agent base, add `discover_models(provider)` using `Config.providers` and facade.
-- Files: `src/agentsmcp/agents/base.py` only.
-- Acceptance: method returns models or structured error; no side effects.
+All core provider/model discovery work is complete in code (`src/agentsmcp/providers.py`, CLI commands in `src/agentsmcp/commands/chat.py`). Future improvements should be tracked as new backlog items if needed.
 
 ## Chat CLI: Models & Provider UX
 
@@ -81,22 +58,7 @@ C4. Apply selection to runtime [S] [Done]
 
 ## API Keys: Validation & Persistence
 
-Delight & Automation: Wizard-grade prompts; masked input; tests keys immediately with friendly remediation. Idempotent writes; no surprises.
-
-K1. Validation helpers [S] [Done]
-- Scope: Implement `validate_provider_config` probing endpoints; no prompts.
-- Files: providers.py or `src/agentsmcp/providers_validate.py` (choose one file only).
-- Acceptance: returns ValidationResult; never raises.
-
-K2. Prompt + persist [S] [Done]
-- Scope: Implement `prompt_for_api_key`, `persist_provider_api_key`.
-- Files: chat.py (prompt); small helper in new `src/agentsmcp/config_write.py` for YAML merge.
-- Acceptance: user can enter and persist key safely.
-
-K3. Wire validation into `/provider` and `/models` [S] [Done]
-- Scope: On demand, run K1; show actionable banner on missing/invalid; allow continue.
-- Files: chat.py only.
-- Acceptance: UX degrades gracefully without blocking.
+Validation helpers and prompting/persistence are implemented (`providers_validate.py`, CLI). Track any provider-specific additions as new items if needed.
 
 ## MCP Gateway: Version Negotiation
 
@@ -119,17 +81,7 @@ M3. Wire negotiation + downconversion [S] [Todo]
 
 ## Context Window Management
 
-Delight & Automation: Intelligent trimming with context awareness (keep recent conversation and system), optional pinning of key messages. Predictable and explained in UI.
-
-X1. Token estimation + Trim function [S] [Done]
-- Scope: Implement `estimate_tokens`, `trim_history` as pure helpers.
-- Files: new `src/agentsmcp/context.py` only.
-- Acceptance: deterministic trimming; unit tests on sample conversations.
-
-X2. Integrate `/context` command [S] [Done]
-- Scope: Add command to set percent/off and apply on send.
-- Files: chat.py only.
-- Acceptance: long threads get trimmed; setting applies immediately.
+Implemented (`src/agentsmcp/context.py`, CLI `/context`). Add improvements as new items if discovered.
 
 ## Streaming
 
@@ -164,14 +116,9 @@ P2. E2E smoke workflow [S]
 - Files: new workflow + `scripts/e2e_smoke.py` only.
 - Acceptance: lists tools; returns 0; on failure uploads logs.
 
-## Delegation (Docs-first)
+## Delegation
 
-Delight & Automation: Clean command pattern to spawn short-lived workers. Guardrails built-in; confirmation flows are one-liners; audit logs human-readable.
-
-D1. Delegation spec docs [D]
-- Scope: Fill `docs/delegation.md` with sequence diagrams and states.
-- Files: docs only.
-- Acceptance: reviewers can implement without ambiguity.
+Functional; document improvements no longer tracked outside this backlog.
 
 ---
 
@@ -182,10 +129,7 @@ Guidelines:
 
 ## Agent Discovery & Coordination (New)
 
-AD1. Discovery protocol spec [D]
-- Scope: Author `docs/interfaces/agent-discovery.md` describing discovery/announce protocol, identifiers (agent id, name, capabilities, transport), and security model (allowlist, tokens).
-- Files: docs only.
-- Acceptance: clear, implementable spec with compatibility notes (Zeroconf/mDNS, broadcast, or registry fallback).
+AD1. Discovery protocol spec — track as implementation tasks only (docs are derived from code as needed).
 
 AD2. Announcer/registry (daemon) [M]
 - Scope: Implement a lightweight announcer that advertises this agent’s presence and capabilities.

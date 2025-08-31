@@ -88,6 +88,7 @@ class ChatInterface:
         
         # Backend integration
         self.conversation_manager: Optional[Any] = None  # Will be imported dynamically
+        self.orchestrator_integration: Optional[Any] = None  # Orchestrator integration for strict communication isolation
         
         # Status and feedback
         self.status_message = ""
@@ -160,23 +161,37 @@ class ChatInterface:
             return False
     
     async def _initialize_conversation_backend(self):
-        """Initialize connection to conversation backend."""
+        """Initialize connection to orchestrated conversation backend."""
         try:
-            # Dynamic import to avoid circular dependencies
-            from ...conversation.conversation import ConversationManager
+            # Use orchestrator integration for strict communication isolation
+            from .orchestrator_integration import initialize_orchestrator_integration
             
-            # Create conversation manager with minimal dependencies
-            self.conversation_manager = ConversationManager(
+            # Initialize orchestrator integration
+            self.orchestrator_integration = await initialize_orchestrator_integration(
                 command_interface=None,  # Will be handled via application controller
                 theme_manager=None,
                 agent_manager=None
             )
             
-            logger.info("Conversation backend initialized")
+            # Keep reference to orchestrated conversation manager
+            self.conversation_manager = self.orchestrator_integration.orchestrated_conversation
+            
+            logger.info("Orchestrated conversation backend initialized - strict communication isolation active")
             
         except Exception as e:
-            logger.warning(f"Could not initialize conversation backend: {e}")
-            # Continue without backend - basic functionality will still work
+            logger.warning(f"Could not initialize orchestrated conversation backend: {e}")
+            # Fallback to regular conversation manager
+            try:
+                from ...conversation.conversation import ConversationManager
+                self.conversation_manager = ConversationManager(
+                    command_interface=None,
+                    theme_manager=None,
+                    agent_manager=None
+                )
+                logger.info("Fallback conversation backend initialized")
+            except Exception as fallback_error:
+                logger.error(f"Fallback conversation backend failed: {fallback_error}")
+                # Continue without backend - basic functionality will still work
     
     async def _setup_layout(self):
         """Setup the chat interface layout."""

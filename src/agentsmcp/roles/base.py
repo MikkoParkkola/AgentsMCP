@@ -280,5 +280,62 @@ class BaseRole:
         parts.append("Return succinct, production‑ready results.")
         return "\n".join(parts)
 
+    async def conduct_retrospective(
+        self,
+        task_context: "TaskEnvelopeV1",
+        execution_results: "ResultEnvelopeV1",
+        agent_state: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Conduct individual retrospective after task completion.
+        
+        This method can be overridden by specific roles to provide
+        role-specific retrospective analysis.
+        
+        Args:
+            task_context: Original task context
+            execution_results: Task execution results
+            agent_state: Optional agent internal state during execution
+            
+        Returns:
+            Optional[Dict[str, Any]]: Retrospective data or None if not supported
+        """
+        # Default implementation provides basic retrospective data
+        retrospective_data = {
+            "agent_role": self.name().value,
+            "task_id": task_context.inputs.get("task_id", str(task_context.telemetry.trace_id)),
+            "execution_status": execution_results.status.value if execution_results.status else "unknown",
+            "confidence": execution_results.confidence or 0.0,
+            "what_went_well": [],
+            "what_could_improve": [],
+            "key_learnings": [],
+            "challenges": [],
+        }
+        
+        # Analyze execution results for basic insights
+        if execution_results.status and execution_results.status.value == "ok":
+            retrospective_data["what_went_well"].append("Task completed successfully")
+        
+        if execution_results.confidence and execution_results.confidence > 0.8:
+            retrospective_data["what_went_well"].append("High confidence in results achieved")
+        elif execution_results.confidence and execution_results.confidence < 0.6:
+            retrospective_data["what_could_improve"].append("Improve result confidence through better validation")
+        
+        if execution_results.artifacts:
+            retrospective_data["what_went_well"].append(f"Generated {len(execution_results.artifacts)} artifacts")
+        
+        # Add role-specific insights
+        role_insights = self._get_role_specific_insights(execution_results)
+        if role_insights:
+            retrospective_data.update(role_insights)
+        
+        return retrospective_data
+    
+    def _get_role_specific_insights(self, execution_results: "ResultEnvelopeV1") -> Dict[str, Any]:
+        """Get role-specific insights for retrospective analysis.
+        
+        Can be overridden by specific roles to provide specialized insights.
+        """
+        return {}
+
 
     

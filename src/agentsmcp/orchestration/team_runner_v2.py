@@ -64,6 +64,13 @@ class TeamRunnerV2:
         self.agile_coach = AgileCoachIntegration()
         self.retrospective_engine = RetrospectiveEngine()
         self._orchestrator: Optional[DynamicOrchestrator] = None
+        self._communication_manager = None
+        self._last_reasoning_logs = {}
+        self._last_retrospective_report = {}
+        
+        # Initialize managed agent loader for controlled agent loading
+        from .managed_agent_loader import get_managed_agent_loader
+        self.agent_loader = get_managed_agent_loader()
         
     async def run_team(
         self,
@@ -214,6 +221,24 @@ class TeamRunnerV2:
                 else DEFAULT_TEAM
             )
             
+            # Validate that all roles are managed agents
+            try:
+                validated_roles = self.agent_loader.validate_team_composition(available_roles)
+                logger.info(f"Validated {len(validated_roles)} managed agents for dynamic team")
+                
+                # Preload agents for performance
+                self.agent_loader.preload_agents_for_team(validated_roles)
+                
+                # Use validated roles for team composition
+                available_roles = [role.value for role in validated_roles]
+                
+            except ValueError as e:
+                logger.error(f"Team validation failed: {e}")
+                # Fallback to traditional approach with default team
+                return await self._run_traditional_team(
+                    objective, DEFAULT_TEAM, agent_manager, progress_callback
+                )
+            
             team_composition = await asyncio.get_event_loop().run_in_executor(
                 None, 
                 self.team_composer.compose_team,
@@ -238,16 +263,20 @@ class TeamRunnerV2:
                 objective, DEFAULT_TEAM, agent_manager, progress_callback
             )
         
-        # Step 3: Dynamic orchestration
+        # Step 3: Dynamic orchestration with communication management
         try:
             if not self._orchestrator:
-                self._orchestrator = DynamicOrchestrator()
+                from .agent_communication_manager import get_communication_manager
+                self._orchestrator = DynamicOrchestrator(agent_manager=agent_manager)
+                self._communication_manager = get_communication_manager()
+            
+            # Start orchestration session
+            session_id = f"team_session_{int(time.time())}_{task_classification.task_type.value}"
             
             # Execute the team with dynamic orchestration
             execution_result = await self._orchestrator.orchestrate_team(
-                team_composition, 
-                objective,
-                agent_manager,
+                team_spec=team_composition,
+                objective=objective,
                 progress_callback=progress_callback
             )
             
@@ -284,6 +313,22 @@ class TeamRunnerV2:
         except Exception as e:
             logger.warning(f"Retrospective failed: {e}")
         
+        # Step 6: Generate and expose reasoning logs for analysis
+        try:
+            if hasattr(self, '_communication_manager'):
+                reasoning_logs = await self._communication_manager.get_all_reasoning_logs()
+                retrospective_report = await self._communication_manager.generate_retrospective_report()
+                
+                # Log summary for immediate feedback
+                logger.info(f"Generated reasoning logs for {len(reasoning_logs)} agents")
+                logger.info(f"Communication events: {retrospective_report.get('total_events', 0)}")
+                
+                # Store for external access
+                self._last_reasoning_logs = reasoning_logs
+                self._last_retrospective_report = retrospective_report
+        except Exception as e:
+            logger.warning(f"Failed to generate reasoning logs: {e}")
+        
         return results
     
     async def _run_traditional_team(
@@ -293,10 +338,33 @@ class TeamRunnerV2:
         agent_manager: AgentManager,
         progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None
     ) -> Dict[str, str]:
-        """Run team using traditional orchestration (backward compatibility)."""
-        logger.info("Running traditional team orchestration")
+        """Run team using traditional orchestration with managed agent validation."""
+        logger.info("Running traditional team orchestration with managed agents")
         
         roles_list = list(roles)
+        
+        # Validate that all requested roles are managed agents
+        try:
+            validated_roles = self.agent_loader.validate_team_composition(roles_list)
+            logger.info(f"Validated {len(validated_roles)} managed agents for traditional team")
+            
+            # Preload agents for performance
+            self.agent_loader.preload_agents_for_team(validated_roles)
+            
+            # Convert back to strings for execution
+            roles_list = [role.value for role in validated_roles]
+            
+        except ValueError as e:
+            logger.error(f"Traditional team validation failed: {e}")
+            # Use only the default managed agents as ultimate fallback
+            logger.warning("Falling back to default managed agents only")
+            try:
+                validated_default = self.agent_loader.validate_team_composition(DEFAULT_TEAM)
+                roles_list = [role.value for role in validated_default]
+            except Exception as fallback_error:
+                logger.critical(f"Even default team validation failed: {fallback_error}")
+                raise
+        
         results = await self._execute_agents_directly(
             roles_list, objective, agent_manager, progress_callback
         )
@@ -313,29 +381,105 @@ class TeamRunnerV2:
         agent_manager: AgentManager,
         progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None
     ) -> Dict[str, str]:
-        """Execute agents directly using the original approach."""
+        """Execute agents directly with orchestrator-only communication."""
+        from .agent_communication_manager import get_communication_manager
+        
         results: Dict[str, str] = {}
+        comm_manager = get_communication_manager()
+        session_id = f"direct_execution_{int(time.time())}"
         
-        async def _run(role: str):
-            task = TaskEnvelopeV1(objective=objective)
-            job_id = await agent_manager.spawn_agent(role, task.objective)
+        async def _run_with_communication_tracking(role: str):
+            # Start agent session for communication tracking
+            await comm_manager.start_agent_session(role, session_id)
             
-            if progress_callback:
-                try:
-                    await progress_callback("job.spawned", {"agent": role})
-                except Exception:
-                    pass
-                    
-            status = await agent_manager.wait_for_completion(job_id)
-            results[role] = status.output or status.error or ""
-            
-            if progress_callback:
-                try:
-                    await progress_callback("job.completed", {"agent": role})
-                except Exception:
-                    pass
+            try:
+                # Log reasoning: Starting agent
+                await comm_manager.log_agent_reasoning(
+                    role, session_id,
+                    f"Starting task: {objective[:100]}...",
+                    confidence=0.9,
+                    metadata={"action": "task_start"}
+                )
+                
+                # Execute agent task
+                task = TaskEnvelopeV1(objective=objective)
+                job_id = await agent_manager.spawn_agent(role, task.objective)
+                
+                # Log tool use
+                await comm_manager.log_agent_tool_use(
+                    role, session_id, "agent_manager.spawn_agent",
+                    {"objective": objective, "job_id": job_id}
+                )
+                
+                if progress_callback:
+                    try:
+                        await progress_callback("job.spawned", {"agent": role})
+                    except Exception:
+                        pass
+                
+                # Log reasoning: Agent spawned
+                await comm_manager.log_agent_reasoning(
+                    role, session_id,
+                    f"Agent spawned with job_id: {job_id}. Waiting for completion...",
+                    confidence=0.8
+                )
+                        
+                # Wait for completion
+                status = await agent_manager.wait_for_completion(job_id)
+                
+                # Determine success
+                success = bool(status.output and not status.error)
+                agent_output = status.output or status.error or ""
+                
+                # Log final output
+                await comm_manager.log_agent_output(
+                    role, session_id, agent_output,
+                    output_type="final_result"
+                )
+                
+                # Log decision: Task completion
+                await comm_manager.log_agent_decision(
+                    role, session_id,
+                    f"Task {'completed successfully' if success else 'completed with issues'}",
+                    {
+                        "success": success,
+                        "output_length": len(agent_output),
+                        "has_error": bool(status.error)
+                    },
+                    confidence=0.9 if success else 0.6
+                )
+                
+                results[role] = agent_output
+                
+                if progress_callback:
+                    try:
+                        await progress_callback("job.completed", {"agent": role})
+                    except Exception:
+                        pass
+                
+                # End agent session successfully
+                await comm_manager.end_agent_session(
+                    role, session_id, success=success, final_output=agent_output
+                )
+                
+            except Exception as e:
+                error_msg = str(e)
+                
+                # Log error
+                await comm_manager.log_agent_error(
+                    role, session_id, error_msg,
+                    {"exception_type": type(e).__name__}
+                )
+                
+                # End agent session with error
+                await comm_manager.end_agent_session(
+                    role, session_id, success=False, error_details=error_msg
+                )
+                
+                results[role] = f"Error: {error_msg}"
         
-        await asyncio.gather(*[_run(r) for r in roles])
+        # Execute all agents with communication tracking
+        await asyncio.gather(*[_run_with_communication_tracking(r) for r in roles])
         return results
     
     async def _run_quality_review_gate(
@@ -393,6 +537,33 @@ class TeamRunnerV2:
             
         except Exception as e:
             logger.warning(f"Retrospective execution failed: {e}")
+    
+    async def get_last_reasoning_logs(self) -> Dict[str, Any]:
+        """Get the reasoning logs from the last team execution."""
+        return self._last_reasoning_logs
+    
+    async def get_last_retrospective_report(self) -> Dict[str, Any]:
+        """Get the retrospective report from the last team execution."""
+        return self._last_retrospective_report
+    
+    async def get_communication_history(
+        self,
+        session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        limit: Optional[int] = None
+    ) -> List[Any]:
+        """Get communication history for analysis."""
+        if self._communication_manager:
+            return await self._communication_manager.get_communication_history(
+                session_id=session_id,
+                agent_id=agent_id,
+                limit=limit
+            )
+        return []
+    
+    async def get_agent_loading_statistics(self) -> Dict[str, Any]:
+        """Get statistics about agent loading and performance."""
+        return self.agent_loader.get_loading_statistics()
 
 
 # Create a singleton instance for the module-level function
@@ -473,10 +644,43 @@ async def run_team(
     return await run_team_v2(objective, roles, progress_callback)
 
 
+# Convenience functions for accessing reasoning logs and retrospective data
+async def get_last_reasoning_logs() -> Dict[str, Any]:
+    """Get the reasoning logs from the last team execution."""
+    return await _team_runner_v2.get_last_reasoning_logs()
+
+
+async def get_last_retrospective_report() -> Dict[str, Any]:
+    """Get the retrospective report from the last team execution."""
+    return await _team_runner_v2.get_last_retrospective_report()
+
+
+async def get_communication_history(
+    session_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    limit: Optional[int] = None
+) -> List[Any]:
+    """Get communication history for analysis."""
+    return await _team_runner_v2.get_communication_history(
+        session_id=session_id,
+        agent_id=agent_id,
+        limit=limit
+    )
+
+
+async def get_agent_loading_statistics() -> Dict[str, Any]:
+    """Get statistics about agent loading and performance."""
+    return await _team_runner_v2.get_agent_loading_statistics()
+
+
 # Export both functions for flexibility
 __all__ = [
     'TeamRunnerV2',
     'run_team',
     'run_team_v2',
+    'get_last_reasoning_logs',
+    'get_last_retrospective_report',
+    'get_communication_history',
+    'get_agent_loading_statistics',
     'DEFAULT_TEAM'
 ]

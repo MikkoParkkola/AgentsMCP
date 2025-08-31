@@ -15,7 +15,7 @@ Note: B6 adds an agent hook in BaseAgent (in a separate file).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict
 
 import httpx
 import structlog
@@ -24,6 +24,9 @@ from .config import ProviderType, ProviderConfig
 
 
 logger = structlog.get_logger(__name__)
+
+# Simple in-process cache for expensive model listings
+_MODELS_CACHE: Dict[Tuple[str, str, str], List["Model"]] = {}
 
 
 # =========================
@@ -300,26 +303,47 @@ def ollama_turbo_list_models(config: ProviderConfig) -> List[Model]:
 
 
 def list_models(provider: ProviderType, config: ProviderConfig) -> List[Model]:
-    """Facade that routes to per-provider implementations with unified errors (B5)."""
+    """Facade that routes to per-provider implementations with unified errors (B5).
+
+    Adds lightweight in-process caching to avoid repeated network calls during
+    a single session. Cache key excludes secrets: uses provider, api_base and a
+    short hash suffix of the api_key if present.
+    """
     logger.info("providers.list_models", provider=provider.value)
+
+    # Build cache key (provider, api_base, api_key_hash8)
+    import hashlib
+    base = (config.api_base or "").strip()
+    key_hash = (
+        hashlib.sha256(config.api_key.encode()).hexdigest()[:8]
+        if config.api_key else ""
+    )
+    cache_key = (provider.value, base, key_hash)
+
+    if cache_key in _MODELS_CACHE:
+        return _MODELS_CACHE[cache_key]
+
     try:
         if provider == ProviderType.OPENAI:
-            return openai_list_models(config)
-        if provider == ProviderType.OPENROUTER:
-            return openrouter_list_models(config)
-        if provider == ProviderType.OLLAMA:
-            return ollama_list_models(config)
-        if provider == ProviderType.OLLAMA_TURBO:
-            return ollama_turbo_list_models(config)
-        raise ProviderProtocolError(f"Unsupported provider: {provider}")
+            models = openai_list_models(config)
+        elif provider == ProviderType.OPENROUTER:
+            models = openrouter_list_models(config)
+        elif provider == ProviderType.OLLAMA:
+            models = ollama_list_models(config)
+        elif provider == ProviderType.OLLAMA_TURBO:
+            models = ollama_turbo_list_models(config)
+        else:
+            raise ProviderProtocolError(f"Unsupported provider: {provider}")
+
+        # Cache successful results
+        _MODELS_CACHE[cache_key] = models
+        return models
+
     except ProviderError:
-        # Re-raise known provider errors as-is (already mapped & informative)
         raise
     except httpx.HTTPError as e:
-        # Safety net: treat generic HTTP errors as network issues
         raise ProviderNetworkError(str(e)) from e
     except Exception as e:  # pragma: no cover - unexpected
-        # Last resort catch-all to keep a consistent exception family
         raise ProviderError(str(e)) from e
 
 
@@ -337,4 +361,3 @@ __all__ = [
     "ollama_turbo_list_models",
     "list_models",
 ]
-

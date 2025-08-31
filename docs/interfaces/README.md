@@ -11,5 +11,14 @@ Concise interface specifications to enable parallel implementation across module
 - build.md: Single-file binary build script inputs/outputs
 - delegation.md: Delegation spec (command + MCP workflows)
 
-Refer to docs/work-plan.md for task priorities and acceptance criteria.
+For priorities and acceptance criteria, see `../backlog.md`.
 
+
+## ICD Policy (source of truth)
+
+This repository treats interface control documents (ICDs) as the single source of truth for public module contracts used by agents.
+
+- Files: one JSON (or Markdown when necessary) per module, named by dotted module id (dots may be kept or replaced with dashes).
+- Required keys: name, purpose, inputs, outputs, errors, perf, security, version.
+- Versioning: semantic versioning. Any breaking change requires a CHANGE_REQUEST approved by the Architect.
+- Self‑improvement: Agents may propose ICD updates via CHANGE_REQUEST. Upon approval, bump the version and add migration notes to `docs/changelog.md`.

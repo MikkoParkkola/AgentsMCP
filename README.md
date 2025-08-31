@@ -57,7 +57,7 @@ Defaults:
 - MCP tools pre-wired for coding: GitHub, filesystem, git, bash, web search. Additional MCP servers can be added via `agentsmcp mcp add ...`.
 
 Startup guidance loading:
-- On startup, AgentsMCP reads local `AGENTS.md`, `CLAUDE.md`, `QWEN.md`, and `GEMINI.md` (if present) and folds key guidance into the system context for higher-quality outputs.
+- On startup, AgentsMCP reads local `AGENTS.md` and folds key guidance into the system context. Provider-specific guidance lives in `docs/models.md`.
 ```
 
 ## MCP Integration
@@ -252,42 +252,12 @@ See [docs/deployment.md](docs/deployment.md) for comprehensive deployment guidan
 
 ## Documentation
 
-### Core Documentation
-- [docs/deployment.md](docs/deployment.md) - Production deployment guide
-- [docs/product-status.md](docs/product-status.md) - Current status and roadmap
- - [docs/product-details.md](docs/product-details.md) - Detailed product information
- - [docs/work-plan.md](docs/work-plan.md) - Prioritized development plan (specs + acceptance criteria)
-  - [docs/backlog.md](docs/backlog.md) - Decomposed backlog (≤500 LOC tasks)
- - CI workflows (expected outputs and acceptance criteria):
-   - [docs/ci/README.md](docs/ci/README.md)
-   - [docs/ci/lint.md](docs/ci/lint.md)
-   - [docs/ci/tests.md](docs/ci/tests.md)
-   - [docs/ci/security.md](docs/ci/security.md)
-   - [docs/ci/container.md](docs/ci/container.md)
-   - [docs/ci/release.md](docs/ci/release.md)
-   - [docs/ci/ai-review.md](docs/ci/ai-review.md)
-   - [docs/ci/automerge.md](docs/ci/automerge.md)
-   - [docs/ci/e2e.md](docs/ci/e2e.md)
- - Interfaces (for parallel work):
-   - [docs/interfaces/README.md](docs/interfaces/README.md)
-   - [docs/interfaces/providers.md](docs/interfaces/providers.md)
-   - [docs/interfaces/chat.md](docs/interfaces/chat.md)
-   - [docs/interfaces/api-keys.md](docs/interfaces/api-keys.md)
-   - [docs/interfaces/mcp-versioning.md](docs/interfaces/mcp-versioning.md)
-   - [docs/interfaces/context.md](docs/interfaces/context.md)
-   - [docs/interfaces/streaming.md](docs/interfaces/streaming.md)
- - [docs/interfaces/build.md](docs/interfaces/build.md)
-  - [docs/interfaces/delegation.md](docs/interfaces/delegation.md)
+- Backlog: [docs/backlog.md](docs/backlog.md) — prioritized tasks
+- Changelog: [docs/changelog.md](docs/changelog.md) — notable changes
+- Architecture: [docs/AGENTIC_ARCHITECTURE.md](docs/AGENTIC_ARCHITECTURE.md)
+- Interfaces: [docs/interfaces/README.md](docs/interfaces/README.md)
 
-### Best Practices
-- [docs/generic-best-practices.md](docs/generic-best-practices.md)
-- [docs/ai-agent-best-practices.md](docs/ai-agent-best-practices.md)
-
-## Binaries
-
-- macOS (Apple Silicon, arm64): prebuilt binary attached to Releases.
-- Build locally: see [docs/standalone-binary.md](docs/standalone-binary.md).
-- [docs/product-best-practices.md](docs/product-best-practices.md)
+  
 
 ## License
 

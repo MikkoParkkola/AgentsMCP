@@ -24,3 +24,22 @@ agentsmcp agent spawn codex "task" --provider openrouter --api-base https://open
 - Fast drafting: `gpt-4o-mini`, `qwen2.5:7b` (local)
 
 Tune `model_priority` per agent to reflect desired defaults.
+
+## Provider Guidance
+
+### Claude (large-context analysis and refactors)
+- Prefer for very large-context analysis and documentation refactors.
+- Use structured, explicit instructions; provide file paths and concrete goals.
+- When editing code, request minimal diffs with rationale; validate with lint/tests when possible.
+- Safeguards: redact secrets, prefer deterministic, idempotent scripts, and stage incremental migrations with rollback.
+
+### Gemini (broad reasoning and content generation)
+- Good for content generation, multi-step reasoning, and cross‑modal tasks.
+- Structure complex tasks into numbered steps and checkpoints; include schemas/contracts when generating code.
+- Quality gates: include quick validation steps and safe defaults with clear flags.
+
+### Qwen (multilingual and cost-sensitive)
+- Useful for multilingual work, summarization, and low‑cost runs.
+- Keep prompts concise; specify output formats, language versions, and style guides.
+- For translations: specify tone, audience, and domain terminology.
+- Safeguards: avoid speculative fixes without tests; flag ambiguities and propose clarifying questions.
