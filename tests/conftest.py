@@ -3,14 +3,33 @@ import subprocess
 import sys
 import tempfile
 import pytest
+import asyncio
 from pathlib import Path
 import pexpect
 import requests
 import time
+from typing import Generator
+from datetime import datetime, timezone
 
 # ----------------------------------------------------------------------
 # General helpers
 # ----------------------------------------------------------------------
+
+# Configure asyncio for pytest-asyncio
+@pytest.fixture(scope="session")
+def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+    """Create an instance of the default event loop for the test session."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture
+def utc_now():
+    """Provide a fixed UTC timestamp for consistent testing."""
+    return datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
 @pytest.fixture(scope="session")
 def binary_path():
     """Return absolute path to the AgentsMCP binary/module."""
@@ -345,3 +364,15 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "template: Template management tests")
     config.addinivalue_line("markers", "ui: User interface tests")
     config.addinivalue_line("markers", "async: Asynchronous tests")
+    config.addinivalue_line("markers", "settings: Settings management system tests")
+    config.addinivalue_line("markers", "domain: Domain layer tests")
+    config.addinivalue_line("markers", "service: Service layer tests")
+    config.addinivalue_line("markers", "api: API endpoint tests")
+
+
+# Mark all async tests automatically
+def pytest_collection_modifyitems(config, items):
+    """Automatically mark async tests."""
+    for item in items:
+        if asyncio.iscoroutinefunction(item.function):
+            item.add_marker(pytest.mark.asyncio)
