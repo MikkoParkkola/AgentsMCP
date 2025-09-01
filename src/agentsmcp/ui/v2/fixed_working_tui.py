@@ -551,7 +551,7 @@ class FixedWorkingTUI:
                     max_agent_wait_time_ms=120000,  # Increased to 2 minutes
                     synthesis_timeout_ms=5000       # Increased synthesis timeout
                 )
-                orchestrator = Orchestrator(config=config, conversation_manager=self.conversation_manager)
+                orchestrator = Orchestrator(config=config)
                 
                 # Process the user input through the orchestrator with working directory context
                 import os
@@ -847,7 +847,7 @@ class FixedWorkingTUI:
             )
             
             if hasattr(self, 'conversation_manager') and self.conversation_manager:
-                return Orchestrator(config=config, conversation_manager=self.conversation_manager)
+                return Orchestrator(config=config)
             else:
                 return None
                 

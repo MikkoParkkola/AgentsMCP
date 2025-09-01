@@ -16,7 +16,8 @@ from ..config import Config, ProviderType, ProviderConfig
 from ..providers import list_models as providers_list_models, ProviderError
 from ..providers_validate import validate_provider_config, ValidationResult
 from ..config_write import persist_provider_api_key
-from ..settings import AppSettings
+# Import from settings.py file directly, not the settings/ directory
+import agentsmcp.settings as settings_module
 from ..stream import generate_stream_from_text, openai_stream_text
 from ..conversation.conversation import ConversationManager
 from ..conversation.command_interface_impl import CommandInterfaceImpl
@@ -27,7 +28,7 @@ console = Console()
 
 
 def _load_config(config_path: Optional[str]) -> Config:
-    env = AppSettings()
+    env = settings_module.AppSettings()
     base: Config
     if config_path and Path(config_path).exists():
         base = Config.from_file(Path(config_path))

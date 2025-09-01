@@ -49,11 +49,7 @@ class OrchestratedConversationManager:
         )
         
         # Create orchestrator instance
-        self.orchestrator = Orchestrator(
-            config=orchestrator_config,
-            conversation_manager=self._create_fallback_conversation_manager(),
-            agent_manager=agent_manager
-        )
+        self.orchestrator = Orchestrator(config=orchestrator_config)
         
         # Conversation context for continuity
         self.conversation_history = []

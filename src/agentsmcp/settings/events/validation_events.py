@@ -14,9 +14,9 @@ from .base_events import DomainEvent
 class ValidationCompletedEvent(DomainEvent):
     """Event raised when validation completes successfully."""
     
-    node_id: str
-    setting_key: str
-    validation_result: Dict[str, Any]
+    node_id: str = None
+    setting_key: str = None
+    validation_result: Dict[str, Any] = None
     
     @property
     def event_type(self) -> str:
@@ -31,10 +31,10 @@ class ValidationCompletedEvent(DomainEvent):
 class ValidationFailedEvent(DomainEvent):
     """Event raised when validation fails."""
     
-    node_id: str
-    setting_key: str
-    errors: List[Dict[str, Any]]
-    suggestions: List[Dict[str, Any]]
+    node_id: str = None
+    setting_key: str = None
+    errors: List[Dict[str, Any]] = None
+    suggestions: List[Dict[str, Any]] = None
     
     @property
     def event_type(self) -> str:
@@ -49,8 +49,8 @@ class ValidationFailedEvent(DomainEvent):
 class SmartSuggestionGeneratedEvent(DomainEvent):
     """Event raised when smart suggestions are generated."""
     
-    context: Dict[str, Any]
-    suggestions: List[Dict[str, Any]]
+    context: Dict[str, Any] = None
+    suggestions: List[Dict[str, Any]] = None
     
     @property
     def event_type(self) -> str:

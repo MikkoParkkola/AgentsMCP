@@ -1730,25 +1730,55 @@ class TUILauncher:
     
     def __init__(self):
         self.app: Optional[MainTUIApp] = None
+        self.revolutionary_launcher = None
     
     async def launch_tui(self, cli_config: Optional[CLIConfig] = None) -> int:
-        """Launch the TUI using the single working implementation.
+        """Launch the TUI with Revolutionary system integration.
+        
+        This method now uses the Revolutionary Launcher to provide enhanced
+        features while maintaining backward compatibility.
         
         Args:
-            cli_config: CLI configuration (currently not used by fixed implementation)
+            cli_config: CLI configuration for TUI customization
             
         Returns:
             Exit code
         """
-        logger.info("Launching fixed working TUI - the only supported TUI implementation")
-        from .fixed_working_tui import launch_fixed_working_tui
-        return await launch_fixed_working_tui()
+        logger.info("Launching TUI with Revolutionary system integration")
+        
+        try:
+            # Try to launch with Revolutionary system
+            from .revolutionary_launcher import RevolutionaryLauncher
+            self.revolutionary_launcher = RevolutionaryLauncher(cli_config)
+            return await self.revolutionary_launcher.launch()
+            
+        except ImportError as e:
+            logger.warning(f"Revolutionary components not available: {e}")
+            # Fallback to basic implementation
+            return await self._launch_basic_fallback(cli_config)
+        except Exception as e:
+            logger.warning(f"Revolutionary TUI launch failed: {e}")
+            # Fallback to basic implementation
+            return await self._launch_basic_fallback(cli_config)
+    
+    async def _launch_basic_fallback(self, cli_config: Optional[CLIConfig] = None) -> int:
+        """Launch basic TUI as fallback when Revolutionary system fails."""
+        logger.info("Using basic TUI fallback implementation")
+        try:
+            from .fixed_working_tui import launch_fixed_working_tui
+            return await launch_fixed_working_tui()
+        except Exception as e:
+            logger.error(f"Basic TUI fallback failed: {e}")
+            return 1
     
 
 
 # Convenience function for CLI integration
 async def launch_main_tui(cli_config: Optional[CLIConfig] = None) -> int:
-    """Launch the main TUI application with CLI integration.
+    """Launch the main TUI application with Revolutionary system integration.
+    
+    This is the primary entry point that the CLI system uses to launch the TUI.
+    It now integrates the Revolutionary TUI system for enhanced features.
     
     Args:
         cli_config: CLI configuration, uses defaults if None

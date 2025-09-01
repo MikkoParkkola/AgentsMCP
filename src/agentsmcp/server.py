@@ -15,7 +15,8 @@ from .agent_manager import AgentManager
 from .config import Config
 from .orchestrator_factory import OrchestratorFactory, OrchestratorMode
 from .logging_config import configure_logging
-from .settings import AppSettings
+# Import from settings.py file directly, not the settings/ directory
+import agentsmcp.settings as settings_module
 from .events import EventBus
 from .models import EnvelopeParser, EnvelopeStatus, EnvelopeError
 
@@ -50,7 +51,7 @@ class AgentServer:
     """FastAPI server for the AgentsMCP system."""
 
     def __init__(self, config: Config, settings: Optional[AppSettings] = None):
-        settings = settings or AppSettings()
+        settings = settings or settings_module.AppSettings()
         self.settings = settings
         configure_logging(level=settings.log_level, fmt=settings.log_format)
         self.log = logging.getLogger(__name__)
@@ -857,7 +858,7 @@ def create_app(config_path: Optional[str] = None) -> FastAPI:
     server host/port if set.
     """
     cfg: Config
-    env = AppSettings()
+    env = settings_module.AppSettings()
     path = config_path or os.getenv("AGENTSMCP_CONFIG") or "agentsmcp.yaml"
     try:
         from pathlib import Path

@@ -22,6 +22,14 @@ from ..domain.value_objects import SettingsLevel, SettingType, ConflictResolutio
 from ..domain.entities import UserProfile
 
 
+# Dependency functions (defined outside class to avoid 'self' reference issues)
+def get_current_user_id() -> str:
+    """Dependency to get current user ID from request context."""
+    # This would typically extract user ID from JWT token or session
+    # For now, returning a placeholder
+    return "user_123"
+
+
 # Request/Response Models
 class CreateHierarchyRequest(BaseModel):
     name: str = Field(..., description="Name of the hierarchy")
@@ -38,12 +46,12 @@ class SetSettingRequest(BaseModel):
     key: str = Field(..., description="Setting key")
     value: Any = Field(..., description="Setting value")
     type: Optional[SettingType] = Field(None, description="Setting type (auto-inferred if not provided)")
-    validate: bool = Field(True, description="Whether to validate the setting")
+    validate_setting: bool = Field(True, description="Whether to validate the setting")
 
 
 class BulkUpdateRequest(BaseModel):
     settings: Dict[str, Any] = Field(..., description="Settings to update")
-    validate: bool = Field(True, description="Whether to validate settings")
+    validate_setting: bool = Field(True, description="Whether to validate settings")
 
 
 class ConflictResolutionRequest(BaseModel):
@@ -227,7 +235,7 @@ class SettingsAPI:
     
     async def create_hierarchy(self, 
                              request: CreateHierarchyRequest,
-                             user_id: str = Depends(self._get_current_user_id)) -> HierarchyResponse:
+                             user_id: str = Depends(get_current_user_id)) -> HierarchyResponse:
         """Create a new settings hierarchy."""
         try:
             hierarchy = await self.settings_service.create_hierarchy(
@@ -252,7 +260,7 @@ class SettingsAPI:
     
     async def get_hierarchy(self,
                           hierarchy_id: str = Path(..., description="Hierarchy ID"),
-                          user_id: str = Depends(self._get_current_user_id)) -> HierarchyResponse:
+                          user_id: str = Depends(get_current_user_id)) -> HierarchyResponse:
         """Get a settings hierarchy by ID."""
         # This would typically get the hierarchy from the repository
         # For now, returning a placeholder response
@@ -261,7 +269,7 @@ class SettingsAPI:
     async def create_node(self,
                         hierarchy_id: str = Path(..., description="Hierarchy ID"),
                         request: CreateNodeRequest = Body(...),
-                        user_id: str = Depends(self._get_current_user_id)) -> NodeResponse:
+                        user_id: str = Depends(get_current_user_id)) -> NodeResponse:
         """Create a new settings node."""
         try:
             node = await self.settings_service.create_settings_node(
@@ -291,7 +299,7 @@ class SettingsAPI:
                         node_id: str = Path(..., description="Node ID"),
                         key: str = Path(..., description="Setting key"),
                         request: SetSettingRequest = Body(...),
-                        user_id: str = Depends(self._get_current_user_id)) -> Dict[str, Any]:
+                        user_id: str = Depends(get_current_user_id)) -> Dict[str, Any]:
         """Set a setting value."""
         try:
             await self.settings_service.set_setting(
@@ -300,7 +308,7 @@ class SettingsAPI:
                 key=key,
                 value=request.value,
                 setting_type=request.type,
-                validate=request.validate
+                validate=request.validate_setting
             )
             
             return {"status": "success", "message": f"Setting '{key}' updated"}
@@ -314,7 +322,7 @@ class SettingsAPI:
                         node_id: str = Path(..., description="Node ID"),
                         key: str = Path(..., description="Setting key"),
                         include_inheritance: bool = Query(True, description="Include inheritance info"),
-                        user_id: str = Depends(self._get_current_user_id)) -> SettingResponse:
+                        user_id: str = Depends(get_current_user_id)) -> SettingResponse:
         """Get a setting value with optional inheritance information."""
         try:
             setting_info = await self.settings_service.get_setting(
@@ -345,7 +353,7 @@ class SettingsAPI:
     async def get_effective_settings(self,
                                    node_id: str = Path(..., description="Node ID"),
                                    use_cache: bool = Query(True, description="Use cached values"),
-                                   user_id: str = Depends(self._get_current_user_id)) -> Dict[str, SettingResponse]:
+                                   user_id: str = Depends(get_current_user_id)) -> Dict[str, SettingResponse]:
         """Get all effective settings for a node."""
         try:
             settings = await self.settings_service.get_effective_settings(
@@ -375,14 +383,14 @@ class SettingsAPI:
     async def bulk_update_settings(self,
                                  node_id: str = Path(..., description="Node ID"),
                                  request: BulkUpdateRequest = Body(...),
-                                 user_id: str = Depends(self._get_current_user_id)) -> Dict[str, Any]:
+                                 user_id: str = Depends(get_current_user_id)) -> Dict[str, Any]:
         """Update multiple settings in a single operation."""
         try:
             result = await self.settings_service.bulk_update_settings(
                 user_id=user_id,
                 node_id=node_id,
                 settings=request.settings,
-                validate=request.validate
+                validate=request.validate_setting
             )
             
             return result
@@ -394,7 +402,7 @@ class SettingsAPI:
     
     async def validate_settings(self,
                               node_id: str = Path(..., description="Node ID"),
-                              user_id: str = Depends(self._get_current_user_id)) -> ValidationResultResponse:
+                              user_id: str = Depends(get_current_user_id)) -> ValidationResultResponse:
         """Validate all settings for a node."""
         try:
             errors = await self.settings_service.validate_settings(
@@ -416,7 +424,7 @@ class SettingsAPI:
     
     async def detect_conflicts(self,
                              node_id: str = Path(..., description="Node ID"),
-                             user_id: str = Depends(self._get_current_user_id)) -> List[ConflictResponse]:
+                             user_id: str = Depends(get_current_user_id)) -> List[ConflictResponse]:
         """Detect setting conflicts for a node."""
         try:
             conflicts = await self.settings_service.detect_conflicts(
@@ -444,7 +452,7 @@ class SettingsAPI:
     async def resolve_conflicts(self,
                               node_id: str = Path(..., description="Node ID"),
                               request: ConflictResolutionRequest = Body(...),
-                              user_id: str = Depends(self._get_current_user_id)) -> Dict[str, Any]:
+                              user_id: str = Depends(get_current_user_id)) -> Dict[str, Any]:
         """Resolve setting conflicts with user decisions."""
         try:
             result = await self.settings_service.resolve_conflicts(
@@ -463,7 +471,7 @@ class SettingsAPI:
     async def export_settings(self,
                             hierarchy_id: str = Path(..., description="Hierarchy ID"),
                             request: ExportRequest = Body(...),
-                            user_id: str = Depends(self._get_current_user_id)) -> Dict[str, Any]:
+                            user_id: str = Depends(get_current_user_id)) -> Dict[str, Any]:
         """Export settings hierarchy."""
         try:
             export_data = await self.settings_service.export_settings(
@@ -481,7 +489,7 @@ class SettingsAPI:
     
     async def import_settings(self,
                             request: ImportRequest = Body(...),
-                            user_id: str = Depends(self._get_current_user_id)) -> Dict[str, Any]:
+                            user_id: str = Depends(get_current_user_id)) -> Dict[str, Any]:
         """Import settings from external data."""
         try:
             result = await self.settings_service.import_settings(
@@ -499,7 +507,7 @@ class SettingsAPI:
     
     async def validate_hierarchy(self,
                                hierarchy_id: str = Path(..., description="Hierarchy ID"),
-                               user_id: str = Depends(self._get_current_user_id)) -> Dict[str, Any]:
+                               user_id: str = Depends(get_current_user_id)) -> Dict[str, Any]:
         """Validate hierarchy consistency."""
         try:
             result = await self.validation_service.validate_hierarchy_consistency(hierarchy_id)
@@ -507,12 +515,6 @@ class SettingsAPI:
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
-    
-    def _get_current_user_id(self) -> str:
-        """Dependency to get current user ID from request context."""
-        # This would typically extract user ID from JWT token or session
-        # For now, returning a placeholder
-        return "user_123"
 
 
 # Handler class for dependency injection

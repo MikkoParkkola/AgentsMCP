@@ -16,11 +16,11 @@ from ..domain.value_objects import SettingsLevel
 class SettingChangedEvent(DomainEvent):
     """Event raised when a setting value is changed."""
     
-    node_id: str
-    hierarchy_id: str
-    setting_key: str
-    old_value: Any
-    new_value: Any
+    node_id: str = None
+    hierarchy_id: str = None
+    setting_key: str = None
+    old_value: Any = None
+    new_value: Any = None
     
     @property
     def event_type(self) -> str:
@@ -35,10 +35,10 @@ class SettingChangedEvent(DomainEvent):
 class SettingsNodeCreatedEvent(DomainEvent):
     """Event raised when a new settings node is created."""
     
-    hierarchy_id: str
-    node_id: str
-    level: SettingsLevel
-    name: str
+    hierarchy_id: str = None
+    node_id: str = None
+    level: SettingsLevel = None
+    name: str = None
     parent_id: Optional[str] = None
     
     @property
@@ -54,11 +54,11 @@ class SettingsNodeCreatedEvent(DomainEvent):
 class SettingsNodeUpdatedEvent(DomainEvent):
     """Event raised when a settings node is updated."""
     
-    hierarchy_id: str
-    node_id: str
-    updated_fields: List[str]
-    old_values: Dict[str, Any]
-    new_values: Dict[str, Any]
+    hierarchy_id: str = None
+    node_id: str = None
+    updated_fields: List[str] = None
+    old_values: Dict[str, Any] = None
+    new_values: Dict[str, Any] = None
     
     @property
     def event_type(self) -> str:
@@ -73,11 +73,11 @@ class SettingsNodeUpdatedEvent(DomainEvent):
 class SettingsNodeDeletedEvent(DomainEvent):
     """Event raised when a settings node is deleted."""
     
-    hierarchy_id: str
-    node_id: str
-    node_name: str
-    level: SettingsLevel
-    settings_count: int
+    hierarchy_id: str = None
+    node_id: str = None
+    node_name: str = None
+    level: SettingsLevel = None
+    settings_count: int = None
     
     @property
     def event_type(self) -> str:
@@ -92,9 +92,9 @@ class SettingsNodeDeletedEvent(DomainEvent):
 class SettingsHierarchyCreatedEvent(DomainEvent):
     """Event raised when a new settings hierarchy is created."""
     
-    hierarchy_id: str
-    name: str
-    root_node_id: str
+    hierarchy_id: str = None
+    name: str = None
+    root_node_id: str = None
     
     @property
     def event_type(self) -> str:
@@ -109,9 +109,9 @@ class SettingsHierarchyCreatedEvent(DomainEvent):
 class SettingsValidationFailedEvent(DomainEvent):
     """Event raised when settings validation fails."""
     
-    node_id: str
-    setting_key: str
-    errors: List[Dict[str, Any]]
+    node_id: str = None
+    setting_key: str = None
+    errors: List[Dict[str, Any]] = None
     
     @property
     def event_type(self) -> str:
@@ -126,9 +126,9 @@ class SettingsValidationFailedEvent(DomainEvent):
 class SettingsConflictDetectedEvent(DomainEvent):
     """Event raised when settings conflicts are detected."""
     
-    hierarchy_id: str
-    node_id: str
-    conflicts: List[Dict[str, Any]]
+    hierarchy_id: str = None
+    node_id: str = None
+    conflicts: List[Dict[str, Any]] = None
     
     @property
     def event_type(self) -> str:
@@ -143,10 +143,10 @@ class SettingsConflictDetectedEvent(DomainEvent):
 class SettingsConflictResolvedEvent(DomainEvent):
     """Event raised when settings conflicts are resolved."""
     
-    hierarchy_id: str
-    node_id: str
-    resolved_conflicts: List[Dict[str, Any]]
-    resolution_strategy: str
+    hierarchy_id: str = None
+    node_id: str = None
+    resolved_conflicts: List[Dict[str, Any]] = None
+    resolution_strategy: str = None
     
     @property
     def event_type(self) -> str:
@@ -161,11 +161,11 @@ class SettingsConflictResolvedEvent(DomainEvent):
 class SettingsImportedEvent(DomainEvent):
     """Event raised when settings are imported."""
     
-    hierarchy_id: str
-    import_source: str
-    nodes_created: int
-    settings_imported: int
-    errors: List[Dict[str, Any]]
+    hierarchy_id: str = None
+    import_source: str = None
+    nodes_created: int = None
+    settings_imported: int = None
+    errors: List[Dict[str, Any]] = None
     
     @property
     def event_type(self) -> str:
@@ -180,10 +180,10 @@ class SettingsImportedEvent(DomainEvent):
 class SettingsExportedEvent(DomainEvent):
     """Event raised when settings are exported."""
     
-    hierarchy_id: str
-    export_format: str
-    include_secrets: bool
-    export_size: int
+    hierarchy_id: str = None
+    export_format: str = None
+    include_secrets: bool = None
+    export_size: int = None
     
     @property
     def event_type(self) -> str:
@@ -198,7 +198,7 @@ class SettingsExportedEvent(DomainEvent):
 class SettingsCacheInvalidatedEvent(DomainEvent):
     """Event raised when settings cache is invalidated."""
     
-    hierarchy_id: str
+    hierarchy_id: str = None
     node_id: Optional[str] = None
     reason: str = "manual"
     

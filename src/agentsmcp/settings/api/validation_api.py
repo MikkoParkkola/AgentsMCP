@@ -9,6 +9,14 @@ from pydantic import BaseModel, Field
 from ..services.validation_service import ValidationService
 
 
+# Dependency functions (defined outside class to avoid 'self' reference issues)
+def get_current_user_id() -> str:
+    """Dependency to get current user ID from request context."""
+    # This would typically extract user ID from JWT token or session
+    # For now, returning a placeholder
+    return "user_123"
+
+
 class ValidateSettingRequest(BaseModel):
     key: str = Field(..., description="Setting key")
     value: Any = Field(..., description="Setting value")
@@ -45,7 +53,7 @@ class ValidationAPI:
     async def validate_setting(self,
                               node_id: str = Path(...),
                               request: ValidateSettingRequest = Body(...),
-                              user_id: str = Depends(self._get_current_user_id)) -> Dict[str, Any]:
+                              user_id: str = Depends(get_current_user_id)) -> Dict[str, Any]:
         """Validate a setting in real-time."""
         try:
             result = await self.validation_service.validate_setting_real_time(
@@ -60,7 +68,7 @@ class ValidationAPI:
     
     async def get_smart_suggestions(self,
                                   request: SmartSuggestionsRequest = Body(...),
-                                  user_id: str = Depends(self._get_current_user_id)) -> List[Dict[str, Any]]:
+                                  user_id: str = Depends(get_current_user_id)) -> List[Dict[str, Any]]:
         """Get smart configuration suggestions."""
         try:
             suggestions = await self.validation_service.get_smart_suggestions(

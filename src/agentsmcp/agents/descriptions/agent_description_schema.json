@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Agent Description Schema",
+  "description": "Schema for defining agent roles and capabilities in AgentsMCP",
+  "type": "object",
+  "required": ["type", "name", "description", "system_prompt", "tools", "capabilities"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "description": "Unique identifier for the agent type"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable name of the agent"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["engineering", "design", "research", "quality_assurance", "management", "legal", "marketing", "data"],
+      "description": "Category of the agent role"
+    },
+    "description": {
+      "type": "string",
+      "description": "Brief description of the agent's role and responsibilities"
+    },
+    "system_prompt": {
+      "type": "string",
+      "description": "Detailed system prompt that defines the agent's personality and behavior"
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["filesystem", "bash", "git", "web_search"]
+      },
+      "description": "List of tools the agent has access to"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "List of key capabilities and skills"
+    },
+    "specializations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Specific areas of specialization within the role"
+    },
+    "collaboration_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Other agent types this agent frequently collaborates with"
+    },
+    "quality_gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "description": {"type": "string"},
+          "criteria": {"type": "array", "items": {"type": "string"}}
+        }
+      },
+      "description": "Quality checks and gates this agent enforces"
+    }
+  }
+}

@@ -15,6 +15,14 @@ from ..domain.value_objects import AgentStatus, AgentCapability
 from ..domain.entities import InstructionTemplate
 
 
+# Dependency functions (defined outside class to avoid 'self' reference issues)
+def get_current_user_id() -> str:
+    """Dependency to get current user ID from request context."""
+    # This would typically extract user ID from JWT token or session
+    # For now, returning a placeholder
+    return "user_123"
+
+
 # Request/Response Models
 class CreateAgentRequest(BaseModel):
     name: str = Field(..., description="Agent name")
@@ -103,7 +111,7 @@ class AgentAPI:
     
     async def create_agent(self,
                          request: CreateAgentRequest,
-                         user_id: str = Depends(self._get_current_user_id)) -> AgentResponse:
+                         user_id: str = Depends(get_current_user_id)) -> AgentResponse:
         """Create a new agent definition."""
         try:
             agent = await self.agent_service.create_agent_definition(
@@ -133,7 +141,7 @@ class AgentAPI:
     
     async def get_agent(self,
                        agent_id: str = Path(...),
-                       user_id: str = Depends(self._get_current_user_id)) -> AgentResponse:
+                       user_id: str = Depends(get_current_user_id)) -> AgentResponse:
         """Get agent definition by ID."""
         # Placeholder implementation
         raise HTTPException(status_code=501, detail="Not implemented")
@@ -141,7 +149,7 @@ class AgentAPI:
     async def create_instance(self,
                             agent_id: str = Path(...),
                             request: CreateInstanceRequest = Body(...),
-                            user_id: str = Depends(self._get_current_user_id)) -> InstanceResponse:
+                            user_id: str = Depends(get_current_user_id)) -> InstanceResponse:
         """Create an agent instance."""
         try:
             instance = await self.agent_service.create_agent_instance(
@@ -167,7 +175,7 @@ class AgentAPI:
     
     async def start_instance(self,
                            instance_id: str = Path(...),
-                           user_id: str = Depends(self._get_current_user_id)) -> InstanceResponse:
+                           user_id: str = Depends(get_current_user_id)) -> InstanceResponse:
         """Start an agent instance."""
         try:
             instance = await self.agent_service.start_agent_instance(
@@ -192,7 +200,7 @@ class AgentAPI:
                             category: Optional[str] = Query(None),
                             search: str = Query(""),
                             limit: int = Query(50, le=100),
-                            user_id: str = Depends(self._get_current_user_id)) -> List[AgentResponse]:
+                            user_id: str = Depends(get_current_user_id)) -> List[AgentResponse]:
         """Get agents from marketplace."""
         try:
             agents = await self.agent_service.get_agent_marketplace(
@@ -221,10 +229,6 @@ class AgentAPI:
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
     
-    def _get_current_user_id(self) -> str:
-        """Get current user ID from request context."""
-        return "user_123"  # Placeholder
-
 
 class AgentAPIHandlers:
     """Container for agent API handlers."""

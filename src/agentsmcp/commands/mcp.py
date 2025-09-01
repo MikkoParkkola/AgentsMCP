@@ -5,13 +5,14 @@ from typing import Optional
 import click
 
 from ..config import Config, MCPServerConfig
-from ..settings import AppSettings
+# Import from settings.py file directly, not the settings/ directory
+import agentsmcp.settings as settings_module
 from ..mcp.manager import MCPServer as _M, get_global_manager as _get
 import json
 
 
 def _load_config(config_path: Optional[str]) -> Config:
-    env = AppSettings()
+    env = settings_module.AppSettings()
     base: Config
     if config_path and Path(config_path).exists():
         base = Config.from_file(Path(config_path))

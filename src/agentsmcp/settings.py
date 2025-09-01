@@ -12,7 +12,7 @@ from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from .config import (
+from .runtime_config import (
     Config,
     RAGConfig,
     ServerConfig,
@@ -128,3 +128,6 @@ class AppSettings(BaseSettings):
             pass
 
         return base
+
+# Rebuild model to resolve forward references
+AppSettings.model_rebuild()

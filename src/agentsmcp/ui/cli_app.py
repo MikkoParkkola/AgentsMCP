@@ -220,13 +220,13 @@ class CLIApp:
             elif self.current_mode == "stats":
                 await self._run_statistics_mode()
             elif self.current_mode == "tui":
-                # Launch the single working TUI implementation
+                # Launch the rich terminal interface
                 try:
                     await self._run_modern_tui()
                 except Exception as exc:  # pragma: no cover – defensive
                     import logging, os as _os
                     logging.getLogger(__name__).exception(
-                        "Failed to start TUI (v2/v1 path)"
+                        "Failed to start TUI"
                     )
                     # Respect no-fallback mode to surface TUI errors for debugging
                     if _os.getenv("AGENTS_TUI_V2_NO_FALLBACK", "0") == "1":
@@ -238,6 +238,8 @@ class CLIApp:
                             "final_mode": "tui",
                             "error": str(exc)
                         }
+                    # Fallback to interactive mode if TUI fails
+                    print(f"TUI failed, falling back to interactive mode: {exc}")
                     await self._run_interactive_mode()
             else:
                 await self._run_interactive_mode()  # Default fallback
@@ -345,16 +347,38 @@ class CLIApp:
         await self.statistics_display.start_display()
 
     async def _run_modern_tui(self):
-        """Launch the fixed working TUI (single implementation).
+        """Launch the Revolutionary TUI with automatic capability detection.
 
-        This method launches the only supported TUI implementation which fixes
-        the typing and scrollback issues. All fallbacks have been removed.
+        This method launches the Revolutionary TUI system which automatically:
+        - Detects terminal capabilities and system performance
+        - Activates appropriate feature level (Basic → Enhanced → Revolutionary → Ultra)
+        - Provides graceful fallback to basic TUI on any failures
+        - Maintains complete backward compatibility
         """
-        print("🚀 Starting fixed working TUI...")
-        from .v2 import launch_main_tui
-        exit_code = await launch_main_tui(self.config)
-        if exit_code != 0:
-            raise RuntimeError(f"TUI failed with exit code: {exit_code}")
+        print("🚀 Starting Revolutionary TUI system...")
+        
+        try:
+            # Import and launch Revolutionary TUI system
+            from .v2.revolutionary_launcher import launch_revolutionary_tui
+            exit_code = await launch_revolutionary_tui(self.config)
+            
+            if exit_code != 0:
+                raise RuntimeError(f"Revolutionary TUI failed with exit code: {exit_code}")
+            
+            return exit_code
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Revolutionary TUI launch failed: {e}")
+            
+            # Graceful fallback to fixed working TUI
+            print("⚠️  Revolutionary TUI unavailable, falling back to basic TUI...")
+            from .v2 import launch_main_tui
+            exit_code = await launch_main_tui(self.config)
+            
+            if exit_code != 0:
+                raise RuntimeError(f"Fallback TUI failed with exit code: {exit_code}")
     
     async def _show_error(self, error_message: str):
         """Display error message beautifully"""
@@ -752,21 +776,22 @@ def create_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="AgentsMCP - Revolutionary Multi-Agent Orchestration Platform",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        add_help=True,
         epilog="""
 Examples:
-  agentsmcp                           # Start in interactive mode
-  agentsmcp --mode dashboard          # Start in dashboard mode
-  agentsmcp --mode stats              # Start in statistics mode
+  agentsmcp                           # Interactive REPL mode
+  agentsmcp --mode tui                # Rich terminal interface  
+  agentsmcp --mode dashboard          # Status dashboard
+  agentsmcp --mode stats              # Statistics display
   agentsmcp --theme dark              # Force dark theme
-  agentsmcp --no-welcome              # Skip welcome screen
         """
     )
     
     parser.add_argument(
         '--mode', '-m',
-        choices=['interactive', 'dashboard', 'stats'],
+        choices=['interactive', 'dashboard', 'stats', 'tui'],
         default='interactive',
-        help='Interface mode (default: interactive)'
+        help='Interface mode: interactive=REPL, tui=rich terminal UI, dashboard=status display, stats=metrics (default: interactive)'
     )
     
     parser.add_argument(

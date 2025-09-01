@@ -1,0 +1,199 @@
+'''Strict Orchestrator Implementation for AgentsMCP
+
+This orchestrator enforces the architectural principle that ONLY the orchestrator 
+communicates directly with users. All agent communications are internal.
+
+Key Principles:
+- User ↔ Orchestrator ONLY (no direct agent-user communication allowed)
+- Orchestrator ↔ Agents (internal coordination) 
+- Smart task classification to avoid unnecessary agent spawning
+- Response synthesis for coherent user experience
+- Communication isolation for clean architecture
+
+The orchestrator acts as the single point of contact for users while coordinating
+with agents behind the scenes to provide intelligent, consolidated responses.
+'''"""
+
+import asyncio
+import logging
+import time
+from typing import Dict, List, Optional, Any, Union
+from dataclasses import dataclass, field
+from enum import Enum
+from datetime import datetime
+
+from .task_classifier import TaskClassifier, TaskClassification, ClassificationResult
+from .response_synthesizer import ResponseSynthesizer, SynthesisStrategy
+from .communication_interceptor import CommunicationInterceptor
+
+logger = logging.getLogger(__name__)
+
+
+class OrchestratorMode(Enum):
+    """Orchestrator operation modes."""
+    STRICT_ISOLATION = "strict_isolation"  # No direct agent-user communication allowed
+    SUPERVISED = "supervised"  # Agent communications monitored and filtered
+    TRANSPARENT = "transparent"  # Agent communications visible but orchestrator-mediated
+
+
+@dataclass
+class OrchestratorConfig:
+    """Configuration for the orchestrator."""
+    mode: OrchestratorMode = OrchestratorMode.STRICT_ISOLATION
+    
+    # Task classification settings
+    enable_smart_classification: bool = True
+    simple_task_threshold: float = 0.8
+    single_agent_threshold: float = 0.6
+    
+    # Response synthesis settings
+    default_synthesis_strategy: SynthesisStrategy = SynthesisStrategy.SUMMARIZE
+    synthesis_timeout_ms: int = 2000
+    
+    # Communication settings
+    intercept_all_agent_output: bool = True
+    allow_agent_status_messages: bool = False
+    consolidate_error_messages: bool = True
+    
+    # Performance settings
+    max_agent_wait_time_ms: int = 30000
+    max_parallel_agents: int = 8
+    
+    # Fallback behavior
+    fallback_to_simple_response: bool = True
+    orchestrator_persona: str = "helpful AI assistant"
++
++    # -------------------------------------------------
++    # NEW: Auto‑approve / keep‑delegating behavior
++    # -------------------------------------------------
++    #: When True the orchestrator **never** pauses for a manual
++    #: confirmation after a delegated step.  It will automatically
++    #: pick the recommended option in a clarification scenario.
++    auto_approve: bool = True
++
++    #: Upper bound on the number of internal delegation cycles
++    #: before the orchestrator gives up (prevents infinite loops).
++    max_delegation_steps: int = 20
++
++    #: How to treat low‑confidence classifications:
++    #:   * ``auto`` – automatically fall‑back to a generic agent.
++    #:   * ``ask`` – request clarification from the user.
++    low_confidence_policy: str = "auto"   # options: "auto", "ask"
+ 
+ 
+ @dataclass 
+ class OrchestratorResponse:
+@@
+         logger.info("Orchestrator shutdown complete")
++
++    # ----------------------------------------------------------------------
++    # PUBLIC: Run a high‑level goal until it is achieved.
++    # ----------------------------------------------------------------------
++    async def run_until_goal(self, goal: str, initial_context: Optional[Dict] = None) -> OrchestratorResponse:
++        """
++        Repeatedly invoke ``process_user_input`` using the same *goal* string.
++        The loop stops when:
++        1. The orchestrator reports ``response_type == "goal_completed"``.
++        2. A clarification is required (see ``_maybe_ask_for_clarification``).
++        3. ``max_delegation_steps`` is reached.
++        """
++        context = initial_context or {}
++        steps = 0
++
++        while steps < self.config.max_delegation_steps:
++            steps += 1
++            resp = await self.process_user_input(goal, context)
++
++            # 1️⃣ Goal completed?
++            if resp.response_type == "goal_completed":
++                self.logger.info(f"Goal satisfied after {steps} delegation step(s).")
++                return resp
++
++            # 2️⃣ Clarification needed?
++            if resp.response_type == "clarification_needed":
++                clarified = await self._maybe_ask_for_clarification(resp, context)
++                if clarified is None:                # user chose to stop
++                    return resp
++                # Use the clarified answer as the new goal string
++                goal = clarified
++                continue
++
++            # 3️⃣ Normal response – keep looping with the same goal
++            continue
++
++        # ------------------------------------------------------------------
++        # Too many steps – give up with a friendly message
++        # ------------------------------------------------------------------
++        return OrchestratorResponse(
++            content=(
++                "I’ve been working on this goal for a while but haven’t reached a "
++                "complete solution yet. Could you give me a bit more detail or "
++                "re‑frame the request?"
++            ),
++            response_type="fallback",
++            metadata={"steps_exhausted": steps}
++        )
++
++    # ----------------------------------------------------------------------
++    # PRIVATE: Ask (or auto‑pick) a clarification when the orchestrator
++    #          cannot decide on its own.
++    # ----------------------------------------------------------------------
++    async def _maybe_ask_for_clarification(self, resp: OrchestratorResponse,
++                                            context: Dict) -> Optional[str]:
++        """
++        *If* ``auto_approve`` is True -> automatically select the recommended
++        option (the orchestrator will have filled ``metadata['options']`` and
++        ``metadata['recommended']``).  *Else* -> present the options to the user,
++        explain pros/cons & risks, and wait for a textual answer.  The method
++        returns the *new* goal string (or ``None`` if the user aborts).
++        """
++        meta = resp.metadata or {}
++        options: List[Dict] = meta.get("options", [])
++        recommended: str = meta.get("recommended", "")
++
++        if not options:
++            # Nothing to clarify – just return the original content as a new goal.
++            return resp.content
++
++        if self.config.auto_approve:
++            # Auto‑approve path – log and move on
++            self.logger.info(f"Auto‑approving clarification, picking recommended option: {recommended}")
++            return recommended
++
++        # ------------------------------------------------------------------
++        # Interactive clarification – build a friendly prompt
++        # ------------------------------------------------------------------
++        prompt_lines = ["We need a bit more information to continue.", "Please choose one of the options below:"]
++        for idx, opt in enumerate(options, start=1):
++            label = opt.get("label", f"Option {idx}")
++            description = opt.get("description", "")
++            pros = opt.get("pros", [])
++            cons = opt.get("cons", [])
++            risks = opt.get("risks", [])
++            prompt_lines.append(f"{idx}. **{label}** – {description}")
++            if pros:
++                prompt_lines.append(f"   • Pros: {', '.join(pros)}")
++            if cons:
++                prompt_lines.append(f"   • Cons: {', '.join(cons)}")
++            if risks:
++                prompt_lines.append(f"   • Risks: {', '.join(risks)}")
++        prompt_lines.append(f"\nRecommended choice: **{recommended}**")
++        prompt_lines.append("\nEnter the number of your choice (or type 'stop' to abort):")
++
++        # Show the prompt to the user (the orchestrator is the only UI entry‑point)
++        user_input = input("\n".join(prompt_lines)).strip().lower()
++        if user_input in ("stop", "abort", "cancel"):
++            self.logger.info("User aborted clarification flow.")
++            return None
++        try:
++            choice_idx = int(user_input) - 1
++            if 0 <= choice_idx < len(options):
++                chosen = options[choice_idx].get("label", recommended)
++                self.logger.info(f"User selected clarification option: {chosen}")
++                return chosen
++        except ValueError:
++            pass
++        # Fallback – if we cannot parse the input, just use the recommended one
++        self.logger.warning("Could not parse clarification choice – falling back to recommended.")
++        return recommended
+*** End Patch***

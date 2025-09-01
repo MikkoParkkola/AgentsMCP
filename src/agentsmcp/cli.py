@@ -27,7 +27,16 @@ agent_manager_module = lazy_import('.agent_manager', __package__)
 config_module = lazy_import('.config', __package__)
 orchestrator_module = lazy_import('.orchestrator_factory', __package__)
 logging_config_module = lazy_import('.logging_config', __package__)
-settings_module = lazy_import('.settings', __package__)
+# Import from settings.py file directly using importlib to avoid namespace conflict
+import importlib.util
+import sys
+from pathlib import Path
+
+# Load settings.py directly to avoid conflict with settings/ directory
+settings_file = Path(__file__).parent / "settings.py"
+spec = importlib.util.spec_from_file_location("agentsmcp.settings_file", settings_file)
+settings_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(settings_module)
 paths_module = lazy_import('.paths', __package__)
 
 # Lazy imports for command groups
@@ -385,17 +394,30 @@ def main(
         # Network access toggle (default on)
         _os.environ["AGENTS_NETWORK_ENABLED"] = "1" if network else "0"
 
-        # Launch v2
+        # Launch Revolutionary TUI system
         try:
-            from agentsmcp.ui.v2.main_app import launch_main_tui
-            exit_code = asyncio.run(launch_main_tui())
+            from agentsmcp.ui.cli_app import CLIConfig
+            from agentsmcp.ui.v2.revolutionary_launcher import launch_revolutionary_tui
+            
+            # Create CLI config with the environment settings
+            cli_config = CLIConfig()
+            
+            click.echo("🚀 Launching Revolutionary TUI system...")
+            exit_code = asyncio.run(launch_revolutionary_tui(cli_config))
             if exit_code != 0:
-                click.echo(f"❌ v2 TUI exited with code {exit_code}")
+                click.echo(f"❌ Revolutionary TUI exited with code {exit_code}")
         except KeyboardInterrupt:
             click.echo("\n👋 Goodbye!")
         except Exception as exc:
-            logging.getLogger(__name__).exception("Failed to start v2 TUI from root")
-            click.echo(f"❌ v2 TUI failed: {exc}")
+            logging.getLogger(__name__).exception("Failed to start Revolutionary TUI from root")
+            click.echo(f"❌ Revolutionary TUI failed: {exc}")
+            click.echo("💡 Falling back to basic mode...")
+            # Try fallback
+            try:
+                from agentsmcp.ui.v2.fixed_working_tui import launch_fixed_working_tui
+                exit_code = asyncio.run(launch_fixed_working_tui())
+            except Exception as fallback_exc:
+                click.echo(f"❌ Fallback also failed: {fallback_exc}")
         # Exit after running TUI
         raise SystemExit(0)
 
@@ -1164,26 +1186,26 @@ def roles_alias(ctx):
     """[ALIAS] Role-based orchestration commands."""
     ctx.forward(server_roles)
 
-@main.command("tui", hidden=True)
+@main.command("tui", hidden=False)
 @click.option("--theme", default="auto", type=click.Choice(["auto", "light", "dark"]))
 @click.option("--no-welcome", is_flag=True, help="Skip welcome screen")
 @click.option("--refresh-interval", default=2.0, type=float, help="Auto-refresh interval")
 @click.option("--orchestrator-model", default="gpt-5", help="Orchestrator model")
 @click.option("--agent", "agent_type", default="ollama-turbo-coding", help="Default AI agent")
+@click.option("--revolutionary/--basic", default=True, help="Use Revolutionary TUI (default) or basic TUI")
+@click.option("--safe-mode", is_flag=True, help="Launch in maximum compatibility mode")
 @click.pass_context
 def tui_alias(ctx, theme: str, no_welcome: bool, refresh_interval: float, 
-              orchestrator_model: str, agent_type: str):
-    """[ALIAS] Launch the modern TUI interface."""
-    # Forward to run_interactive but force TUI mode
-    config_path = ctx.parent.params.get('config_path')
-    config = _load_config(config_path)
-    
+              orchestrator_model: str, agent_type: str, revolutionary: bool, safe_mode: bool):
+    """🚀 Launch the Revolutionary TUI interface with automatic capability detection."""
     # Import here to avoid startup overhead
-    from agentsmcp.ui.cli_app import CLIApp, CLIConfig
+    from agentsmcp.ui.cli_app import CLIConfig
+    from agentsmcp.ui.v2.revolutionary_launcher import launch_revolutionary_tui
+    from agentsmcp.ui.v2.tui_entry_point_adapter import launch_safe_tui, launch_adaptive_tui
     import logging
     
     try:
-        # Create CLI configuration with parameters, explicitly set to TUI mode
+        # Create CLI configuration with parameters
         cli_config = CLIConfig(
             theme_mode=theme,
             show_welcome=not no_welcome,
@@ -1192,21 +1214,33 @@ def tui_alias(ctx, theme: str, no_welcome: bool, refresh_interval: float,
             agent_type=agent_type,
         )
         
-        # Force TUI mode
-        app = CLIApp(config=cli_config, mode="tui")
+        # Run the Revolutionary TUI system
+        async def run_revolutionary_tui():
+            if safe_mode:
+                # Maximum compatibility mode
+                print("🔒 Launching TUI in safe mode with maximum compatibility...")
+                return await launch_safe_tui(cli_config)
+            elif revolutionary:
+                # Revolutionary TUI with automatic capability detection
+                print("🚀 Launching Revolutionary TUI with automatic capability detection...")
+                return await launch_revolutionary_tui(cli_config)
+            else:
+                # Adaptive launch based on environment
+                print("🔄 Launching TUI with adaptive feature selection...")
+                return await launch_adaptive_tui(cli_config)
         
-        # Run the app asynchronously
-        async def run_app():
-            return await app.start()
-        
-        asyncio.run(run_app())
+        exit_code = asyncio.run(run_revolutionary_tui())
+        if exit_code != 0:
+            sys.exit(exit_code)
+            
     except KeyboardInterrupt:
         print("\n👋 Goodbye!")
     except Exception as exc:
         logging.getLogger(__name__).exception(
-            "Failed to start the TUI interface"
+            "Failed to start the Revolutionary TUI interface"
         )
-        print(f"❌ TUI mode failed: {exc}")
+        print(f"❌ Revolutionary TUI failed: {exc}")
+        print("💡 Try using --safe-mode for maximum compatibility")
 
 @main.command("tui-v2-dev", hidden=False)
 @click.option("--minimal", is_flag=True, help="Run v2 in minimal input mode (default)")

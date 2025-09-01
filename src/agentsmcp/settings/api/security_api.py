@@ -11,6 +11,14 @@ from ..services.security_service import SecurityService
 from ..domain.value_objects import PermissionLevel
 
 
+# Dependency functions (defined outside class to avoid 'self' reference issues)
+def get_current_user_id() -> str:
+    """Dependency to get current user ID from request context."""
+    # This would typically extract user ID from JWT token or session
+    # For now, returning a placeholder
+    return "user_123"
+
+
 class GrantPermissionRequest(BaseModel):
     user_id: str = Field(..., description="Target user ID")
     resource_type: str = Field(..., description="Resource type")
@@ -45,7 +53,7 @@ class SecurityAPI:
     
     async def grant_permission(self,
                              request: GrantPermissionRequest = Body(...),
-                             granter_id: str = Depends(self._get_current_user_id)) -> Dict[str, Any]:
+                             granter_id: str = Depends(get_current_user_id)) -> Dict[str, Any]:
         """Grant permission to a user."""
         try:
             await self.security_service.grant_permission(
@@ -63,7 +71,7 @@ class SecurityAPI:
     async def get_audit_events(self,
                               user_id: str = Path(...),
                               hours: int = 24,
-                              current_user_id: str = Depends(self._get_current_user_id)) -> Dict[str, Any]:
+                              current_user_id: str = Depends(get_current_user_id)) -> Dict[str, Any]:
         """Get security audit events for a user."""
         try:
             audit_data = await self.security_service.audit_security_events(user_id, hours)

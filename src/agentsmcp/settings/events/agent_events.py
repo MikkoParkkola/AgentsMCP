@@ -16,11 +16,11 @@ from ..domain.value_objects import AgentStatus
 class AgentDefinitionCreatedEvent(DomainEvent):
     """Event raised when a new agent definition is created."""
     
-    agent_id: str
-    name: str
-    base_model: str
-    category: str
-    owner_id: str
+    agent_id: str = None
+    name: str = None
+    base_model: str = None
+    category: str = None
+    owner_id: str = None
     organization_id: Optional[str] = None
     
     @property
@@ -36,10 +36,10 @@ class AgentDefinitionCreatedEvent(DomainEvent):
 class AgentDefinitionUpdatedEvent(DomainEvent):
     """Event raised when an agent definition is updated."""
     
-    agent_id: str
-    updated_fields: List[str]
-    old_values: Dict[str, Any]
-    new_values: Dict[str, Any]
+    agent_id: str = None
+    updated_fields: List[str] = None
+    old_values: Dict[str, Any] = None
+    new_values: Dict[str, Any] = None
     
     @property
     def event_type(self) -> str:
@@ -54,9 +54,9 @@ class AgentDefinitionUpdatedEvent(DomainEvent):
 class AgentDefinitionStatusChangedEvent(DomainEvent):
     """Event raised when an agent definition's status changes."""
     
-    agent_id: str
-    old_status: AgentStatus
-    new_status: AgentStatus
+    agent_id: str = None
+    old_status: AgentStatus = None
+    new_status: AgentStatus = None
     reason: str = ""
     
     @property
@@ -72,10 +72,10 @@ class AgentDefinitionStatusChangedEvent(DomainEvent):
 class AgentDefinitionPublishedEvent(DomainEvent):
     """Event raised when an agent definition is published."""
     
-    agent_id: str
-    name: str
-    version: str
-    publisher_id: str
+    agent_id: str = None
+    name: str = None
+    version: str = None
+    publisher_id: str = None
     
     @property
     def event_type(self) -> str:
@@ -90,10 +90,10 @@ class AgentDefinitionPublishedEvent(DomainEvent):
 class AgentDefinitionDeletedEvent(DomainEvent):
     """Event raised when an agent definition is deleted."""
     
-    agent_id: str
-    name: str
-    owner_id: str
-    active_instances_count: int
+    agent_id: str = None
+    name: str = None
+    owner_id: str = None
+    active_instances_count: int = None
     
     @property
     def event_type(self) -> str:
@@ -108,9 +108,9 @@ class AgentDefinitionDeletedEvent(DomainEvent):
 class AgentInstanceCreatedEvent(DomainEvent):
     """Event raised when a new agent instance is created."""
     
-    instance_id: str
-    agent_id: str
-    name: str
+    instance_id: str = None
+    agent_id: str = None
+    name: str = None
     session_id: Optional[str] = None
     
     @property
@@ -126,9 +126,9 @@ class AgentInstanceCreatedEvent(DomainEvent):
 class AgentInstanceStartedEvent(DomainEvent):
     """Event raised when an agent instance is started."""
     
-    instance_id: str
-    agent_id: str
-    started_at: datetime
+    instance_id: str = None
+    agent_id: str = None
+    started_at: datetime = None
     
     @property
     def event_type(self) -> str:
@@ -143,9 +143,9 @@ class AgentInstanceStartedEvent(DomainEvent):
 class AgentInstanceStoppedEvent(DomainEvent):
     """Event raised when an agent instance is stopped."""
     
-    instance_id: str
-    agent_id: str
-    stopped_at: datetime
+    instance_id: str = None
+    agent_id: str = None
+    stopped_at: datetime = None
     reason: str = "manual"
     
     @property
@@ -161,10 +161,10 @@ class AgentInstanceStoppedEvent(DomainEvent):
 class AgentInstanceDeletedEvent(DomainEvent):
     """Event raised when an agent instance is deleted."""
     
-    instance_id: str
-    agent_id: str
-    total_requests: int
-    success_rate: float
+    instance_id: str = None
+    agent_id: str = None
+    total_requests: int = None
+    success_rate: float = None
     
     @property
     def event_type(self) -> str:
@@ -179,12 +179,12 @@ class AgentInstanceDeletedEvent(DomainEvent):
 class AgentPerformanceUpdatedEvent(DomainEvent):
     """Event raised when agent performance metrics are updated."""
     
-    instance_id: str
-    agent_id: str
-    response_time: float
-    success: bool
-    new_success_rate: float
-    old_success_rate: float
+    instance_id: str = None
+    agent_id: str = None
+    response_time: float = None
+    success: bool = None
+    new_success_rate: float = None
+    old_success_rate: float = None
     
     @property
     def event_type(self) -> str:
@@ -199,9 +199,9 @@ class AgentPerformanceUpdatedEvent(DomainEvent):
 class AgentCapabilityAddedEvent(DomainEvent):
     """Event raised when a capability is added to an agent."""
     
-    agent_id: str
-    capability_name: str
-    capability_version: str
+    agent_id: str = None
+    capability_name: str = None
+    capability_version: str = None
     
     @property
     def event_type(self) -> str:
@@ -216,8 +216,8 @@ class AgentCapabilityAddedEvent(DomainEvent):
 class AgentCapabilityRemovedEvent(DomainEvent):
     """Event raised when a capability is removed from an agent."""
     
-    agent_id: str
-    capability_name: str
+    agent_id: str = None
+    capability_name: str = None
     
     @property
     def event_type(self) -> str:
@@ -232,9 +232,9 @@ class AgentCapabilityRemovedEvent(DomainEvent):
 class AgentInstructionTemplateUpdatedEvent(DomainEvent):
     """Event raised when an agent's instruction template is updated."""
     
-    agent_id: str
-    template_id: str
-    template_version: str
+    agent_id: str = None
+    template_id: str = None
+    template_version: str = None
     
     @property
     def event_type(self) -> str:
@@ -249,10 +249,10 @@ class AgentInstructionTemplateUpdatedEvent(DomainEvent):
 class AgentSettingsSchemaUpdatedEvent(DomainEvent):
     """Event raised when an agent's settings schema is updated."""
     
-    agent_id: str
-    added_settings: List[str]
-    removed_settings: List[str]
-    modified_settings: List[str]
+    agent_id: str = None
+    added_settings: List[str] = None
+    removed_settings: List[str] = None
+    modified_settings: List[str] = None
     
     @property
     def event_type(self) -> str:

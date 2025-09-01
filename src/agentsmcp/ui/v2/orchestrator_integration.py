@@ -49,6 +49,9 @@ class OrchestratorTUIIntegration:
         self.config = config or OrchestratorIntegrationConfig()
         self.orchestrated_conversation: Optional[OrchestratedConversationManager] = None
         
+        # Monitoring components from orchestrator
+        self._monitoring_components: Optional[Dict[str, Any]] = None
+        
         # Integration state
         self.is_initialized = False
         self.fallback_conversation = None
@@ -81,6 +84,9 @@ class OrchestratorTUIIntegration:
                     theme_manager=theme_manager,
                     agent_manager=agent_manager
                 )
+            
+            # Initialize monitoring components
+            await self._initialize_monitoring_components()
             
             self.is_initialized = True
             logger.info("Orchestrator TUI integration initialized successfully")
@@ -330,6 +336,32 @@ class OrchestratorTUIIntegration:
                 stats["interception_stats"] = self.orchestrated_conversation.get_interception_stats()
         
         return stats
+    
+    async def _initialize_monitoring_components(self):
+        """Initialize monitoring components from orchestrator."""
+        try:
+            if (self.orchestrated_conversation and 
+                hasattr(self.orchestrated_conversation, 'orchestrator')):
+                
+                orchestrator = self.orchestrated_conversation.orchestrator
+                if hasattr(orchestrator, 'get_monitoring_components'):
+                    self._monitoring_components = orchestrator.get_monitoring_components()
+                    logger.debug("Monitoring components initialized from orchestrator")
+                else:
+                    logger.warning("Orchestrator does not support monitoring components")
+            else:
+                logger.warning("No orchestrator available for monitoring initialization")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize monitoring components: {e}")
+    
+    def get_monitoring_components(self) -> Optional[Dict[str, Any]]:
+        """Get monitoring components for TUI integration."""
+        return self._monitoring_components
+    
+    def has_monitoring_support(self) -> bool:
+        """Check if monitoring components are available."""
+        return self._monitoring_components is not None
     
     async def shutdown(self):
         """Shutdown the orchestrator integration."""

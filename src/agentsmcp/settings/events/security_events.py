@@ -16,9 +16,9 @@ from ..domain.value_objects import PermissionLevel
 class SecurityViolationEvent(DomainEvent):
     """Event raised when a security violation is detected."""
     
-    violation_type: str
-    severity: str  # "low", "medium", "high", "critical"
-    details: Dict[str, Any]
+    violation_type: str = None
+    severity: str = None  # "low", "medium", "high", "critical"
+    details: Dict[str, Any] = None
     ip_address: Optional[str] = None
     
     @property
@@ -30,8 +30,8 @@ class SecurityViolationEvent(DomainEvent):
 class EncryptionKeyRotatedEvent(DomainEvent):
     """Event raised when encryption keys are rotated."""
     
-    updated_secrets_count: int
-    rotation_time: datetime
+    updated_secrets_count: int = None
+    rotation_time: datetime = None
     
     @property
     def event_type(self) -> str:
@@ -42,10 +42,10 @@ class EncryptionKeyRotatedEvent(DomainEvent):
 class PermissionGrantedEvent(DomainEvent):
     """Event raised when permission is granted to a user."""
     
-    granter_id: str
-    resource_type: str
-    resource_id: str
-    permission_level: PermissionLevel
+    granter_id: str = None
+    resource_type: str = None
+    resource_id: str = None
+    permission_level: PermissionLevel = None
     expires_at: Optional[datetime] = None
     
     @property
@@ -57,9 +57,9 @@ class PermissionGrantedEvent(DomainEvent):
 class PermissionRevokedEvent(DomainEvent):
     """Event raised when permission is revoked from a user."""
     
-    revoker_id: str
-    resource_type: str
-    resource_id: str
+    revoker_id: str = None
+    resource_type: str = None
+    resource_id: str = None
     
     @property
     def event_type(self) -> str:

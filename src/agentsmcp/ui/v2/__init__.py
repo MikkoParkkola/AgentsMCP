@@ -33,6 +33,11 @@ from .components import ChatInput, ChatHistory, ChatMessage, MessageRole, create
 # Main application
 from .main_app import TUILauncher, launch_main_tui
 
+# Revolutionary TUI system
+from .revolutionary_launcher import RevolutionaryLauncher, launch_revolutionary_tui
+from .feature_activation_manager import FeatureActivationManager, FeatureLevel
+from .tui_entry_point_adapter import TUIEntryPointAdapter, launch_adaptive_tui, launch_safe_tui
+
 # Convenience functions
 from .terminal_manager import create_terminal_manager, get_terminal_manager
 from .event_system import create_event_system, get_event_system
@@ -57,6 +62,11 @@ __all__ = [
     
     # Main application
     'TUILauncher', 'launch_main_tui',
+    
+    # Revolutionary TUI system
+    'RevolutionaryLauncher', 'launch_revolutionary_tui',
+    'FeatureActivationManager', 'FeatureLevel',
+    'TUIEntryPointAdapter', 'launch_adaptive_tui', 'launch_safe_tui',
     
     # Convenience functions
     'create_terminal_manager', 'get_terminal_manager',
