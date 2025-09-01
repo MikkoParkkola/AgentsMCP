@@ -223,6 +223,9 @@ class Orchestrator:
         
         This method is the ONLY way users should interact with agents.
         All responses are synthesized and sanitized before returning.
+        
+        CRITICAL: This now routes ALL user input directly to the LLM agent,
+        bypassing task classification to ensure no template responses.
         """
         start_time = time.time()
         self.total_requests += 1
@@ -250,24 +253,15 @@ class Orchestrator:
         try:
             self.logger.info(f"Processing user input: {user_input[:100]}...")
             
-            # Step 1: Classify the task
-            classification_result = await self.task_classifier.classify_task(user_input, context)
+            # BYPASS CLASSIFICATION: Route ALL input directly to LLM agent
+            # This ensures no template responses - everything goes to the connected LLM
+            self.logger.debug("Bypassing task classifier - routing directly to LLM agent")
             
-            # Step 2: Handle based on classification
-            if classification_result.classification == TaskClassification.SIMPLE_RESPONSE:
-                response = await self._handle_simple_task(user_input, classification_result, context)
-            elif classification_result.classification == TaskClassification.SINGLE_AGENT_NEEDED:
-                response = await self._handle_single_agent_task(user_input, classification_result, context)
-            elif classification_result.classification == TaskClassification.MULTI_AGENT_NEEDED:
-                response = await self._handle_multi_agent_task(user_input, classification_result, context)
-            else:
-                response = await self._handle_fallback(user_input, context)
+            response = await self._route_to_llm_directly(user_input, context)
             
-            # Step 3: Synthesize and sanitize response
-            final_response = await self._synthesize_response(response, classification_result)
-            
+            # Record that we successfully got an LLM response
             processing_time = int((time.time() - start_time) * 1000)
-            final_response.processing_time_ms = processing_time
+            response.processing_time_ms = processing_time
             
             task_success = True
             self.successful_responses += 1
@@ -277,9 +271,9 @@ class Orchestrator:
             self.metrics_collector.record_histogram("orchestrator.response_time_ms", processing_time)
             self.performance_monitor.record_request(processing_time / 1000.0, success=True)
             
-            self.logger.info(f"Successfully processed request in {processing_time}ms")
+            self.logger.info(f"Successfully processed request via LLM in {processing_time}ms")
             
-            return final_response
+            return response
             
         except Exception as e:
             self.logger.error(f"Error processing user input: {e}", exc_info=True)
@@ -538,6 +532,44 @@ class Orchestrator:
             self.logger.error(f"Error connecting to LLM for agent {agent_id}: {e}")
             # Fallback to indicate the issue
             return f"I encountered an issue connecting to the {agent_id} agent. Please check that ollama-turbo is properly configured and running. Error: {str(e)}"
+    
+    async def _route_to_llm_directly(self, user_input: str, context: Dict) -> OrchestratorResponse:
+        """
+        Route user input directly to LLM without any task classification.
+        
+        This is the "pre-processor" approach that ensures ALL user questions
+        go to the connected LLM (ollama-turbo) instead of getting template responses.
+        """
+        self.logger.debug("Routing directly to LLM agent - bypassing all classification")
+        
+        try:
+            # Import and create LLM client for direct LLM responses
+            from ..conversation.llm_client import LLMClient
+            
+            # Create LLM client instance
+            llm_client = LLMClient()
+            
+            # Send user input directly to LLM without any modification or classification
+            llm_response = await llm_client.send_message(user_input, context)
+            
+            # Return the LLM response directly as an orchestrator response
+            return OrchestratorResponse(
+                content=llm_response,
+                response_type="llm_direct",
+                confidence=0.9,  # High confidence since it's from the actual LLM
+                sources=["ollama-turbo"],
+                metadata={"routing_method": "direct_llm_bypass", "bypassed_classification": True}
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error routing directly to LLM: {e}")
+            # If LLM fails, give a clear error message
+            return OrchestratorResponse(
+                content=f"I'm having trouble connecting to the language model. Please check that ollama-turbo is running and accessible. Error: {str(e)}",
+                response_type="error",
+                confidence=0.0,
+                metadata={"error": str(e), "routing_method": "direct_llm_failed"}
+            )
     
     async def _synthesize_response(self, response: OrchestratorResponse, classification: ClassificationResult) -> OrchestratorResponse:
         """Apply final response synthesis and safety checks."""
