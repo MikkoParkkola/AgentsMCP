@@ -101,10 +101,10 @@ class TaskClassifier:
         ]
     
     def _build_agent_mapping(self) -> Dict[str, Dict]:
-        """Build mapping of task types to appropriate agents."""
+        """Build mapping of task types to appropriate roles."""
         return {
             "code": {
-                "agents": ["codex", "claude"],  # Prefer codex for coding
+                "roles": ["coder"],  # Coding tasks route to coder role
                 "patterns": [
                     r'\b(write|create|implement|code|program|script|function|class|method)\b',
                     r'\b(debug|fix|error|bug|issue)\b',
@@ -115,19 +115,20 @@ class TaskClassifier:
             },
             
             "analysis": {
-                "agents": ["claude", "codex"],  # Prefer claude for analysis
+                "roles": ["analyst"],  # Analysis tasks route to analyst role
                 "patterns": [
-                    r'\b(analyze|review|examine|assess|evaluate)\b',
+                    r'\b(analyz|review|examin|assess|evaluat)\w*\b',  # Matches analyze/analysis, examine/examination, assess/assessment, evaluate/evaluation
                     r'\b(explain|describe|documentation|docs)\b',
-                    r'\b(architecture|design|structure|pattern)\b',
                     r'\b(performance|optimization|efficiency)\b',
-                    r'\b(suggest.*improvement|recommend)\b'
+                    r'\b(suggest.*improvement|recommend)\b',
+                    r'\bquality\b.*(check|review|assessment|evaluation|audit)',
+                    r'\bcomprehensive\b.*(review|analysis|assessment|evaluation|audit|quality)'
                 ],
                 "confidence": 0.85
             },
             
             "local_tasks": {
-                "agents": ["ollama"],  # Use ollama for simple local tasks
+                "roles": ["general"],  # General role for simple local tasks
                 "patterns": [
                     r'\b(local|offline|private|secure)\b',
                     r'\b(simple|quick|basic|straightforward)\b',
@@ -136,17 +137,53 @@ class TaskClassifier:
                 "confidence": 0.75
             },
             
+            "architecture": {
+                "roles": ["architect"],  # Architect role for system design
+                "patterns": [
+                    r'\b(design|architect)\b.*(system|architecture|solution|framework)\b',
+                    r'\b(system|architecture|microservices|design pattern)\b',
+                    r'\b(technical.*design|system.*design|architecture.*design)\b',
+                    r'\b(scalability|distributed|enterprise)\b'
+                ],
+                "confidence": 0.85
+            },
+            
             "complex_projects": {
-                "agents": ["claude", "codex"],  # Large context needs
+                "roles": ["architect"],  # Architect role for complex projects  
                 "patterns": [
                     r'\b(create|build).*\b(project|application|system|platform|website|app)\b',
                     r'\b(web application|mobile app|desktop app|full stack)\b',
                     r'\b(with.*authentication|with.*database|with.*api)\b',
-                    r'\b(project|application|system|platform)\b',
                     r'\b(migrate|integrate|deploy|configure)\b',
-                    r'\b(enterprise|production|scale)\b'
+                    r'\b(production|scale)\b'
                 ],
                 "confidence": 0.80
+            },
+            
+            "project_management": {
+                "roles": ["project_manager"],  # Project manager role for PM tasks
+                "patterns": [
+                    r'\b(backlog|priorities|p0|p1|p2|roadmap)\b',
+                    r'\b(project.*roadmap|create.*roadmap|prioritize.*features)\b',
+                    r'\b(what.*next|next.*task|current.*status)\b',
+                    r'\b(product.*priorities|product.*backlog|development.*plan)\b',
+                    r'\b(planning|plan.*project|manage.*project)\b',
+                    r'\b(current.*priorities|important.*task)\b',
+                    r'\b(what.*should.*do|recommendations|suggest)\b'
+                ],
+                "confidence": 0.85
+            },
+            
+            "qa_review": {
+                "roles": ["qa_reviewer"],  # QA reviewer role for code review and testing
+                "patterns": [
+                    r'\b(review.*code|code.*review|quality.*review)\b',
+                    r'\b(security.*issues|security.*review|security.*check)\b', 
+                    r'\b(test|testing|quality.*assurance|qa)\b',
+                    r'\b(bug|issues|problems|defects)\b.*\b(review|check|find)\b',
+                    r'\b(review.*quality|quality.*check)\b'
+                ],
+                "confidence": 0.85
             }
         }
     
@@ -325,7 +362,9 @@ class TaskClassifier:
         # First check if this looks like a complex task that should override simple patterns
         complexity_overrides = [
             r'\b(write|create|implement|code|program|script|function|class|method)\b',
-            r'\b(analyze|review|examine|assess|evaluate)\b.*(code|performance|system|data|algorithm|structure)',
+            r'\b(analyze|review|examine|assess|evaluate|audit)\b.*(project|codebase|code|performance|system|data|algorithm|structure|quality|architecture)',
+            r'\bcomprehensive\b.*(assessment|review|analysis|evaluation|audit)',
+            r'\bquality\b.*(assessment|review|analysis|evaluation|audit)',
             r'\b(debug|fix|error|bug|issue|problem)\b',
             r'\b(optimize|improve|enhance|refactor)\b',
             r'\b(build|deploy|configure|setup|install)\b',
@@ -376,7 +415,7 @@ class TaskClassifier:
         return min(score, 1.0)
     
     def _find_best_agent_match(self, user_input: str) -> Optional[Dict]:
-        """Find the best agent match for a single-agent task."""
+        """Find the best role match for a single-agent task."""
         best_match = None
         best_score = 0.0
         
@@ -395,8 +434,10 @@ class TaskClassifier:
                 
                 if score > best_score:
                     best_score = score
+                    # Use roles instead of agents
+                    role_key = "roles" if "roles" in config else "agents"  # Backward compatibility
                     best_match = {
-                        "agent": config["agents"][0],  # Preferred agent
+                        "agent": config[role_key][0],  # Preferred role
                         "confidence": score,
                         "reason": f"Best match for {task_type} task"
                     }

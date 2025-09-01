@@ -690,18 +690,134 @@ Start typing to begin..."""
             )
             
             try:
-                # Process with conversation manager
-                response = await asyncio.wait_for(
-                    self.conversation_manager.process_input(text),
-                    timeout=self.config.typing_timeout
+                # Check if orchestrator integration supports streaming
+                supports_streaming = (
+                    self.orchestrator_integration and
+                    hasattr(self.orchestrator_integration, 'supports_streaming') and 
+                    self.orchestrator_integration.supports_streaming()
                 )
                 
-                # Update AI message with response
-                await self.chat_history.update_message(
-                    ai_msg_id,
-                    content=response,
-                    status=MessageStatus.COMPLETE
-                )
+                if supports_streaming and hasattr(self.orchestrator_integration, 'process_user_input_streaming'):
+                    # Use streaming processing through orchestrator integration
+                    self.state = ChatState.STREAMING
+                    await self._update_status("Receiving response...")
+                    
+                    full_response = ""
+                    try:
+                        # Add timeout to the entire streaming process
+                        async def _stream_with_timeout():
+                            async for chunk in self.orchestrator_integration.process_user_input_streaming(text):
+                                if chunk:
+                                    return chunk
+                        
+                        async for chunk in self.orchestrator_integration.process_user_input_streaming(text):
+                            if chunk:
+                                full_response += chunk
+                                # Update AI message with accumulated response
+                                await self.chat_history.update_message(
+                                    ai_msg_id,
+                                    content=full_response,
+                                    status=MessageStatus.STREAMING
+                                )
+                                # Force display update for streaming effect
+                                if self.display_renderer and self.display_region:
+                                    await self._force_display_update()
+                        
+                        # Mark message as complete after streaming
+                        await self.chat_history.update_message(
+                            ai_msg_id,
+                            content=full_response,
+                            status=MessageStatus.COMPLETE
+                        )
+                    except asyncio.TimeoutError:
+                        # Handle streaming timeout
+                        timeout_msg = full_response + "\n\n[Response timed out during streaming]"
+                        await self.chat_history.update_message(
+                            ai_msg_id,
+                            content=timeout_msg,
+                            status=MessageStatus.ERROR
+                        )
+                        raise  # Re-raise to be handled by outer exception handler
+                    except Exception as streaming_error:
+                        # Handle streaming errors
+                        error_msg = full_response + f"\n\n[Streaming error: {str(streaming_error)}]"
+                        await self.chat_history.update_message(
+                            ai_msg_id,
+                            content=error_msg,
+                            status=MessageStatus.ERROR
+                        )
+                        raise  # Re-raise to be handled by outer exception handler
+                elif self.conversation_manager:
+                    # Check if conversation manager itself supports streaming
+                    conv_supports_streaming = (
+                        hasattr(self.conversation_manager, 'supports_streaming') and 
+                        self.conversation_manager.supports_streaming()
+                    )
+                    
+                    if conv_supports_streaming and hasattr(self.conversation_manager, 'process_input_streaming'):
+                        # Use streaming processing through conversation manager
+                        self.state = ChatState.STREAMING
+                        await self._update_status("Receiving response...")
+                        
+                        full_response = ""
+                        try:
+                            async for chunk in self.conversation_manager.process_input_streaming(text):
+                                if chunk:
+                                    full_response += chunk
+                                    # Update AI message with accumulated response
+                                    await self.chat_history.update_message(
+                                        ai_msg_id,
+                                        content=full_response,
+                                        status=MessageStatus.STREAMING
+                                    )
+                                    # Force display update for streaming effect
+                                    if self.display_renderer and self.display_region:
+                                        await self._force_display_update()
+                            
+                            # Mark message as complete after streaming
+                            await self.chat_history.update_message(
+                                ai_msg_id,
+                                content=full_response,
+                                status=MessageStatus.COMPLETE
+                            )
+                        except asyncio.TimeoutError:
+                            # Handle streaming timeout
+                            timeout_msg = full_response + "\n\n[Response timed out during streaming]"
+                            await self.chat_history.update_message(
+                                ai_msg_id,
+                                content=timeout_msg,
+                                status=MessageStatus.ERROR
+                            )
+                            raise  # Re-raise to be handled by outer exception handler
+                        except Exception as streaming_error:
+                            # Handle streaming errors
+                            error_msg = full_response + f"\n\n[Streaming error: {str(streaming_error)}]"
+                            await self.chat_history.update_message(
+                                ai_msg_id,
+                                content=error_msg,
+                                status=MessageStatus.ERROR
+                            )
+                            raise  # Re-raise to be handled by outer exception handler
+                    else:
+                        # Fallback to non-streaming processing
+                        response = await asyncio.wait_for(
+                            self.conversation_manager.process_input(text),
+                            timeout=self.config.typing_timeout
+                        )
+                        
+                        # Update AI message with response
+                        await self.chat_history.update_message(
+                            ai_msg_id,
+                            content=response,
+                            status=MessageStatus.COMPLETE
+                        )
+                else:
+                    # No conversation manager available
+                    await self.chat_history.update_message(
+                        ai_msg_id,
+                        content="Backend connection error - conversation manager not available.",
+                        status=MessageStatus.ERROR
+                    )
                 
                 self.state = ChatState.WAITING_INPUT
                 await self._update_status("Ready")
@@ -809,6 +925,16 @@ Start typing to begin..."""
             asyncio.create_task(self._handle_input_change(ChatInputEvent(event_type="text_change", text=self.chat_input.state.text)))
         except Exception:
             pass
+    
+    async def _force_display_update(self):
+        """Force a display update for streaming content."""
+        try:
+            if self.display_renderer and self.display_region:
+                # Trigger display refresh for streaming effect
+                self.display_renderer.mark_region_dirty(self.display_region.name)
+                await asyncio.sleep(0.01)  # Small delay to allow visual update
+        except Exception as e:
+            logger.debug(f"Error forcing display update: {e}")
     
     async def _handle_message_added(self, message: ChatMessage):
         """Handle message added to history."""

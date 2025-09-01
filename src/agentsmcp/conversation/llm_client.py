@@ -86,6 +86,7 @@ class ModelCapabilities:
     parameter_count: Optional[str] = None
     model_family: Optional[str] = None
     quantization: Optional[str] = None
+    supports_streaming: bool = False
 
 
 @dataclass
@@ -97,7 +98,7 @@ class ConversationMessage:
 
 
 class LLMClient:
-    """Client for interacting with configured LLM models via MCP."""
+    """Client for interacting with configured LLM models via MCP with streaming support."""
     
     def __init__(self, config_path: Optional[Path] = None):
         self.config = self._load_config(config_path)
@@ -340,13 +341,13 @@ class LLMClient:
     def _build_system_context(self, orchestration_working: bool = False) -> str:
         """Build system context for AgentsMCP conversational interface.
 
-        Also loads local guidance from AGENTS.md / CLAUDE.md / QWEN.md / GEMINI.md
-        when present, to enrich instructions without requiring network access.
+        Also loads local guidance from AGENTS.md and docs/models.md when present,
+        to enrich instructions without requiring network access.
         """
         supplemental = []
         try:
             from pathlib import Path
-            for name in ("AGENTS.md", "CLAUDE.md", "QWEN.md", "GEMINI.md"):
+            for name in ("AGENTS.md", "docs/models.md"):
                 p = Path.cwd() / name
                 if p.exists() and p.is_file():
                     try:
@@ -605,6 +606,185 @@ Remember: Be truthful about the system's current state rather than creating fals
             logger.error(f"Error in LLM communication: {e}")
             return f"Sorry, I encountered an error: {str(e)}"
     
+    def supports_streaming(self) -> bool:
+        """Check if the current provider supports streaming responses."""
+        # Check if provider explicitly supports streaming
+        streaming_providers = ["ollama-turbo", "ollama", "openai", "anthropic"]
+        return self.provider in streaming_providers
+    
+    async def send_message_streaming(self, message: str, context: Optional[Dict[str, Any]] = None):
+        """Send a message and yield streaming response chunks.
+        
+        Yields:
+            str: Response chunks as they arrive from the LLM
+        """
+        if not self.supports_streaming():
+            # Fallback to non-streaming for unsupported providers
+            response = await self.send_message(message, context)
+            yield response
+            return
+        
+        # Add message to conversation history
+        self.conversation_history.append(
+            ConversationMessage(role="user", content=message, context=context)
+        )
+        
+        try:
+            # Prepare messages for API call
+            messages = await self._prepare_messages()
+            
+            # Call appropriate streaming method based on provider
+            if self.provider == "ollama-turbo":
+                async for chunk in self._call_ollama_turbo_streaming(messages):
+                    yield chunk
+            elif self.provider == "ollama":
+                async for chunk in self._call_ollama_streaming(messages):
+                    yield chunk
+            elif self.provider == "openai":
+                async for chunk in self._call_openai_streaming(messages):
+                    yield chunk
+            elif self.provider == "anthropic":
+                async for chunk in self._call_anthropic_streaming(messages):
+                    yield chunk
+            else:
+                # Fallback to non-streaming
+                response = await self.send_message(message, context)
+                yield response
+        
+        except Exception as e:
+            logger.error(f"Error in streaming LLM communication: {e}")
+            yield f"Sorry, I encountered an error: {str(e)}"
+    
+    async def _call_ollama_turbo_streaming(self, messages: List[Dict[str, str]]):
+        """Call ollama-turbo with streaming support."""
+        try:
+            import httpx
+            
+            # Convert messages to ollama format
+            ollama_messages = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+            
+            max_tokens = await self._get_max_tokens_for_api()
+            
+            # Try ollama.com API first with streaming
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                async with client.stream(
+                    "POST",
+                    "https://ollama.com/api/chat",
+                    headers={
+                        "Authorization": f"Bearer {self._get_api_key('ollama-turbo')}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": ollama_messages,
+                        "options": {
+                            "temperature": self.config.get("temperature", 0.7),
+                            "num_predict": max_tokens
+                        },
+                        "stream": True
+                    }
+                ) as response:
+                    if response.status_code == 200:
+                        full_content = ""
+                        async for line in response.aiter_lines():
+                            if line.strip():
+                                try:
+                                    chunk_data = json.loads(line)
+                                    if "message" in chunk_data and "content" in chunk_data["message"]:
+                                        content = chunk_data["message"]["content"]
+                                        if content:
+                                            full_content += content
+                                            yield content
+                                    
+                                    # Check if streaming is done
+                                    if chunk_data.get("done", False):
+                                        break
+                                except json.JSONDecodeError:
+                                    continue
+                        
+                        # Add response to conversation history
+                        self.conversation_history.append(
+                            ConversationMessage(role="assistant", content=full_content)
+                        )
+                        return
+        
+        except Exception as e:
+            logger.warning(f"Ollama turbo streaming failed: {e}")
+            # Fallback to non-streaming
+            response = await self._call_ollama_turbo(messages, enable_tools=False)
+            if response and "choices" in response:
+                content = response["choices"][0]["message"]["content"]
+                yield content
+    
+    async def _call_ollama_streaming(self, messages: List[Dict[str, str]]):
+        """Call local ollama with streaming support."""
+        try:
+            import httpx
+            
+            ollama_messages = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+            max_tokens = await self._get_max_tokens_for_api()
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                async with client.stream(
+                    "POST",
+                    "http://localhost:11434/api/chat",
+                    json={
+                        "model": self.model,
+                        "messages": ollama_messages,
+                        "options": {
+                            "temperature": self.config.get("temperature", 0.7),
+                            "num_predict": max_tokens
+                        },
+                        "stream": True
+                    }
+                ) as response:
+                    if response.status_code == 200:
+                        full_content = ""
+                        async for line in response.aiter_lines():
+                            if line.strip():
+                                try:
+                                    chunk_data = json.loads(line)
+                                    if "message" in chunk_data and "content" in chunk_data["message"]:
+                                        content = chunk_data["message"]["content"]
+                                        if content:
+                                            full_content += content
+                                            yield content
+                                    
+                                    if chunk_data.get("done", False):
+                                        break
+                                except json.JSONDecodeError:
+                                    continue
+                        
+                        # Add response to conversation history
+                        self.conversation_history.append(
+                            ConversationMessage(role="assistant", content=full_content)
+                        )
+                        return
+        
+        except Exception as e:
+            logger.warning(f"Ollama streaming failed: {e}")
+            # Fallback to non-streaming
+            response = await self._call_ollama(messages, enable_tools=False)
+            if response and "choices" in response:
+                content = response["choices"][0]["message"]["content"]
+                yield content
+    
+    async def _call_openai_streaming(self, messages: List[Dict[str, str]]):
+        """Call OpenAI with streaming support (placeholder)."""
+        # Placeholder for OpenAI streaming - would need actual implementation
+        response = await self._call_openai(messages, enable_tools=False)
+        if response and "choices" in response:
+            content = response["choices"][0]["message"]["content"]
+            yield content
+    
+    async def _call_anthropic_streaming(self, messages: List[Dict[str, str]]):
+        """Call Anthropic with streaming support (placeholder)."""
+        # Placeholder for Anthropic streaming - would need actual implementation
+        response = await self._call_anthropic(messages, enable_tools=False)
+        if response and "choices" in response:
+            content = response["choices"][0]["message"]["content"]
+            yield content
+    
     async def _prepare_messages(self) -> List[Dict[str, str]]:
         """Prepare messages for LLM API call with auto-detected capabilities."""
         messages = [
@@ -804,7 +984,8 @@ Remember: Be truthful about the system's current state rather than creating fals
                 max_input_tokens=120000,
                 max_output_tokens=8192,
                 parameter_count="120B",
-                model_family="gpt-oss"
+                model_family="gpt-oss",
+                supports_streaming=True
             )
         elif "gpt-oss:20b" in model_name:
             return ModelCapabilities(
@@ -812,7 +993,8 @@ Remember: Be truthful about the system's current state rather than creating fals
                 max_input_tokens=124000,
                 max_output_tokens=4096,
                 parameter_count="20B", 
-                model_family="gpt-oss"
+                model_family="gpt-oss",
+                supports_streaming=True
             )
         elif "mistral-nemo" in model_name:
             return ModelCapabilities(
@@ -820,7 +1002,8 @@ Remember: Be truthful about the system's current state rather than creating fals
                 max_input_tokens=124000,
                 max_output_tokens=4096,
                 parameter_count="12.2B",
-                model_family="mistral"
+                model_family="mistral",
+                supports_streaming=True
             )
         elif "llama" in model_name:
             return ModelCapabilities(
@@ -828,7 +1011,8 @@ Remember: Be truthful about the system's current state rather than creating fals
                 max_input_tokens=28000,
                 max_output_tokens=4096,
                 parameter_count="Unknown",
-                model_family="llama"
+                model_family="llama",
+                supports_streaming=True
             )
         else:
             # Conservative defaults for unknown models
@@ -837,7 +1021,8 @@ Remember: Be truthful about the system's current state rather than creating fals
                 max_input_tokens=6144,
                 max_output_tokens=2048,
                 parameter_count="Unknown",
-                model_family="unknown"
+                model_family="unknown",
+                supports_streaming=False  # Conservative default for unknown models
             )
     
     async def _get_max_tokens_for_api(self) -> int:

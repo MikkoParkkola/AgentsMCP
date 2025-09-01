@@ -185,7 +185,7 @@ class DynamicScalingManager:
                 reasoning=f"Emergency scaling for {urgent_tasks} urgent tasks",
                 cost_impact=self._estimate_scaling_cost(urgent_tasks),
                 urgency=1.0,
-                capabilities_needed=["general"]
+                capabilities_needed=["ollama"]
             )
         
         # 2. Cost-constrained scaling
@@ -236,7 +236,7 @@ class DynamicScalingManager:
                     reasoning=f"High utilization {worker_utilization:.2f}",
                     cost_impact=self._estimate_worker_cost(),
                     urgency=0.6,
-                    capabilities_needed=["general"]
+                    capabilities_needed=["ollama"]
                 )
         
         # 5. Scale down if underutilized
@@ -505,11 +505,11 @@ class DynamicScalingManager:
         total_queued = sum(queue_sizes.values())
         
         if total_queued > 10:
-            return ["general", "coding"]  # High demand scenarios need versatile workers
+            return ["ollama", "coding"]  # High demand scenarios need versatile workers
         elif total_queued > 5:
-            return ["general"]
+            return ["ollama"]
         else:
-            return ["general"]
+            return ["ollama"]
     
     def _estimate_scaling_cost(self, worker_count: int) -> float:
         """Estimate the cost impact of adding workers."""

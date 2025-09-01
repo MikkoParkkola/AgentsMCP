@@ -481,7 +481,7 @@ class DistributedOrchestrator:
             task = Task(
                 description=f"Execute request {request_id}",
                 priority=execution_plan.get("priority", TaskPriority.NORMAL),
-                required_capabilities=["general"],
+                required_capabilities=["ollama"],
                 max_cost=self.budget_manager.remaining_budget() * 0.1  # 10% of remaining budget
             )
             tasks.append(task)
@@ -534,7 +534,7 @@ class DistributedOrchestrator:
         for task in tasks:
             # Get cost-optimized model recommendation
             recommendation = self.model_optimizer.recommend_model(
-                task_type=task.required_capabilities[0] if task.required_capabilities else "general",
+                task_type=task.required_capabilities[0] if task.required_capabilities else "ollama",
                 cost_priority=0.6,
                 quality_priority=0.4
             )
@@ -1563,7 +1563,7 @@ class DistributedOrchestrator:
         
         for task in tasks:
             # Check if mesh collaboration would benefit this task
-            task_type = task.required_capabilities[0] if task.required_capabilities else "general"
+            task_type = task.required_capabilities[0] if task.required_capabilities else "ollama"
             recommendations = await self.get_collaboration_recommendations(task_type)
             
             if recommendations and len(recommendations) > 0:

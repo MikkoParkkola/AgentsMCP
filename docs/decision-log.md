@@ -24,7 +24,7 @@ Template:
 - **Decision Date:** 2025-08-21
 - **Outcome:** Adopted BRoA-based guidelines for human and AI agent collaboration.
 - **Rationale:** Provide shared principles for working with AI agents and mixed human–AI teams.
-- **Details:** See [docs/broa-agent-guidelines.md](broa-agent-guidelines.md).
+- Note: Consolidated; refer to `docs/backlog.md` (improvements) and `docs/changelog.md` (changes).
 
 ## [0002] - Adopt GitHub Actions CI with automerge
 - **Outcome:** Implemented GitHub Actions workflows for CI, security scanning, and automerge with branch cleanup.
@@ -40,7 +40,7 @@ Template:
 - **Decision Date:** 2025-08-21
 - **Outcome:** Adopted comprehensive engineering handbook for humans and AI agents.
 - **Rationale:** Provide evidence-based principles and practices to guide collaboration and delivery.
-- **Details:** See [docs/engineering-handbook.md](engineering-handbook.md).
+- Note: Consolidated; refer to `docs/backlog.md` and `docs/changelog.md`.
 
 
 ## [0004] - Adopt AI-Agent Project Best Practices
@@ -58,7 +58,7 @@ Template:
 - **Date Added:** 2025-08-22
 - **Outcome:** Documented baseline principles for AI-agent team software projects.
 - **Rationale:** Standardize quality gates and collaboration practices for multi-agent development.
-- **Details:** See [docs/ai-agent-project-principles.md](ai-agent-project-principles.md).
+- Note: Consolidated; see `docs/backlog.md`.
 
 ## [0006] - Reorganize Documentation Structure
 - **Date Added:** 2025-08-23
@@ -91,7 +91,7 @@ Template:
 - **Decision Date:** 2025-08-26
 - **Outcome:** Accepted the architecture synthesis focusing on: single AgentManager instance in API, job cleanup fix, EventBus consolidation, queue/worker pool with 429 overload, async provider calls with retry/backoff, tool sandboxing, JWT auth (prod), rate limits, and config consolidation via AppSettings.
 - **Rationale:** Addresses correctness, robustness, and maintainability with minimal disruption and clear phased rollout.
-- **Details:** See [docs/architecture-analysis-synthesis.md](architecture-analysis-synthesis.md).
+- Note: Consolidated; see `docs/AGENTIC_ARCHITECTURE.md` and `docs/backlog.md`.
 ## [0009] - UI/UX Overhaul Plan
 - **Date Added:** 2025-08-26
 - **Version:** Unreleased

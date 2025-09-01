@@ -7,6 +7,7 @@ Users must see characters as they type, and input must be submitted properly.
 
 import asyncio
 import logging
+import time
 from typing import Optional, Callable, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
@@ -37,6 +38,10 @@ class ChatInputState:
     show_cursor: bool = True
     command_prefix: str = "/"
     multiline_mode: bool = False
+    # Paste detection state
+    paste_buffer: str = ""
+    paste_start_time: float = 0
+    is_pasting: bool = False
 
 
 @dataclass
@@ -89,6 +94,11 @@ class ChatInput:
         # We render via ChatInterface/DisplayRenderer, not direct stdout
         self._echo_enabled = False
         self._immediate_display = False
+        
+        # Paste detection settings
+        self._paste_threshold_ms = 50  # Time threshold to detect paste operations
+        self._paste_timeout_ms = 200   # Time to wait after last character for paste completion
+        self._paste_task: Optional[asyncio.Task] = None
     
     async def initialize(self) -> bool:
         """Initialize the chat input component."""
@@ -233,10 +243,19 @@ class ChatInput:
             self._cursor_task.cancel()
             self._cursor_task = None
         
+        if self._paste_task:
+            self._paste_task.cancel()
+            self._paste_task = None
+        
+        # Reset paste state
+        self.state.is_pasting = False
+        self.state.paste_buffer = ""
+        self.state.paste_start_time = 0
+        
         logger.debug("Chat input deactivated")
     
     def _handle_character_input(self, event: InputEvent):
-        """Handle regular character input with immediate display."""
+        """Handle regular character input with immediate display and paste detection."""
         if not self._active or event.event_type != InputEventType.CHARACTER:
             return
         
@@ -244,6 +263,53 @@ class ChatInput:
         if not char or len(char) != 1:
             return
         
+        current_time = time.time() * 1000  # Convert to milliseconds
+        
+        # Check if this might be part of a paste operation
+        if self._is_paste_event(current_time):
+            # Handle as part of paste
+            self._handle_paste_character(char, current_time)
+        else:
+            # Handle as normal typing
+            self._handle_normal_character(char)
+        
+        logger.debug(f"Character input: '{char}', is_pasting: {self.state.is_pasting}")
+    
+    def _is_paste_event(self, current_time: float) -> bool:
+        """Determine if current character is part of a paste operation."""
+        if not self.state.is_pasting:
+            # Not currently pasting, check if rapid input suggests paste
+            if self.state.paste_start_time > 0:
+                time_since_last = current_time - self.state.paste_start_time
+                return time_since_last < self._paste_threshold_ms
+            return False
+        else:
+            # Already pasting, continue if within timeout
+            time_since_last = current_time - self.state.paste_start_time
+            return time_since_last < self._paste_timeout_ms
+    
+    def _handle_paste_character(self, char: str, current_time: float):
+        """Handle a character as part of a paste operation."""
+        if not self.state.is_pasting:
+            # Start new paste operation
+            self.state.is_pasting = True
+            self.state.paste_buffer = char
+            logger.debug("Started paste operation")
+        else:
+            # Add to existing paste buffer
+            self.state.paste_buffer += char
+        
+        self.state.paste_start_time = current_time
+        
+        # Cancel existing paste completion task
+        if self._paste_task:
+            self._paste_task.cancel()
+        
+        # Schedule paste completion check
+        self._paste_task = asyncio.create_task(self._complete_paste_operation())
+    
+    def _handle_normal_character(self, char: str):
+        """Handle a single character as normal typing."""
         # Insert character at cursor position
         text = self.state.text
         pos = self.state.cursor_position
@@ -251,15 +317,50 @@ class ChatInput:
         self.state.text = text[:pos] + char + text[pos:]
         self.state.cursor_position += 1
         
+        # Update timestamp for paste detection
+        self.state.paste_start_time = time.time() * 1000
+        
         # Emit text change event (ChatInterface will render input line)
         asyncio.create_task(self._emit_text_change_event())
-        
-        logger.debug(f"Character input: '{char}', new text: '{self.state.text}'")
+    
+    async def _complete_paste_operation(self):
+        """Complete the paste operation after timeout."""
+        try:
+            # Wait for paste timeout
+            await asyncio.sleep(self._paste_timeout_ms / 1000.0)
+            
+            if self.state.is_pasting and self.state.paste_buffer:
+                # Insert the entire paste buffer at cursor position
+                text = self.state.text
+                pos = self.state.cursor_position
+                
+                self.state.text = text[:pos] + self.state.paste_buffer + text[pos:]
+                self.state.cursor_position += len(self.state.paste_buffer)
+                
+                # Reset paste state
+                self.state.paste_buffer = ""
+                self.state.is_pasting = False
+                self.state.paste_start_time = 0
+                
+                # Emit text change event for the complete paste
+                await self._emit_text_change_event()
+                
+                logger.info(f"Completed paste operation: {len(self.state.paste_buffer)} characters")
+                
+        except asyncio.CancelledError:
+            # Task was cancelled, likely due to more input
+            pass
     
     def _handle_enter_key(self, event: InputEvent):
         """Handle Enter key - either submit or insert newline in multiline mode."""
         if not self._active:
             return
+        
+        # If we're currently pasting, treat enter as part of paste content
+        if self.state.is_pasting:
+            self._handle_paste_character('\n', time.time() * 1000)
+            return
+        
         if self.state.multiline_mode:
             # Insert newline
             t = self.state.text
@@ -611,6 +712,10 @@ class ChatInput:
     async def cleanup(self):
         """Cleanup the chat input component."""
         await self.deactivate()
+        
+        if self._paste_task:
+            self._paste_task.cancel()
+            self._paste_task = None
         
         if self.input_handler:
             # Remove all handlers

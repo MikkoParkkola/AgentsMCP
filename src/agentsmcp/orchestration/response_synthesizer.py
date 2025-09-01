@@ -134,11 +134,147 @@ class ResponseSynthesizer:
         for pattern in agent_refs:
             cleaned = re.sub(pattern, 'I', cleaned, flags=re.IGNORECASE)
         
-        # Clean up any double spaces or line breaks
-        cleaned = re.sub(r'\s+', ' ', cleaned)
+        # Clean up double spaces but preserve line breaks for markdown structure
+        cleaned = re.sub(r'[ \t]+', ' ', cleaned)  # Only collapse spaces and tabs
+        cleaned = re.sub(r'\n\s*\n\s*\n+', '\n\n', cleaned)  # Collapse multiple empty lines to double newlines
         cleaned = cleaned.strip()
         
+        # Fix inline bullet lists - convert to proper markdown
+        cleaned = self._fix_inline_bullets(cleaned)
+        
+        # Ensure paragraph breaks
+        cleaned = self._ensure_paragraph_breaks(cleaned)
+        
         return cleaned
+    
+    def _fix_inline_bullets(self, text: str) -> str:
+        """Fix inline bullet lists by converting to proper markdown format."""
+        # Pattern to match inline bullets like: "text: * item1 * item2 * item3"
+        # or "text whether it's: * getting * doing * checking"
+        pattern = r'([.:])\s*\*\s*([^*\n]+?)(\s*\*\s*[^*\n]+)*(?=\s*$|\s*\n)'
+        
+        def replace_inline_bullets(match):
+            full_match = match.group(0)
+            prefix = match.group(1)  # The : or . before bullets
+            
+            # Split on asterisks and clean up each item
+            parts = full_match.split('*')
+            if len(parts) < 2:
+                return full_match
+            
+            # First part is the text before bullets (includes the : or .)
+            intro = parts[0].strip()
+            
+            # Process bullet items
+            bullet_items = []
+            for part in parts[1:]:
+                item = part.strip()
+                if item:  # Skip empty items
+                    bullet_items.append(f"• {item}")
+            
+            if not bullet_items:
+                return full_match
+            
+            # Return formatted with proper line breaks
+            return f"{intro}\n" + "\n".join(bullet_items)
+        
+        # Apply the transformation
+        return re.sub(pattern, replace_inline_bullets, text, flags=re.MULTILINE)
+    
+    def _ensure_paragraph_breaks(self, text: str) -> str:
+        """Ensure proper paragraph breaks in text."""
+        # Fix table formatting - ensure pipe-separated table rows are on separate lines
+        text = self._fix_table_formatting(text)
+        
+        # Add line breaks before common sentence starters that should be new paragraphs
+        paragraph_starters = [
+            r'(Let me\s+)',
+            r'(Here\s+is\s+)',
+            r'(Here\s+are\s+)',
+            r'(I\s+can\s+help\s+)',
+            r'(First\s*,?\s+)',
+            r'(Second\s*,?\s+)',
+            r'(Third\s*,?\s+)',
+            r'(Finally\s*,?\s+)',
+            r'(Additionally\s*,?\s+)',
+            r'(Also\s*,?\s+)',
+            r'(However\s*,?\s+)',
+            r'(For\s+example\s*,?\s+)'
+        ]
+        
+        for starter_pattern in paragraph_starters:
+            # Only add breaks if not already at start of line
+            text = re.sub(f'(?<!^)(?<!\n)\\s*{starter_pattern}', r'\n\n\1', text, flags=re.MULTILINE | re.IGNORECASE)
+        
+        # Ensure double newlines before headings
+        text = re.sub(r'(?<!^)(?<!\n)(\s*#+\s+)', r'\n\n\1', text, flags=re.MULTILINE)
+        
+        # Add line breaks between sentences that end with periods and start with capital letters
+        # But avoid breaking in the middle of abbreviations or short phrases
+        text = re.sub(r'(\.)(\s+)([A-Z][a-z]{3,})', r'\1\n\n\3', text)
+        
+        # Clean up any triple+ newlines
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        
+        return text
+    
+    def _fix_table_formatting(self, text: str) -> str:
+        """Fix malformed table formatting by ensuring proper line breaks."""
+        # Pattern to match table rows that are incorrectly on the same line
+        # Example: "| Header | Header |------|------| Row | Data |"
+        # Should become separate lines for header, separator, and each row
+        
+        # First, fix inline table headers and separators
+        # Pattern for header + separator + rows all on one line
+        table_pattern = r'(\|[^|\n]*\|)\s*(\|[\-\s:]*\|)\s*(\|[^|\n]*\|.*?)(?=\n|$)'
+        
+        def fix_table_match(match):
+            header = match.group(1).strip()
+            separator = match.group(2).strip()
+            remaining = match.group(3).strip()
+            
+            # Split remaining content on pipe boundaries that look like row starts
+            # Look for patterns like "| word" after another complete cell
+            row_parts = []
+            current_row = ""
+            
+            # Simple approach: split on | and reconstruct rows
+            parts = remaining.split('|')
+            cells = []
+            
+            for part in parts:
+                part = part.strip()
+                if part:  # Skip empty parts
+                    cells.append(part)
+            
+            # Group cells into rows (assuming each row has same number of columns as header)
+            header_cols = len([col for col in header.split('|') if col.strip()])
+            
+            if header_cols > 0 and cells:
+                rows = []
+                for i in range(0, len(cells), header_cols):
+                    row_cells = cells[i:i+header_cols]
+                    if row_cells:  # Only add non-empty rows
+                        row = "| " + " | ".join(row_cells) + " |"
+                        rows.append(row)
+                
+                # Combine header, separator, and rows
+                if rows:
+                    return f"{header}\n{separator}\n" + "\n".join(rows)
+            
+            # Fallback: just separate header, separator, and remaining with line breaks
+            return f"{header}\n{separator}\n| {remaining.replace('|', ' | ')} |"
+        
+        text = re.sub(table_pattern, fix_table_match, text)
+        
+        # Also fix simpler cases where table rows are just concatenated
+        # Pattern: "| cell | cell | cell | cell |" -> separate into rows
+        text = re.sub(r'(\|[^|\n]+\|)(\s*)(\|[^|\n]+\|)', r'\1\n\3', text)
+        
+        # Clean up any malformed table separators  
+        text = re.sub(r'\|[\-\s:]*\|\s*\|([^|]*)\|', r'|------|\n|\1|', text)
+        
+        return text
     
     async def _synthesize_summarize(self, responses: Dict[str, str], 
                                   original_request: str) -> SynthesisResult:

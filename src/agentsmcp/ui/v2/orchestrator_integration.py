@@ -22,7 +22,7 @@ import logging
 from typing import Dict, Any, Optional, Callable
 from dataclasses import dataclass
 
-from ..conversation.orchestrated_conversation import OrchestratedConversationManager, create_orchestrated_conversation_manager
+from ...conversation.orchestrated_conversation import OrchestratedConversationManager, create_orchestrated_conversation_manager
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +138,84 @@ class OrchestratorTUIIntegration:
             return ("I apologize, but I'm having trouble processing your request right now. "
                    "Please try again in a moment, or try rephrasing your question.")
     
+    async def process_user_input_streaming(self, user_input: str):
+        """
+        Process user input through orchestrator with streaming support - STREAMING INTEGRATION POINT.
+        
+        Yields:
+            str: Response chunks as they arrive from the orchestrator
+        """
+        if not self.is_initialized or not self.orchestrated_conversation:
+            logger.error("Orchestrator integration not initialized")
+            yield "I'm not ready to help yet. Please wait a moment and try again."
+            return
+        
+        self.integration_stats["total_requests"] += 1
+        
+        try:
+            # Check if orchestrated conversation supports streaming
+            if hasattr(self.orchestrated_conversation, 'process_input_streaming'):
+                async for chunk in self.orchestrated_conversation.process_input_streaming(user_input):
+                    yield chunk
+            else:
+                # Fallback to non-streaming for orchestrator
+                response = await self.orchestrated_conversation.process_input(user_input)
+                yield response
+            
+            # This response is guaranteed to be from orchestrator perspective only
+            self.integration_stats["orchestrator_responses"] += 1
+            
+        except Exception as e:
+            logger.error(f"Orchestrator streaming error: {e}")
+            
+            # Use fallback if configured
+            if self.fallback_conversation and self.config.fallback_on_orchestrator_error:
+                try:
+                    if hasattr(self.fallback_conversation, 'llm_client') and hasattr(self.fallback_conversation.llm_client, 'send_message_streaming'):
+                        # Use streaming fallback if available
+                        full_response = ""
+                        async for chunk in self.fallback_conversation.llm_client.send_message_streaming(user_input):
+                            full_response += chunk
+                            yield self._sanitize_fallback_chunk(chunk)
+                        
+                        self.integration_stats["fallback_responses"] += 1
+                        if self.config.log_agent_interactions:
+                            self._log_interaction(user_input, full_response, "fallback_streaming")
+                    else:
+                        # Non-streaming fallback
+                        fallback_response = await self.fallback_conversation.process_input(user_input)
+                        clean_response = self._sanitize_fallback_response(fallback_response)
+                        self.integration_stats["fallback_responses"] += 1
+                        yield clean_response
+                    
+                except Exception as fallback_error:
+                    logger.error(f"Fallback streaming also failed: {fallback_error}")
+                    yield ("I apologize, but I'm having trouble processing your request right now. "
+                           "Please try again in a moment, or try rephrasing your question.")
+            else:
+                # Final fallback - orchestrator-style error response
+                yield ("I apologize, but I'm having trouble processing your request right now. "
+                       "Please try again in a moment, or try rephrasing your question.")
+    
+    def supports_streaming(self) -> bool:
+        """
+        Check if the orchestrator integration supports streaming responses.
+        """
+        if not self.is_initialized or not self.orchestrated_conversation:
+            return False
+        
+        # Check if orchestrator supports streaming
+        if hasattr(self.orchestrated_conversation, 'supports_streaming'):
+            return self.orchestrated_conversation.supports_streaming()
+        
+        # Check if fallback LLM client supports streaming
+        if (self.fallback_conversation and 
+            hasattr(self.fallback_conversation, 'llm_client') and 
+            hasattr(self.fallback_conversation.llm_client, 'supports_streaming')):
+            return self.fallback_conversation.llm_client.supports_streaming()
+        
+        return False
+    
     def should_display_message(self, message: str, source: str) -> bool:
         """
         Filter messages to ensure only orchestrator messages are displayed.
@@ -220,6 +298,20 @@ class OrchestratorTUIIntegration:
         
         return response
     
+    def _sanitize_fallback_chunk(self, chunk: str) -> str:
+        """Sanitize streaming fallback response chunks to maintain orchestrator perspective."""
+        import re
+        
+        # Remove agent identifiers from chunks
+        chunk = re.sub(r'🧩\s*\w*\s*:?\s*', '', chunk)
+        chunk = re.sub(r'Agent\s+\w*\s*:?\s*', '', chunk)
+        
+        # Convert agent self-references (be more careful with partial chunks)
+        chunk = re.sub(r'I am (an? )?\w*\s*agent', 'I', chunk, flags=re.IGNORECASE)
+        chunk = re.sub(r'As (an? )?\w*\s*agent', 'I', chunk, flags=re.IGNORECASE)
+        
+        return chunk
+    
     def _log_interaction(self, user_input: str, response: str, interaction_type: str):
         """Log interaction for monitoring (internal use only)."""
         logger.debug(f"Interaction [{interaction_type}]: {user_input[:50]}... -> {response[:50]}...")
@@ -279,6 +371,19 @@ async def process_user_input_orchestrated(user_input: str) -> str:
     """Process user input through orchestrator (convenience function)."""
     integration = get_orchestrator_integration()
     return await integration.process_user_input(user_input)
+
+
+async def process_user_input_orchestrated_streaming(user_input: str):
+    """Process user input through orchestrator with streaming (convenience function)."""
+    integration = get_orchestrator_integration()
+    async for chunk in integration.process_user_input_streaming(user_input):
+        yield chunk
+
+
+def supports_streaming_orchestrated() -> bool:
+    """Check if orchestrator supports streaming responses (convenience function)."""
+    integration = get_orchestrator_integration()
+    return integration.supports_streaming()
 
 
 def should_display_message_orchestrated(message: str, source: str) -> bool:

@@ -117,6 +117,68 @@ class OrchestratedConversationManager:
             return ("I apologize, but I encountered an issue processing your request. "
                    "Let me try a different approach. Could you please rephrase what you'd like help with?")
     
+    async def process_input_streaming(self, user_input: str):
+        """
+        Process user input through the orchestrator with streaming support.
+        
+        Yields response chunks as they arrive from the orchestrator.
+        This is the STREAMING method that should be called by the TUI for streaming responses.
+        """
+        logger.debug(f"Orchestrated streaming conversation processing: {user_input[:50]}...")
+        
+        # Build conversation context
+        context = self._build_conversation_context(user_input)
+        
+        try:
+            # Check if orchestrator supports streaming
+            if hasattr(self.orchestrator, 'process_user_input_streaming'):
+                full_response = ""
+                response_info = None
+                
+                async for chunk_data in self.orchestrator.process_user_input_streaming(user_input, context):
+                    if isinstance(chunk_data, dict) and 'content' in chunk_data:
+                        # Extract chunk content and metadata
+                        chunk_content = chunk_data['content']
+                        if chunk_content:
+                            full_response += chunk_content
+                            yield chunk_content
+                        
+                        # Store response metadata from final chunk
+                        if chunk_data.get('is_final', False):
+                            response_info = chunk_data
+                    else:
+                        # Simple string chunk
+                        chunk_content = str(chunk_data)
+                        full_response += chunk_content
+                        yield chunk_content
+                
+                # Store in conversation history for context
+                self.conversation_history.append({
+                    "input": user_input,
+                    "response": full_response,
+                    "response_type": response_info.get('response_type', 'streaming') if response_info else 'streaming',
+                    "agents_consulted": response_info.get('agents_consulted', []) if response_info else [],
+                    "timestamp": datetime.now(),
+                    "processing_time_ms": response_info.get('processing_time_ms', 0) if response_info else 0
+                })
+            else:
+                # Fallback to non-streaming orchestrator
+                response = await self.process_input(user_input)
+                yield response
+            
+        except Exception as e:
+            logger.error(f"Error in orchestrated streaming conversation processing: {e}")
+            
+            # Provide orchestrator-style error response
+            yield ("I apologize, but I encountered an issue processing your request. "
+                   "Let me try a different approach. Could you please rephrase what you'd like help with?")
+    
+    def supports_streaming(self) -> bool:
+        """
+        Check if the orchestrated conversation manager supports streaming responses.
+        """
+        return hasattr(self.orchestrator, 'supports_streaming') and self.orchestrator.supports_streaming()
+    
     def _build_conversation_context(self, user_input: str) -> Dict[str, Any]:
         """Build context for the orchestrator."""
         context = {

@@ -126,7 +126,7 @@ RESOURCE MANAGEMENT:
 
     def get_model(self) -> str:
         """Get the model optimized for local execution."""
-        # Default to gpt-oss:20b as mentioned in CLAUDE.md guidance
+        # Default to gpt-oss:20b (see docs/models.md provider guidance)
         return self.agent_config.model or "gpt-oss:20b"
 
     async def _simulate(self, task: str) -> str:

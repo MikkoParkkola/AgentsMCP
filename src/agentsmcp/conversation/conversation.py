@@ -530,44 +530,90 @@ Please be thorough and systematic. Report your progress as you work through each
         
         return await self._delegate_to_mcp_agent_with_prompt(agent_type, description)
     
-    async def _delegate_to_mcp_agent_with_prompt(self, agent_type: str, prompt: str) -> str:
-        """Delegate task to MCP agent with specific prompt."""
+    async def _delegate_to_mcp_agent_with_prompt(self, role_or_agent: str, prompt: str) -> str:
+        """Delegate task to role (all roles use ollama-turbo)."""
         try:
             # Dynamic import to avoid circular dependencies
             import asyncio
             
-            # Add timeout protection to prevent hanging
-            timeout_seconds = 10  # 10 second timeout for agent operations
+            # Role-specific timeout settings
+            role_timeouts = {
+                "analyst": 60,          # Analysis tasks need more time
+                "architect": 45,        # Architecture design needs time
+                "project_manager": 30,  # Standard timeout
+                "coder": 30,           # Standard timeout  
+                "qa_reviewer": 30,     # Standard timeout
+                "general": 30,         # Standard timeout
+            }
+            timeout_seconds = role_timeouts.get(role_or_agent, 30)  # Default 30 seconds
             
-            if agent_type == "codex":
-                # Use the LLM client with Codex provider for orchestration
+            # All roles and legacy agent types use ollama-turbo via LLM client
+            if role_or_agent in ["codex", "claude", "ollama", "analyst", "coder", "project_manager", "architect", "qa_reviewer", "general"]:
                 try:
                     return await asyncio.wait_for(
-                        self._call_mcp_codex_via_llm_client(prompt), 
+                        self._call_ollama_via_llm_client(prompt, role_or_agent), 
                         timeout=timeout_seconds
                     )
                 except asyncio.TimeoutError:
-                    return f"⏰ **Codex Agent Timeout**\n\nThe Codex agent didn't respond within {timeout_seconds} seconds.\n\nThis usually means MCP connections are not working properly.\n\nTry using basic commands like 'help', 'status', or 'analyze the project' instead."
-                    
-            elif agent_type == "claude":
-                # Claude MCP integration not implemented - be honest about it
-                return f"❌ **Claude Agent Not Available**\n\nI'm unable to delegate this task to Claude as the MCP integration is not implemented.\n\nTask requested: {prompt[:100]}{'...' if len(prompt) > 100 else ''}\n\nTry using 'codex' or 'ollama' agents instead, or ask for help with basic commands."
-                
-            elif agent_type == "ollama":
-                try:
-                    return await asyncio.wait_for(
-                        self._call_mcp_ollama(prompt), 
-                        timeout=timeout_seconds
-                    )
-                except asyncio.TimeoutError:
-                    return f"⏰ **Ollama Agent Timeout**\n\nThe Ollama agent didn't respond within {timeout_seconds} seconds.\n\nThis usually means Ollama is not running or MCP connections are not working.\n\nTry using basic commands like 'help', 'status', or 'analyze the project' instead."
+                    return f"⏰ **{role_or_agent.title()} Role Timeout**\n\nThe {role_or_agent} role (ollama-turbo) didn't respond within {timeout_seconds} seconds.\n\nThis usually means ollama-turbo is not running or configured properly.\n\nTry using basic commands like 'help', 'status', or 'settings' instead."
                     
             else:
-                return f"❌ Unknown agent type: {agent_type}"
+                return f"❌ Unknown role/agent type: {role_or_agent}"
                 
         except Exception as e:
-            logger.error(f"Error calling MCP {agent_type} agent: {e}")
-            return f"❌ Failed to delegate to {agent_type}: {str(e)}\n\nTry using basic commands like 'help', 'status', or 'analyze the project' instead."
+            logger.error(f"Error calling {role_or_agent} role: {e}")
+            return f"❌ Failed to delegate to {role_or_agent}: {str(e)}\n\nTry using basic commands like 'help', 'status', or 'analyze the project' instead."
+    
+    async def _call_claude_with_context(self, prompt: str) -> str:
+        """Call Claude with access to project context like backlog files."""
+        try:
+            # Build context by reading relevant project files
+            context_parts = []
+            
+            # Check if the prompt is asking about backlog/priorities
+            prompt_lower = prompt.lower()
+            if any(word in prompt_lower for word in ['backlog', 'priorities', 'p0', 'p1', 'p2', 'roadmap', 'next', 'task']):
+                # Try to read the product backlog file
+                import os
+                backlog_path = os.path.join(os.getcwd(), 'docs', 'PRODUCT_BACKLOG.md')
+                if os.path.exists(backlog_path):
+                    try:
+                        with open(backlog_path, 'r', encoding='utf-8') as f:
+                            backlog_content = f.read()
+                        context_parts.append(f"Current Product Backlog:\n{backlog_content}")
+                    except Exception as e:
+                        logger.warning(f"Could not read backlog file: {e}")
+                
+                # Also try to read other relevant docs
+                for doc_name in ['work-plan.md', 'backlog.md', 'product-status.md']:
+                    doc_path = os.path.join(os.getcwd(), 'docs', doc_name)
+                    if os.path.exists(doc_path):
+                        try:
+                            with open(doc_path, 'r', encoding='utf-8') as f:
+                                doc_content = f.read()
+                            context_parts.append(f"From {doc_name}:\n{doc_content}")
+                        except Exception as e:
+                            logger.debug(f"Could not read {doc_name}: {e}")
+            
+            # Build the enhanced prompt with context
+            if context_parts:
+                enhanced_prompt = f"""Context from project files:
+
+{chr(10).join(context_parts)}
+
+User Question: {prompt}
+
+Please answer the user's question based on the context provided above. Focus on the most relevant information and provide actionable insights."""
+            else:
+                enhanced_prompt = prompt
+            
+            # Use the LLM client to process the enhanced prompt
+            response = await self.llm_client.send_message(enhanced_prompt)
+            return response
+            
+        except Exception as e:
+            logger.error(f"Claude context call failed: {e}")
+            return f"❌ **Claude Context Error**\n\nFailed to process request with context.\n\nError: {str(e)}\n\nTry asking without specific context or use basic commands."
     
     async def _call_mcp_codex(self, prompt: str) -> str:
         """Call MCP Codex agent."""
@@ -915,6 +961,46 @@ Please be thorough and systematic. Report your progress as you work through each
         except Exception as e:
             logger.error(f"Error calling MCP Ollama: {e}")
             return f"❌ Ollama delegation failed: {str(e)}"
+
+    async def _call_ollama_via_llm_client(self, prompt: str, role_or_agent: str = "general") -> str:
+        """Call ollama-turbo via LLM client with role-specific configuration."""
+        try:
+            # Import role manager
+            from ..orchestration.roles import role_manager, AgentRole
+            
+            # Get role configuration
+            role_config = None
+            role_obj = role_manager.get_role_by_name(role_or_agent)
+            if role_obj:
+                role_config = role_manager.get_role_config(role_obj)
+                logger.info(f"🎭 Using role configuration for {role_or_agent}: {role_config.provider}/{role_config.model}")
+            else:
+                # Fallback to general role for legacy agent types
+                role_config = role_manager.get_role_config(AgentRole.GENERAL)
+                logger.info(f"🔄 Fallback to general role for unknown type: {role_or_agent}")
+            
+            # Force the LLM client to use configured provider and model
+            original_provider = self.llm_client.provider
+            self.llm_client.provider = role_config.provider
+            
+            # Create role-specific context for the prompt
+            role_context = f"You are acting as a {role_config.description}. Your capabilities include: {', '.join(role_config.capabilities)}.\n\n"
+            enhanced_prompt = role_context + prompt
+            
+            # Make the request (use default LLM client settings for temperature/tokens)
+            response = await self.llm_client.send_message(
+                message=enhanced_prompt,
+                context={"role": role_config.role.value}
+            )
+            
+            # Restore original provider
+            self.llm_client.provider = original_provider
+            
+            return f"🤖 **{role_config.role.value.title()} Role Response** ({role_config.provider}/{role_config.model})\n\n{response}"
+            
+        except Exception as e:
+            logger.error(f"Error calling {role_or_agent} role via LLM client: {e}")
+            return f"❌ **{role_or_agent.title()} Role Error**\n\nFailed to connect to ollama-turbo: {str(e)}\n\nPlease check your ollama-turbo configuration and API key."
 
     async def _handle_orchestration_request(self, orchestration_request: Dict[str, Any]) -> str:
         """Handle agent orchestration requests from LLM."""

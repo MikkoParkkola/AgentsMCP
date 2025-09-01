@@ -114,13 +114,14 @@ class ANSIMarkdownProcessor:
             'italic': TextStyle(italic=True),
             'underline': TextStyle(underline=True),
             'dim': TextStyle(dim=True),
-            'bold_yellow': TextStyle(color=ANSIColor.YELLOW, bold=True),
-            'cyan': TextStyle(color=ANSIColor.CYAN),
-            'blue': TextStyle(color=ANSIColor.BLUE),
-            'blue_underline': TextStyle(color=ANSIColor.BLUE, underline=True),
-            'green': TextStyle(color=ANSIColor.GREEN),
-            'red': TextStyle(color=ANSIColor.RED),
-            'magenta': TextStyle(color=ANSIColor.MAGENTA),
+            'bold_yellow': TextStyle(color=ANSIColor.BRIGHT_YELLOW, bold=True),
+            'cyan': TextStyle(color=ANSIColor.BRIGHT_CYAN),
+            'blue': TextStyle(color=ANSIColor.BRIGHT_BLUE),
+            'blue_underline': TextStyle(color=ANSIColor.BRIGHT_BLUE, underline=True),
+            'green': TextStyle(color=ANSIColor.BRIGHT_GREEN),
+            'red': TextStyle(color=ANSIColor.BRIGHT_RED),
+            'magenta': TextStyle(color=ANSIColor.BRIGHT_MAGENTA),
+            'yellow': TextStyle(color=ANSIColor.BRIGHT_YELLOW),
         }
         
         # Regex patterns for markdown elements
@@ -137,6 +138,8 @@ class ANSIMarkdownProcessor:
             'quote': re.compile(r'^(\s*>)\s*(.+)$', re.MULTILINE),
             'link': re.compile(r'\[([^\]]+)\]\(([^\)]+)\)'),
             'hr': re.compile(r'^(\s*)([-=]{3,})\s*$', re.MULTILINE),
+            'table_row': re.compile(r'^\s*\|(.+)\|\s*$', re.MULTILINE),
+            'table_separator': re.compile(r'^\s*\|[\s:|-]+\|\s*$', re.MULTILINE),
         }
         
         # Track code block state for proper rendering
@@ -158,6 +161,7 @@ class ANSIMarkdownProcessor:
         try:
             # Process in order of precedence
             result = self._process_code_blocks(text)
+            result = self._process_tables(result)
             result = self._process_headers(result)
             result = self._process_lists(result)
             result = self._process_quotes(result)
@@ -194,6 +198,125 @@ class ANSIMarkdownProcessor:
             return '\n' + '\n'.join(lines) + '\n'
         
         return self._patterns['code_block'].sub(replace_code_block, text)
+    
+    def _process_tables(self, text: str) -> str:
+        """Process markdown tables with proper alignment."""
+        lines = text.split('\n')
+        result_lines = []
+        i = 0
+        
+        while i < len(lines):
+            line = lines[i]
+            
+            # Check if this line looks like a table row
+            if self._patterns['table_row'].match(line):
+                # Find the complete table
+                table_start = i
+                table_lines = []
+                
+                # Collect all consecutive table lines
+                while i < len(lines) and (self._patterns['table_row'].match(lines[i]) or self._patterns['table_separator'].match(lines[i])):
+                    table_lines.append(lines[i])
+                    i += 1
+                
+                # Process the table
+                formatted_table = self._format_table(table_lines)
+                result_lines.extend(formatted_table)
+            else:
+                result_lines.append(line)
+                i += 1
+        
+        return '\n'.join(result_lines)
+    
+    def _format_table(self, table_lines: List[str]) -> List[str]:
+        """Format a markdown table with proper alignment and colors."""
+        if not table_lines:
+            return []
+        
+        # Parse table structure
+        rows = []
+        separator_idx = None
+        
+        for idx, line in enumerate(table_lines):
+            if self._patterns['table_separator'].match(line):
+                separator_idx = idx
+            else:
+                # Extract cells from table row
+                cells = [cell.strip() for cell in line.split('|')[1:-1]]  # Remove empty first/last
+                rows.append(cells)
+        
+        if not rows:
+            return table_lines
+        
+        # Calculate column widths
+        num_cols = len(rows[0]) if rows else 0
+        col_widths = [0] * num_cols
+        
+        for row in rows:
+            for i, cell in enumerate(row[:num_cols]):
+                # Calculate visual width (without ANSI codes)
+                visual_width = self._calculate_visual_length(cell)
+                col_widths[i] = max(col_widths[i], visual_width, 3)  # Minimum width 3
+        
+        # Apply maximum width constraint
+        max_col_width = max(10, (self.config.width - num_cols * 3) // num_cols)
+        col_widths = [min(w, max_col_width) for w in col_widths]
+        
+        formatted_rows = []
+        
+        for row_idx, row in enumerate(rows):
+            # Add separator after header row if we found one
+            if row_idx == 1 and separator_idx is not None and len(formatted_rows) > 0:
+                if self.config.enable_colors:
+                    style = self._get_style('dim')
+                    separator = f"{style.to_ansi()}├{'─┼─'.join(['─' * w for w in col_widths])}┤{ANSIStyle.RESET.value}"
+                else:
+                    separator = f"├{'─┼─'.join(['─' * w for w in col_widths])}┤"
+                formatted_rows.append(separator)
+            
+            # Format the data row
+            formatted_cells = []
+            for i, cell in enumerate(row[:num_cols]):
+                width = col_widths[i]
+                
+                # Truncate if too long
+                visual_len = self._calculate_visual_length(cell)
+                if visual_len > width:
+                    # Simple truncation - could be improved with ellipsis
+                    cell = cell[:width-1] + '…'
+                
+                # Pad to width
+                padding = width - self._calculate_visual_length(cell)
+                padded_cell = cell + (' ' * padding)
+                
+                # Apply header styling for first row
+                if row_idx == 0 and self.config.enable_colors:
+                    style = self._get_style('bold')
+                    padded_cell = f"{style.to_ansi()}{padded_cell}{ANSIStyle.RESET.value}"
+                
+                formatted_cells.append(padded_cell)
+            
+            # Assemble the row with borders
+            if self.config.enable_colors:
+                border_style = self._get_style('dim')
+                border_char = f"{border_style.to_ansi()}│{ANSIStyle.RESET.value}"
+            else:
+                border_char = '│'
+                
+            row_content = f" {border_char} ".join(formatted_cells)
+            formatted_row = f"{border_char} {row_content} {border_char}"
+            formatted_rows.append(formatted_row)
+        
+        # Add top and bottom borders
+        if self.config.enable_colors:
+            style = self._get_style('dim')
+            top_border = f"{style.to_ansi()}┌{'─┬─'.join(['─' * w for w in col_widths])}┐{ANSIStyle.RESET.value}"
+            bottom_border = f"{style.to_ansi()}└{'─┴─'.join(['─' * w for w in col_widths])}┘{ANSIStyle.RESET.value}"
+        else:
+            top_border = f"┌{'─┬─'.join(['─' * w for w in col_widths])}┐"
+            bottom_border = f"└{'─┴─'.join(['─' * w for w in col_widths])}┘"
+        
+        return [top_border] + formatted_rows + [bottom_border]
     
     def _process_headers(self, text: str) -> str:
         """Process markdown headers."""
@@ -337,7 +460,7 @@ class ANSIMarkdownProcessor:
         return self._patterns['link'].sub(replace_link, text)
     
     def _apply_text_wrapping(self, text: str) -> str:
-        """Apply text wrapping while preserving ANSI codes."""
+        """Apply text wrapping while preserving ANSI codes and structure."""
         if not self.config.enable_wrapping or self.config.width <= 0:
             return text
         
@@ -345,20 +468,60 @@ class ANSIMarkdownProcessor:
         wrapped_lines = []
         
         for line in lines:
-            if self._line_contains_ansi(line):
+            if not line.strip():
+                # Preserve empty lines as-is
+                wrapped_lines.append(line)
+                continue
+                
+            # Check if this is a list item (starts with bullet or number)
+            list_match = re.match(r'^(\s*)(•|\d+\.|[-*+])\s+(.+)$', line)
+            if list_match:
+                indent_prefix = list_match.group(1)  # Leading whitespace
+                marker = list_match.group(2)         # Bullet or number
+                content = list_match.group(3)        # Content after marker
+                
+                # Calculate the indentation for continuation lines
+                marker_width = len(marker) + 1  # marker + space
+                continuation_indent = indent_prefix + ' ' * marker_width
+                
+                # Wrap the content
+                available_width = self.config.width - len(continuation_indent)
+                if available_width > 10:  # Ensure reasonable width
+                    if self._line_contains_ansi(content):
+                        wrapped_content = self._wrap_ansi_line(content, available_width)
+                    else:
+                        wrapped_content = textwrap.wrap(
+                            content,
+                            width=available_width,
+                            break_long_words=False,
+                            break_on_hyphens=True
+                        ) or [content]
+                    
+                    # Add the first line with the marker
+                    first_line = f"{indent_prefix}{marker} {wrapped_content[0]}"
+                    wrapped_lines.append(first_line)
+                    
+                    # Add continuation lines with proper indentation
+                    for continuation_line in wrapped_content[1:]:
+                        wrapped_lines.append(f"{continuation_indent}{continuation_line}")
+                else:
+                    # If not enough space for proper wrapping, keep as-is
+                    wrapped_lines.append(line)
+            elif self._line_contains_ansi(line):
                 # Handle ANSI-styled lines specially
-                wrapped_lines.extend(self._wrap_ansi_line(line))
+                wrapped_lines.extend(self._wrap_ansi_line(line, self.config.width))
             else:
                 # Regular text wrapping
                 if len(line) <= self.config.width:
                     wrapped_lines.append(line)
                 else:
-                    wrapped_lines.extend(textwrap.wrap(
+                    wrapped_content = textwrap.wrap(
                         line, 
                         width=self.config.width,
                         break_long_words=False,
                         break_on_hyphens=True
-                    ))
+                    ) or [line]
+                    wrapped_lines.extend(wrapped_content)
         
         return '\n'.join(wrapped_lines)
     
@@ -366,26 +529,25 @@ class ANSIMarkdownProcessor:
         """Check if line contains ANSI escape codes."""
         return '\x1b[' in line
     
-    def _wrap_ansi_line(self, line: str) -> List[str]:
+    def _wrap_ansi_line(self, line: str, max_width: int = None) -> List[str]:
         """Wrap a line containing ANSI codes."""
-        # This is a simplified approach - for production use,
-        # consider a more sophisticated ANSI-aware wrapper
+        # Use provided width or fall back to config width
+        target_width = max_width if max_width is not None else self.config.width
         
         # For now, preserve ANSI lines as-is if they're not too long
         visual_length = self._calculate_visual_length(line)
         
-        if visual_length <= self.config.width:
+        if visual_length <= target_width:
             return [line]
         
-        # If too long, attempt simple breaking
-        # This is a fallback - more complex logic could be added
+        # If too long, attempt simple breaking at word boundaries
         parts = line.split(' ')
         current_line = ""
         result_lines = []
         
         for part in parts:
             test_line = f"{current_line} {part}" if current_line else part
-            if self._calculate_visual_length(test_line) <= self.config.width:
+            if self._calculate_visual_length(test_line) <= target_width:
                 current_line = test_line
             else:
                 if current_line:
@@ -420,9 +582,9 @@ class ANSIMarkdownProcessor:
         Returns:
             List of formatted lines
         """
-        # Update config width
+        # Update config width for processing
         original_width = self.config.width
-        self.config.width = max(1, width - len(indent_prefix))
+        self.config.width = max(20, width - len(indent_prefix))
         
         try:
             processed_text = self.process_text(text)
@@ -430,11 +592,36 @@ class ANSIMarkdownProcessor:
             
             result_lines = []
             for line in lines:
+                # Apply prefix
                 prefixed_line = indent_prefix + line
-                # Ensure line doesn't exceed width
-                if len(prefixed_line) > width:
-                    prefixed_line = prefixed_line[:width]
-                result_lines.append(prefixed_line)
+                
+                # Check visual length (excluding ANSI codes)
+                visual_length = self._calculate_visual_length(prefixed_line)
+                
+                if visual_length <= width:
+                    # Line fits - add as is
+                    result_lines.append(prefixed_line)
+                else:
+                    # Line too long - wrap it properly
+                    if self._line_contains_ansi(line):
+                        # For ANSI lines, wrap carefully to preserve formatting
+                        wrapped = self._wrap_ansi_line(line, width - len(indent_prefix))
+                        for wrapped_line in wrapped:
+                            result_lines.append(indent_prefix + wrapped_line)
+                    else:
+                        # For plain text, use standard wrapping
+                        wrapped = textwrap.wrap(
+                            line, 
+                            width=width - len(indent_prefix),
+                            break_long_words=False,
+                            expand_tabs=False
+                        )
+                        if wrapped:
+                            for wrapped_line in wrapped:
+                                result_lines.append(indent_prefix + wrapped_line)
+                        else:
+                            # Empty or whitespace-only line
+                            result_lines.append(indent_prefix)
             
             return result_lines
             
@@ -487,7 +674,18 @@ def render_markdown_lines(text: str, width: int = 80, indent: str = '') -> List[
     Returns:
         List of formatted lines
     """
-    config = RenderConfig(width=width)
+    config = RenderConfig(
+        width=width,
+        enable_colors=True,
+        enable_markdown=True,
+        enable_wrapping=True,
+        header_style='bold_yellow',
+        code_style='cyan',
+        emphasis_style='italic',
+        strong_style='bold',
+        quote_style='dim',
+        link_style='blue_underline'
+    )
     processor = ANSIMarkdownProcessor(config)
     return processor.render_lines(text, width, indent)
 

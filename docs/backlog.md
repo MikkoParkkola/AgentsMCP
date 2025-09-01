@@ -8,12 +8,9 @@ Legend: [Size] S ≤200 LOC, M ≤500 LOC, D = docs-only.
 
 ## Now / Next / Later
 - Now (P0)
-  - TUI v2 input reliability: single input path, echo/ICANON control, fallback reader; ensure chat input renders typed characters; exit via /quit and Ctrl+C. [S]
   - TUI: terminal resize support — handle SIGWINCH and recompute layout; ensure immediate reflow without artifacts. [S]
   - TUI: guarantee terminal state restoration on crash/TERM — install signal handlers and always restore cooked mode. [S]
-  - TUI: integrate mouse wheel scroll events into scrollable panes (history/log views). [S]
   - CLI standardization: single entry path, consistent command schema, Problem+Solution error format. [S]
-  - Setup wizard: interactive first‑run for API keys/config + test connection. [M]
 - Next (P1)
   - TUI: Unicode grapheme-aware backspace/delete behavior. [S]
   - TUI: mouse click mapping to UI actions (selection, focus). [S]
@@ -182,5 +179,48 @@ WUI5. Controls in UI [S]
 
 WUI6. Docs & config [D]
 - Scope: Document how to enable/disable UI, set bind host/port, and use SSE; troubleshooting.
-- Files: `docs/usage.md`, `docs/deployment.md`.
+- Files: `docs/usage.md`.
 - Acceptance: A fresh user can enable UI and see live dashboard in under 2 minutes.
+
+---
+
+### P0 Triage (Small, testable tasks)
+
+P0-A. SIGWINCH resize support [S]
+- Scope: Install `SIGWINCH` handler; recompute layout on resize.
+- Files: `src/agentsmcp/ui/*`.
+- Acceptance: Resizing terminal triggers reflow without visual artifacts.
+
+P0-B. Terminal state restoration [S]
+- Scope: Install TERM/INT signal handlers; always restore cooked mode.
+- Files: `src/agentsmcp/ui/*` (terminal state manager).
+- Acceptance: After forced TERM, terminal echo/line mode restored (manual reproduction).
+
+P0-C. CLI standardization [S]
+- Scope: Single entry path; consistent command schema; Problem+Solution error format.
+- Files: `src/agentsmcp/cli.py`, `src/agentsmcp/commands/*`.
+- Acceptance: Commands show consistent help and error messages.
+
+Completed: Setup wizard implemented (`src/agentsmcp/commands/setup.py`).
+
+### P1 Triage (Small, testable tasks)
+
+P1-A. Unicode grapheme-aware backspace [S]
+- Scope: Use grapheme clusters for delete/backspace.
+- Files: `src/agentsmcp/ui/*` (line buffer).
+- Acceptance: Backspace removes entire grapheme (emoji/accented) correctly.
+
+P1-B. Mouse click mapping [S]
+- Scope: Map clicks to selection/focus actions in scrollable lists.
+- Files: `src/agentsmcp/ui/*`.
+- Acceptance: Clicking on items focuses/selects accordingly.
+
+P1-C. MCP version negotiation (M1–M3) [S]
+- Scope: Implement `negotiate_version()`, `downconvert_tools()`, and wire on registration.
+- Files: `src/agentsmcp/mcp/server.py`.
+- Acceptance: Logs negotiated version; unit tests cover field filtering; manual mock path passes.
+
+P1-D. Streaming adapters (S2) [M]
+- Scope: Implement provider streaming wiring behind `stream.generate_stream()`.
+- Files: `src/agentsmcp/stream.py`.
+- Acceptance: Incremental chunks arrive; `finish_reason` set; toggling `/stream on|off` works.
