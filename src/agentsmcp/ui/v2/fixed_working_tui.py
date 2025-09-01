@@ -15,6 +15,7 @@ import shutil
 import termios
 import tty
 import time
+from .improvement_dashboard import ImprovementDashboard
 
 logger = logging.getLogger(__name__)
 
@@ -490,15 +491,18 @@ class FixedWorkingTUI:
             return
         if line.lower() == '/help':
             sys.stdout.write('\r\n📚 Commands:\n')
-            sys.stdout.write('\r  /help   - Show this help\n')
-            sys.stdout.write('\r  /quit   - Exit TUI\n')
-            sys.stdout.write('\r  /clear  - Clear conversation history\n')
-            sys.stdout.write('\r  /agents - List configured agents\n')
+            sys.stdout.write('\r  /help       - Show this help\n')
+            sys.stdout.write('\r  /quit       - Exit TUI\n')
+            sys.stdout.write('\r  /clear      - Clear conversation history\n')
+            sys.stdout.write('\r  /agents     - List configured agents\n')
+            sys.stdout.write('\r  /dashboard  - Show improvement dashboard\n')
+            sys.stdout.write('\r  /optimize   - Manual optimization cycle\n')
+            sys.stdout.write('\r  /status     - Show system status\n')
             sys.stdout.write('\r\n⌨️  Keyboard Shortcuts:\n')
-            sys.stdout.write('\r  Ctrl+C  - Exit TUI\n')
-            sys.stdout.write('\r  Ctrl+N  - Add new line (multi-line input)\n')
-            sys.stdout.write('\r  ↑/↓     - Navigate input history\n')
-            sys.stdout.write('\r  Enter   - Send message\n')
+            sys.stdout.write('\r  Ctrl+C      - Exit TUI\n')
+            sys.stdout.write('\r  Ctrl+N      - Add new line (multi-line input)\n')
+            sys.stdout.write('\r  ↑/↓         - Navigate input history\n')
+            sys.stdout.write('\r  Enter       - Send message\n')
             sys.stdout.write('\r\n💬 Just type normally to chat with the LLM!\n')
             return
         if line.lower() == '/clear':
@@ -510,6 +514,18 @@ class FixedWorkingTUI:
                 sys.stdout.write('\r\n🧹 Conversation history cleared!\n')
             else:
                 sys.stdout.write('\r\n⚠️  LLM client not available\n')
+            return
+        
+        if line.lower() == '/dashboard':
+            await self._show_improvement_dashboard()
+            return
+        
+        if line.lower() == '/optimize':
+            await self._trigger_manual_optimization()
+            return
+        
+        if line.lower() == '/status':
+            await self._show_system_status()
             return
         if not line:
             return
@@ -669,6 +685,175 @@ class FixedWorkingTUI:
         if self.progress_task:
             self.progress_task.cancel()
             self.progress_task = None
+
+    async def _show_improvement_dashboard(self):
+        """Display the improvement dashboard."""
+        try:
+            sys.stdout.write('\r\n📊 Improvement Dashboard\n')
+            sys.stdout.write('─' * 50 + '\n')
+            
+            # Get orchestrator if available
+            orchestrator = await self._get_orchestrator()
+            if not orchestrator:
+                sys.stdout.write('⚠️  Self-improvement system not available\n')
+                return
+                
+            # Get improvement status
+            status = await orchestrator.get_self_improvement_status()
+            
+            if not status.get('enabled', False):
+                sys.stdout.write('ℹ️  Self-improvement system is disabled\n')
+                sys.stdout.write('   Use /optimize to enable and run manual optimization\n')
+                return
+            
+            # Display key metrics
+            metrics = status.get('metrics', {})
+            sys.stdout.write(f"Mode: {status.get('mode', 'unknown')}\n")
+            sys.stdout.write(f"Tasks processed: {metrics.get('tasks_processed', 0)}\n")
+            sys.stdout.write(f"Improvements applied: {metrics.get('improvements_applied', 0)}\n")
+            sys.stdout.write(f"Average completion time: {metrics.get('avg_completion_time', 0):.2f}s\n")
+            sys.stdout.write(f"User satisfaction: {metrics.get('user_satisfaction', 0):.1f}/5.0\n")
+            
+            # Show recent improvements
+            recent_improvements = status.get('recent_improvements', [])
+            if recent_improvements:
+                sys.stdout.write('\n🔧 Recent Improvements:\n')
+                for imp in recent_improvements[-3:]:  # Show last 3
+                    sys.stdout.write(f"  • {imp.get('description', 'Unknown improvement')}\n")
+                    sys.stdout.write(f"    Impact: {imp.get('impact', 'N/A')}\n")
+            
+            # Show full dashboard using the dashboard component
+            dashboard = ImprovementDashboard()
+            dashboard_content = await dashboard.render_dashboard(status)
+            if dashboard_content:
+                sys.stdout.write('\n')
+                sys.stdout.write(dashboard_content)
+            
+        except Exception as e:
+            logger.error(f"Error showing improvement dashboard: {e}")
+            sys.stdout.write(f'❌ Error displaying dashboard: {str(e)}\n')
+        
+        sys.stdout.flush()
+
+    async def _trigger_manual_optimization(self):
+        """Trigger a manual optimization cycle."""
+        try:
+            sys.stdout.write('\r\n⚙️  Triggering manual optimization...\n')
+            
+            # Get orchestrator
+            orchestrator = await self._get_orchestrator()
+            if not orchestrator:
+                sys.stdout.write('⚠️  Self-improvement system not available\n')
+                return
+                
+            # Start optimization
+            result = await orchestrator.trigger_manual_optimization()
+            
+            if result.get('success', False):
+                sys.stdout.write('✅ Optimization completed successfully\n')
+                
+                improvements = result.get('improvements_found', [])
+                if improvements:
+                    sys.stdout.write(f'🔧 Applied {len(improvements)} improvements:\n')
+                    for imp in improvements:
+                        sys.stdout.write(f"  • {imp.get('description', 'Unknown improvement')}\n")
+                        sys.stdout.write(f"    Expected impact: {imp.get('expected_impact', 'N/A')}\n")
+                else:
+                    sys.stdout.write('ℹ️  No optimization opportunities found at this time\n')
+                    
+                # Show updated metrics
+                metrics = result.get('updated_metrics', {})
+                if metrics:
+                    sys.stdout.write(f'\n📈 Updated Performance:\n')
+                    sys.stdout.write(f"  Average completion time: {metrics.get('avg_completion_time', 0):.2f}s\n")
+                    sys.stdout.write(f"  User satisfaction: {metrics.get('user_satisfaction', 0):.1f}/5.0\n")
+            else:
+                error_msg = result.get('error', 'Unknown error occurred')
+                sys.stdout.write(f'❌ Optimization failed: {error_msg}\n')
+                
+        except Exception as e:
+            logger.error(f"Error triggering manual optimization: {e}")
+            sys.stdout.write(f'❌ Error during optimization: {str(e)}\n')
+        
+        sys.stdout.flush()
+
+    async def _show_system_status(self):
+        """Show comprehensive system status."""
+        try:
+            sys.stdout.write('\r\n🔍 System Status\n')
+            sys.stdout.write('─' * 50 + '\n')
+            
+            # LLM Client Status
+            if self.llm_client:
+                sys.stdout.write(f'✅ LLM Client: {self.llm_client.provider} - {self.llm_client.model}\n')
+            else:
+                sys.stdout.write('❌ LLM Client: Not connected\n')
+                
+            # Conversation Manager Status
+            if hasattr(self, 'conversation_manager') and self.conversation_manager:
+                sys.stdout.write('✅ Conversation Manager: Active\n')
+            else:
+                sys.stdout.write('❌ Conversation Manager: Not available\n')
+            
+            # Orchestrator and Self-Improvement Status
+            orchestrator = await self._get_orchestrator()
+            if orchestrator:
+                sys.stdout.write('✅ Orchestrator: Available\n')
+                
+                # Get self-improvement status
+                si_status = await orchestrator.get_self_improvement_status()
+                if si_status.get('enabled', False):
+                    mode = si_status.get('mode', 'unknown')
+                    sys.stdout.write(f'✅ Self-Improvement: Active ({mode})\n')
+                    
+                    metrics = si_status.get('metrics', {})
+                    sys.stdout.write(f'   Tasks processed: {metrics.get("tasks_processed", 0)}\n')
+                    sys.stdout.write(f'   Improvements applied: {metrics.get("improvements_applied", 0)}\n')
+                    
+                    if metrics.get('last_optimization'):
+                        sys.stdout.write(f'   Last optimization: {metrics["last_optimization"]}\n')
+                else:
+                    sys.stdout.write('⚠️  Self-Improvement: Disabled\n')
+            else:
+                sys.stdout.write('⚠️  Orchestrator: Not available\n')
+                sys.stdout.write('⚠️  Self-Improvement: Not available\n')
+            
+            # Terminal and Input Status
+            sys.stdout.write(f'✅ Terminal: Ready (TTY: {sys.stdin.isatty()})\n')
+            sys.stdout.write(f'✅ Input History: {len(self.input_history)} entries\n')
+            
+            # Working Directory
+            import os
+            sys.stdout.write(f'📁 Working Directory: {os.getcwd()}\n')
+            
+        except Exception as e:
+            logger.error(f"Error showing system status: {e}")
+            sys.stdout.write(f'❌ Error retrieving system status: {str(e)}\n')
+        
+        sys.stdout.flush()
+
+    async def _get_orchestrator(self):
+        """Get orchestrator instance for self-improvement operations."""
+        try:
+            # Import and create orchestrator similar to how it's done in process_line
+            from ...orchestration import Orchestrator, OrchestratorConfig, OrchestratorMode
+            
+            config = OrchestratorConfig(
+                mode=OrchestratorMode.STRICT_ISOLATION,
+                enable_smart_classification=True,
+                fallback_to_simple_response=True,
+                max_agent_wait_time_ms=120000,
+                synthesis_timeout_ms=5000
+            )
+            
+            if hasattr(self, 'conversation_manager') and self.conversation_manager:
+                return Orchestrator(config=config, conversation_manager=self.conversation_manager)
+            else:
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error creating orchestrator: {e}")
+            return None
 
     def __del__(self):
         """Ensure terminal is restored on cleanup."""
