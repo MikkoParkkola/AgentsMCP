@@ -43,13 +43,17 @@ class MainTUIApp:
     - Handles exit commands (/quit) and Ctrl+C gracefully
     """
     
-    def __init__(self, cli_config: Optional[CLIConfig] = None):
+    def __init__(self, cli_config: Optional[CLIConfig] = None, orchestrator_integration=None, revolutionary_components=None):
         """Initialize the main TUI application.
         
         Args:
             cli_config: CLI configuration, if None uses defaults
+            orchestrator_integration: Optional orchestrator integration for enhanced communication
+            revolutionary_components: Optional dict of revolutionary TUI components for advanced features
         """
         self.cli_config = cli_config or CLIConfig()
+        self.orchestrator_integration = orchestrator_integration
+        self.revolutionary_components = revolutionary_components or {}
         self.app_controller: Optional[ApplicationController] = None
         self.running = False
         self._shutdown_event = asyncio.Event()
@@ -63,6 +67,10 @@ class MainTUIApp:
         self.theme_manager = None
         self.chat_interface = None
         self.keyboard_processor = None
+        
+        # Revolutionary component integration
+        if self.revolutionary_components:
+            logger.info(f"Revolutionary TUI components available: {list(self.revolutionary_components.keys())}")
         self.status_manager = None
         
         # New critical components for input fix
@@ -279,7 +287,9 @@ class MainTUIApp:
             application_controller=self.app_controller,
             config=chat_config,
             status_manager=self.status_manager,
-            display_renderer=self.display_renderer
+            display_renderer=self.display_renderer,
+            orchestrator_integration=self.orchestrator_integration,
+            revolutionary_components=self.revolutionary_components
         )
         await self.chat_interface.initialize()
     

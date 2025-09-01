@@ -77,6 +77,7 @@ class AsyncEventSystem:
             max_handler_timeout: Maximum time to wait for a handler (seconds)
         """
         self._handlers: Dict[EventType, List[weakref.ref]] = {}
+        self._named_handlers: Dict[str, List[weakref.ref]] = {}  # For string event names
         self._running = False
         self._event_queue = asyncio.Queue()
         self._worker_task: Optional[asyncio.Task] = None
@@ -127,12 +128,12 @@ class AsyncEventSystem:
         self._handlers[event_type].append(weakref.ref(handler))
         logger.debug(f"Added handler {handler.name} for {event_type.value}")
     
-    async def subscribe(self, event_type: EventType, handler_func: Callable):
+    async def subscribe(self, event_type: Union[str, EventType], handler_func: Callable):
         """
         Subscribe a function to handle events of a specific type.
         
         Args:
-            event_type: Type of events to handle
+            event_type: Type of events to handle (string or EventType enum)
             handler_func: Async function to call for events
         """
         # Create a simple event handler wrapper
@@ -143,17 +144,26 @@ class AsyncEventSystem:
             
             async def handle_event(self, event: Event) -> bool:
                 try:
+                    # Pass the event data directly to the handler for convenience
                     if inspect.iscoroutinefunction(self.func):
-                        await self.func(event)
+                        await self.func(event.data)
                     else:
-                        self.func(event)
+                        self.func(event.data)
                     return True
                 except Exception as e:
                     logger.error(f"Error in subscribed handler {self.name}: {e}")
                     return False
         
         handler = FunctionEventHandler(handler_func)
-        self.add_handler(event_type, handler)
+        
+        # Handle string event names vs EventType enums
+        if isinstance(event_type, str):
+            if event_type not in self._named_handlers:
+                self._named_handlers[event_type] = []
+            self._named_handlers[event_type].append(weakref.ref(handler))
+            logger.debug(f"Added named handler {handler.name} for '{event_type}'")
+        else:
+            self.add_handler(event_type, handler)
     
     def remove_handler(self, event_type: EventType, handler: EventHandler):
         """
@@ -176,12 +186,21 @@ class AsyncEventSystem:
     
     def _cleanup_dead_handlers(self):
         """Remove weak references to dead handlers."""
+        # Clean up type-based handlers
         for event_type in list(self._handlers.keys()):
             handlers = self._handlers[event_type]
             alive_handlers = [h for h in handlers if h() is not None]
             if len(alive_handlers) != len(handlers):
                 logger.debug(f"Cleaned up {len(handlers) - len(alive_handlers)} dead handlers for {event_type.value}")
                 self._handlers[event_type] = alive_handlers
+        
+        # Clean up named handlers
+        for event_name in list(self._named_handlers.keys()):
+            handlers = self._named_handlers[event_name]
+            alive_handlers = [h for h in handlers if h() is not None]
+            if len(alive_handlers) != len(handlers):
+                logger.debug(f"Cleaned up {len(handlers) - len(alive_handlers)} dead handlers for '{event_name}'")
+                self._named_handlers[event_name] = alive_handlers
     
     async def emit_event(self, event: Event) -> bool:
         """
@@ -222,6 +241,24 @@ class AsyncEventSystem:
         """
         return await self._process_event(event)
     
+    async def emit(self, event_type_name: str, data: Dict[str, Any] = None) -> bool:
+        """
+        Convenience method to emit an event by name and data.
+        
+        Args:
+            event_type_name: Name/type of the event
+            data: Event data dictionary
+            
+        Returns:
+            True if event was queued successfully
+        """
+        event = Event(
+            event_type=EventType.CUSTOM,
+            data=data or {},
+            source=event_type_name
+        )
+        return await self.emit_event(event)
+    
     async def _process_event(self, event: Event) -> bool:
         """
         Process a single event by calling all registered handlers.
@@ -232,13 +269,25 @@ class AsyncEventSystem:
         Returns:
             True if any handler handled the event
         """
-        if event.event_type not in self._handlers:
-            return False
+        handled_by_any = False
         
+        # Check named handlers first (for string event names)
+        if event.source and event.source in self._named_handlers:
+            handlers = self._named_handlers[event.source]
+            handled_by_any = await self._call_handlers(handlers, event) or handled_by_any
+        
+        # Check type-based handlers
+        if event.event_type in self._handlers:
+            handlers = self._handlers[event.event_type]
+            handled_by_any = await self._call_handlers(handlers, event) or handled_by_any
+        
+        return handled_by_any
+    
+    async def _call_handlers(self, handlers: List[weakref.ref], event: Event) -> bool:
+        """Call a list of handlers for an event."""
         # Clean up dead handlers periodically
         self._cleanup_dead_handlers()
         
-        handlers = self._handlers[event.event_type]
         handled_by_any = False
         
         for weak_handler in handlers[:]:  # Copy list to avoid modification during iteration
@@ -265,14 +314,17 @@ class AsyncEventSystem:
                         break
                         
             except asyncio.TimeoutError:
-                logger.warning(f"Handler {handler.name} timed out processing {event.event_type.value} event")
+                event_name = event.source or (event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type))
+                logger.warning(f"Handler {handler.name} timed out processing {event_name} event")
                 self._stats['handler_timeouts'] += 1
                 
             except Exception as e:
-                logger.error(f"Handler {handler.name} error processing {event.event_type.value} event: {e}")
+                event_name = event.source or (event.event_type.value if hasattr(event.event_type, 'value') else str(event.event_type))
+                logger.error(f"Handler {handler.name} error processing {event_name} event: {e}")
                 self._stats['handler_errors'] += 1
         
-        self._stats['events_processed'] += 1
+        if handled_by_any:
+            self._stats['events_processed'] += 1
         return handled_by_any
     
     async def _worker_loop(self):
@@ -331,6 +383,11 @@ class AsyncEventSystem:
                 break
         
         logger.debug("Event system stopped")
+    
+    async def shutdown(self):
+        """Shutdown the event system (alias for stop + cleanup)."""
+        await self.stop()
+        await self.cleanup()
     
     async def cleanup(self):
         """

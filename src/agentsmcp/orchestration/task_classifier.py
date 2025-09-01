@@ -64,39 +64,32 @@ class TaskClassifier:
     def _build_simple_patterns(self) -> List[Dict]:
         """Build patterns for simple tasks that don't need agents."""
         return [
-            # Greetings and pleasantries
+            # Greetings and pleasantries (strict patterns)
             {
-                "patterns": [r'\bhello\b', r'\bhi\b', r'\bhey\b', r'\bgood (morning|afternoon|evening)\b'],
+                "patterns": [r'^\s*(hello|hi|hey)\s*$', r'^\s*good\s+(morning|afternoon|evening)\s*$'],
                 "confidence": 0.95,
                 "reasoning": "Simple greeting"
             },
             
-            # Status and health checks
+            # Status and health checks (narrow patterns)
             {
-                "patterns": [r'\bstatus\b', r'\bhow are you\b', r'\bworking\b', r'\bup\b', r'\bonline\b'],
+                "patterns": [r'^\s*(how\s+are\s+you|are\s+you\s+working|system\s+status)\s*\??\s*$'],
                 "confidence": 0.90,
                 "reasoning": "Status inquiry"
             },
             
-            # Basic help requests
+            # Acknowledgments and confirmations (strict end patterns)
             {
-                "patterns": [r'\bhelp\b(?!\s+\w+\s+\w+)', r'\bwhat can you do\b', r'\bcapabilities\b'],
-                "confidence": 0.85,
-                "reasoning": "General help request"
-            },
-            
-            # Simple questions without complexity
-            {
-                "patterns": [r'^\w{1,20}\?$', r'^(what|who|when|where|why|how)\s+\w{1,30}\?$'],
-                "confidence": 0.70,
-                "reasoning": "Simple question"
-            },
-            
-            # Acknowledgments and confirmations
-            {
-                "patterns": [r'\b(ok|okay|yes|no|thanks|thank you)\b$'],
+                "patterns": [r'^\s*(ok|okay|yes|no|thanks?|thank\s+you)\s*$'],
                 "confidence": 0.80,
                 "reasoning": "Simple acknowledgment"
+            },
+            
+            # Farewells (strict patterns)
+            {
+                "patterns": [r'^\s*(goodbye|bye|see\s+you|farewell)\s*$'],
+                "confidence": 0.90,
+                "reasoning": "Simple farewell"
             }
         ]
     
@@ -123,6 +116,34 @@ class TaskClassifier:
                     r'\b(suggest.*improvement|recommend)\b',
                     r'\bquality\b.*(check|review|assessment|evaluation|audit)',
                     r'\bcomprehensive\b.*(review|analysis|assessment|evaluation|audit|quality)'
+                ],
+                "confidence": 0.85
+            },
+            
+            "file_system": {
+                "roles": ["general"],  # General role for file system tasks
+                "patterns": [
+                    r'\b(list|show|display|find|search)\b.*(file|directory|folder|path)',
+                    r'\bwhat.*\b(file|directory|folder|agent|tool)s?\b',
+                    r'\b(current|working)\s+(directory|folder)\b',
+                    r'\blist\s+(all\s+)?(file|agent|tool)',
+                    r'\bshow\s+me\s+(what|all|the)',
+                    r'\bwhat\s+do\s+you\s+(see|have|know)\b',
+                    r'\bwhat.*available\b'
+                ],
+                "confidence": 0.80
+            },
+            
+            "information_requests": {
+                "roles": ["general"],  # General role for information requests
+                "patterns": [
+                    r'\bwhat\s+(agents?|tools?)\b',
+                    r'\blist\s+(agents?|tools?|commands?)\b',
+                    r'\bshow\s+(agents?|tools?|capabilities)\b',
+                    r'\bavailable\s+(agents?|tools?|options?)\b',
+                    r'\bwhat\s+can\s+you\s+(do|use)\b',
+                    r'\bcapabilities\b',
+                    r'\binfo\b.*(about|on)\b'
                 ],
                 "confidence": 0.85
             },
@@ -359,17 +380,37 @@ class TaskClassifier:
     def _check_simple_patterns(self, user_input: str) -> Optional[ClassificationResult]:
         """Check if input matches simple task patterns."""
         
-        # First check if this looks like a complex task that should override simple patterns
+        # Check if this looks like a complex task that should override simple patterns
         complexity_overrides = [
+            # Coding and development tasks
             r'\b(write|create|implement|code|program|script|function|class|method)\b',
-            r'\b(analyze|review|examine|assess|evaluate|audit)\b.*(project|codebase|code|performance|system|data|algorithm|structure|quality|architecture)',
-            r'\bcomprehensive\b.*(assessment|review|analysis|evaluation|audit)',
-            r'\bquality\b.*(assessment|review|analysis|evaluation|audit)',
             r'\b(debug|fix|error|bug|issue|problem)\b',
             r'\b(optimize|improve|enhance|refactor)\b',
             r'\b(build|deploy|configure|setup|install)\b',
+            
+            # Analysis and review tasks
+            r'\b(analyze|review|examine|assess|evaluate|audit)\b',
+            r'\bcomprehensive\b.*(assessment|review|analysis|evaluation|audit)',
+            r'\bquality\b.*(assessment|review|analysis|evaluation|audit)',
+            
+            # File system and information requests
+            r'\b(list|show|display|find|search)\b.*(file|directory|folder|agent|tool|command)',
+            r'\bwhat\s+(agents?|tools?|files?)\b',
+            r'\b(current|working)\s+(directory|folder)\b',
+            
+            # Questions requiring real analysis or action
+            r'\bwhat\s+do\s+you\s+(see|have|know)\b',
+            r'\bmake\s+.*\b(analysis|comprehensive|detailed)\b',
+            r'\bcan\s+you\s+(list|show|find|analyze)\b',
+            
+            # System and performance queries
             r'\b(performance|efficiency|speed|memory|cpu)\b',
-            r'\b(suggest.*improvement|recommend.*change)\b'
+            r'\b(suggest.*improvement|recommend.*change)\b',
+            
+            # Generic help that requires agent knowledge
+            r'\bhelp\b.*(with|me|using)\b',
+            r'\bwhat\s+can\s+you\s+do\s+with\b',
+            r'\bcapabilities\b.*(of|for)\b'
         ]
         
         for override_pattern in complexity_overrides:
@@ -442,7 +483,7 @@ class TaskClassifier:
                         "reason": f"Best match for {task_type} task"
                     }
         
-        return best_match if best_score > 0.25 else None
+        return best_match if best_score > 0.20 else None
     
     def _determine_multi_agent_team(self, user_input: str) -> List[str]:
         """Determine which agents to include in multi-agent team."""

@@ -18,6 +18,7 @@ Key Enhancements:
 import asyncio
 import json
 import math
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -28,7 +29,9 @@ import logging
 from collections import defaultdict, deque
 import sys
 
-from ..v2.core.event_system import AsyncEventSystem
+from ..v2.event_system import AsyncEventSystem
+
+logger = logging.getLogger(__name__)
 
 
 class AnimationEasing(Enum):
@@ -283,6 +286,66 @@ class RevolutionaryTUIEnhancements:
         # Detect accessibility preferences
         await self._detect_accessibility_preferences()
     
+    async def _detect_accessibility_preferences(self):
+        """Detect system accessibility preferences and adapt interface."""
+        try:
+            # Check for common accessibility environment variables
+            high_contrast = os.getenv('HIGH_CONTRAST', '').lower() in ('1', 'true', 'on')
+            screen_reader = os.getenv('SCREEN_READER', '').lower() in ('1', 'true', 'on')
+            
+            # Check system accessibility settings (cross-platform)
+            accessibility_settings = {}
+            
+            try:
+                import platform
+                system = platform.system().lower()
+                
+                if system == 'darwin':  # macOS
+                    # Check for VoiceOver and other accessibility features
+                    try:
+                        import subprocess
+                        result = subprocess.run(['defaults', 'read', 'com.apple.universalaccess', 'voiceOverOnOffKey'], 
+                                              capture_output=True, text=True, timeout=2)
+                        screen_reader = screen_reader or (result.returncode == 0)
+                    except:
+                        pass
+                        
+                elif system == 'linux':
+                    # Check for screen readers like Orca
+                    screen_reader = screen_reader or bool(os.getenv('ORCA_ENABLED'))
+                    
+                elif system == 'windows':
+                    # Check for NVDA or JAWS
+                    screen_reader = screen_reader or bool(os.getenv('NVDA_RUNNING') or os.getenv('JAWS_RUNNING'))
+                    
+            except Exception:
+                pass  # Fallback to environment variables only
+            
+            # Update accessibility settings
+            if high_contrast:
+                self.accessibility_engine["visual_accessibility"]["high_contrast"] = True
+                
+            if screen_reader:
+                self.accessibility_engine["screen_reader_support"]["enabled"] = True
+                
+            # Detect reduced motion preference
+            try:
+                reduced_motion = os.getenv('REDUCED_MOTION', '').lower() in ('1', 'true', 'on')
+                if reduced_motion:
+                    self.accessibility_engine["visual_accessibility"]["reduced_motion"] = True
+                    # Reduce animation speeds
+                    for animation in self.active_animations.values():
+                        if hasattr(animation, 'duration_ms'):
+                            animation.duration_ms = min(animation.duration_ms, 100)  # Cap at 100ms
+            except:
+                pass
+            
+            logger.info("Accessibility preferences detected and applied")
+            
+        except Exception as e:
+            logger.warning(f"Could not detect accessibility preferences: {e}")
+            # Use safe defaults
+    
     async def _initialize_prediction_engine(self):
         """Initialize predictive input system."""
         self.prediction_engine = {
@@ -296,6 +359,62 @@ class RevolutionaryTUIEnhancements:
         
         # Load command patterns
         await self._load_command_patterns()
+    
+    async def _load_command_patterns(self):
+        """Load command patterns for predictive input."""
+        try:
+            # Initialize default command patterns
+            default_patterns = {
+                "agent_commands": [
+                    "/agent", "/system", "/config", "/help", "/status", 
+                    "/clear", "/history", "/exit", "/quit", "/save", "/load"
+                ],
+                "workflow_commands": [
+                    "create task", "run test", "deploy", "build", "install",
+                    "update", "start", "stop", "restart", "monitor"
+                ],
+                "file_commands": [
+                    "edit", "open", "save", "close", "new", "delete",
+                    "copy", "move", "rename", "find", "search", "replace"
+                ]
+            }
+            
+            # Update command patterns with defaults
+            self.command_patterns.update(default_patterns)
+            
+            # Load from config file if it exists
+            if self.config_path.exists():
+                try:
+                    import json
+                    with open(self.config_path, 'r') as f:
+                        config_data = json.load(f)
+                    
+                    patterns = config_data.get('command_patterns', {})
+                    for category, commands in patterns.items():
+                        if category in self.command_patterns:
+                            self.command_patterns[category].extend(commands)
+                        else:
+                            self.command_patterns[category] = commands
+                    
+                    # Update prediction engine with loaded patterns
+                    for category, commands in self.command_patterns.items():
+                        for command in commands:
+                            self.prediction_engine["command_frequency"][command.lower()] = 1
+                    
+                except Exception as e:
+                    self.logger.warning(f"Could not load command patterns from config: {e}")
+            
+            # Create config directory if it doesn't exist
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            self.logger.debug(f"Loaded {sum(len(cmds) for cmds in self.command_patterns.values())} command patterns")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load command patterns: {e}")
+            # Use minimal fallback patterns
+            self.command_patterns = {
+                "basic": ["/help", "/quit", "/status", "help", "exit"]
+            }
     
     async def _initialize_effects_engine(self):
         """Initialize visual effects engine."""
@@ -957,6 +1076,39 @@ class RevolutionaryTUIEnhancements:
                 duration=200
             )
     
+    async def _handle_element_created(self, event_data: Dict[str, Any]):
+        """Handle element creation events."""
+        element_id = event_data.get("element_id", "")
+        element_type = event_data.get("element_type", "")
+        
+        if element_id:
+            # Add visual feedback for new elements
+            await self.create_visual_effect(
+                VisualFeedbackType.FADE_IN,
+                element_id,
+                duration=300
+            )
+    
+    async def _handle_accessibility_request(self, event_data: Dict[str, Any]):
+        """Handle accessibility feature requests."""
+        feature = event_data.get("feature", "")
+        enabled = event_data.get("enabled", True)
+        
+        if feature:
+            await self.enable_accessibility_feature(feature, enabled)
+    
+    async def _handle_performance_warning(self, event_data: Dict[str, Any]):
+        """Handle performance warnings and adapt accordingly."""
+        warning_type = event_data.get("warning_type", "")
+        severity = event_data.get("severity", "medium")
+        
+        if warning_type == "low_fps":
+            await self._adapt_performance("low_fps")
+        elif warning_type == "high_memory":
+            await self._adapt_performance("high_memory")
+        elif warning_type == "high_latency":
+            await self._adapt_performance("high_latency")
+    
     async def shutdown(self):
         """Shutdown the revolutionary TUI enhancements."""
         self.is_running = False
@@ -992,12 +1144,255 @@ class RevolutionaryTUIEnhancements:
         if element_id in self.visual_elements:
             self.visual_elements[element_id].content = content
             self.visual_elements[element_id].last_update = time.time()
+    
+    async def _save_learning_data(self):
+        """Save learning data to persistent storage."""
+        try:
+            if not self.config_path.exists():
+                self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            learning_data = {
+                "command_frequency": dict(self.prediction_engine["command_frequency"]),
+                "sequence_patterns": self.prediction_engine["sequence_patterns"],
+                "command_patterns": self.command_patterns,
+                "user_behavior_model": self.user_behavior_model,
+                "last_updated": time.time()
+            }
+            
+            import json
+            with open(self.config_path, 'w') as f:
+                json.dump(learning_data, f, indent=2)
+            
+            self.logger.debug("Learning data saved successfully")
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to save learning data: {e}")
+    
+    def _get_focused_element(self) -> Optional[str]:
+        """Get the currently focused element for accessibility."""
+        # Return the element with the highest focus order that's interactive
+        focused_elements = [
+            (element_id, element) for element_id, element in self.visual_elements.items()
+            if element.interactive
+        ]
+        
+        if not focused_elements:
+            return None
+        
+        # Sort by focus order and return the first one
+        focused_elements.sort(key=lambda x: x[1].focus_order)
+        return focused_elements[0][0] if focused_elements else None
+    
+    async def _apply_high_contrast_theme(self, enabled: bool):
+        """Apply high contrast theme to all visual elements."""
+        try:
+            if enabled:
+                # Apply high contrast colors
+                high_contrast_style = {
+                    "background": "#000000",
+                    "foreground": "#FFFFFF", 
+                    "accent": "#FFFF00",
+                    "border": "#FFFFFF",
+                    "highlight": "#00FFFF"
+                }
+            else:
+                # Revert to default colors
+                high_contrast_style = {
+                    "background": "#1e1e1e",
+                    "foreground": "#ffffff",
+                    "accent": "#0078d4",
+                    "border": "#3c3c3c",
+                    "highlight": "#264f78"
+                }
+            
+            # Apply to all visual elements
+            for element in self.visual_elements.values():
+                element.style.update(high_contrast_style)
+                element.last_update = time.time()
+            
+            # Emit theme change event
+            await self.event_system.emit("theme_changed", {
+                "high_contrast": enabled,
+                "style": high_contrast_style
+            })
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to apply high contrast theme: {e}")
+    
+    async def _apply_text_scaling(self, scale_factor: float):
+        """Apply text scaling for better readability."""
+        try:
+            for element in self.visual_elements.values():
+                element.style["text_scale"] = scale_factor
+                element.last_update = time.time()
+            
+            await self.event_system.emit("text_scaling_changed", {
+                "scale_factor": scale_factor
+            })
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to apply text scaling: {e}")
+    
+    async def _setup_keyboard_navigation(self):
+        """Setup keyboard navigation for accessibility."""
+        try:
+            # Define keyboard shortcuts
+            self.keyboard_shortcuts.update({
+                "Tab": self._focus_next_element,
+                "Shift+Tab": self._focus_previous_element,
+                "Enter": self._activate_focused_element,
+                "Escape": self._clear_focus,
+                "Ctrl+H": self._show_help,
+                "Ctrl+Q": self._quit_application
+            })
+            
+            await self.event_system.emit("keyboard_navigation_enabled", {
+                "shortcuts": list(self.keyboard_shortcuts.keys())
+            })
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to setup keyboard navigation: {e}")
+    
+    async def _focus_next_element(self):
+        """Focus the next interactive element."""
+        interactive_elements = [
+            (element_id, element) for element_id, element in self.visual_elements.items()
+            if element.interactive
+        ]
+        
+        if not interactive_elements:
+            return
+        
+        # Sort by focus order
+        interactive_elements.sort(key=lambda x: x[1].focus_order)
+        
+        # Find current focused element and move to next
+        current_focus = self._get_focused_element()
+        if current_focus:
+            current_index = next(
+                (i for i, (eid, _) in enumerate(interactive_elements) if eid == current_focus), 
+                -1
+            )
+            next_index = (current_index + 1) % len(interactive_elements)
+        else:
+            next_index = 0
+        
+        next_element_id = interactive_elements[next_index][0]
+        await self._set_element_focus(next_element_id)
+    
+    async def _focus_previous_element(self):
+        """Focus the previous interactive element."""
+        interactive_elements = [
+            (element_id, element) for element_id, element in self.visual_elements.items()
+            if element.interactive
+        ]
+        
+        if not interactive_elements:
+            return
+        
+        # Sort by focus order
+        interactive_elements.sort(key=lambda x: x[1].focus_order)
+        
+        # Find current focused element and move to previous
+        current_focus = self._get_focused_element()
+        if current_focus:
+            current_index = next(
+                (i for i, (eid, _) in enumerate(interactive_elements) if eid == current_focus),
+                0
+            )
+            prev_index = (current_index - 1) % len(interactive_elements)
+        else:
+            prev_index = len(interactive_elements) - 1
+        
+        prev_element_id = interactive_elements[prev_index][0]
+        await self._set_element_focus(prev_element_id)
+    
+    async def _set_element_focus(self, element_id: str):
+        """Set focus to a specific element."""
+        if element_id in self.visual_elements:
+            element = self.visual_elements[element_id]
+            element.style["focused"] = True
+            element.last_update = time.time()
+            
+            # Announce focus change for screen readers
+            if self.accessibility_state.screen_reader_active:
+                await self._announce_screen_reader(
+                    f"Focused on {element.accessibility_label or element_id}"
+                )
+    
+    async def _activate_focused_element(self):
+        """Activate the currently focused element."""
+        focused_element_id = self._get_focused_element()
+        if focused_element_id:
+            await self.event_system.emit("element_activated", {
+                "element_id": focused_element_id
+            })
+    
+    async def _clear_focus(self):
+        """Clear focus from all elements."""
+        for element in self.visual_elements.values():
+            element.style.pop("focused", None)
+            element.last_update = time.time()
+    
+    async def _show_help(self):
+        """Show help information."""
+        await self.event_system.emit("show_help", {
+            "shortcuts": self.keyboard_shortcuts,
+            "accessibility_enabled": self.accessibility_state.screen_reader_active
+        })
+    
+    async def _quit_application(self):
+        """Quit the application."""
+        await self.event_system.emit("quit_requested", {})
+    
+    async def _update_shimmer_effects(self, delta_time: float):
+        """Update shimmer visual effects."""
+        for element_id, effect_data in self.effects_engine.get("shimmer_effects", {}).items():
+            if not effect_data.get("active", False):
+                continue
+            
+            # Update shimmer animation
+            elapsed = time.time() - effect_data["start_time"]
+            intensity = effect_data.get("intensity", 0.5)
+            frequency = effect_data.get("frequency", 2.0)
+            
+            # Calculate shimmer offset
+            shimmer_offset = intensity * (0.5 + 0.5 * math.sin(elapsed * frequency * 2 * math.pi))
+            
+            # Apply shimmer effect to element style
+            if element_id in self.visual_elements:
+                element = self.visual_elements[element_id]
+                element.style["shimmer_offset"] = shimmer_offset
+                element.last_update = time.time()
+    
+    async def _update_ripple_effects(self, delta_time: float):
+        """Update ripple visual effects."""
+        active_ripples = []
+        
+        for ripple in self.effects_engine.get("ripple_effects", []):
+            if not ripple.get("active", False):
+                continue
+            
+            elapsed = time.time() - ripple["start_time"]
+            duration = ripple.get("duration", 1000) / 1000.0  # Convert to seconds
+            
+            if elapsed >= duration:
+                ripple["active"] = False
+            else:
+                # Update ripple radius
+                progress = elapsed / duration
+                ripple["radius"] = ripple["max_radius"] * progress
+                ripple["opacity"] = 1.0 - progress
+                active_ripples.append(ripple)
+        
+        # Update active ripples list
+        self.effects_engine["ripple_effects"] = active_ripples
 
 
 # Example usage and integration
 async def main():
     """Example usage of Revolutionary TUI Enhancements."""
-    from ..v2.core.event_system import AsyncEventSystem
+    from ..v2.event_system import AsyncEventSystem
     
     event_system = AsyncEventSystem()
     enhancements = RevolutionaryTUIEnhancements(event_system)

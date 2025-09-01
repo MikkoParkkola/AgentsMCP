@@ -26,7 +26,7 @@ import logging
 from collections import defaultdict, deque
 import weakref
 
-from ..v2.core.event_system import AsyncEventSystem
+from ..v2.event_system import AsyncEventSystem
 from .enhanced_command_interface import EnhancedCommandInterface
 from .progressive_disclosure_manager import ProgressiveDisclosureManager
 from .symphony_dashboard import SymphonyDashboard
@@ -967,7 +967,7 @@ async def create_revolutionary_integration(
 # Example usage
 async def main():
     """Example usage of Revolutionary Integration Layer."""
-    from ..v2.core.event_system import AsyncEventSystem
+    from ..v2.event_system import AsyncEventSystem
     
     # Create event system
     event_system = AsyncEventSystem()

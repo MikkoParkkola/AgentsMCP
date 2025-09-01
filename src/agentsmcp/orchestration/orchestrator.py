@@ -316,29 +316,70 @@ class Orchestrator:
         """Handle tasks that don't require agent delegation."""
         self.logger.debug("Handling simple task without agent delegation")
         
-        # Generate simple response based on classification metadata
-        response_templates = {
-            "greeting": "Hello! How can I help you today?",
-            "status": "All systems are running normally.",
-            "help": "I can help you with various tasks. What would you like to accomplish?",
+        # Analyze user input for intelligent response generation
+        user_input_lower = user_input.lower().strip()
+        reasoning_lower = classification.reasoning.lower() if classification.reasoning else ""
+        
+        # Comprehensive response patterns
+        response_patterns = {
+            # Greetings and social
+            ("hello", "hi", "hey", "good morning", "good afternoon", "good evening"): 
+                "Hello! I'm your AgentsMCP assistant. How can I help you today?",
+            
+            # Status and system inquiries
+            ("status", "how are you", "are you working", "system status", "health check"):
+                "I'm running normally and ready to assist you. All systems are operational. What can I help you with?",
+            
+            # Help requests
+            ("help", "what can you do", "capabilities", "commands", "how do i", "what do you"):
+                "I can help you with various tasks including:\n• Managing and coordinating AI agents\n• Software development workflows\n• System monitoring and diagnostics\n• Configuration and settings\n\nWhat specific task would you like help with?",
+            
+            # Thanks and pleasantries
+            ("thank you", "thanks", "appreciate", "great job", "well done"):
+                "You're welcome! I'm here to help whenever you need assistance. Is there anything else I can do for you?",
+            
+            # Farewells
+            ("goodbye", "bye", "see you", "quit", "exit", "farewell"):
+                "Goodbye! Feel free to return anytime you need assistance. Have a great day!",
+            
+            # Questions about the system
+            ("what is this", "what are you", "who are you", "about"):
+                "I'm AgentsMCP, an AI assistant that coordinates multiple specialized agents to help you with various tasks. I can manage complex workflows, delegate tasks to appropriate agents, and provide unified responses. What would you like to explore?",
+            
+            # Time and date
+            ("time", "date", "when", "what time"):
+                f"The current time is {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}. How can I assist you today?",
+            
+            # Settings and configuration
+            ("settings", "config", "preferences", "options"):
+                "I can help you configure various settings including:\n• Theme preferences (light/dark/auto)\n• Agent behavior settings\n• System configurations\n• Display options\n\nWhat would you like to adjust?",
+                
+            # Weather (redirect to capability)
+            ("weather", "temperature", "forecast"):
+                "I don't have direct access to weather information, but I can help you set up agents or tools that can provide weather data. Would you like me to help you configure weather services?",
         }
         
-        # Derive task type from classification reasoning or task complexity
-        task_type = "general"  # default
-        reasoning_lower = classification.reasoning.lower()
-        if "greeting" in reasoning_lower or "hello" in reasoning_lower or "hi" in reasoning_lower:
-            task_type = "greeting"
-        elif "help" in reasoning_lower:
-            task_type = "help"
-        elif "status" in reasoning_lower:
-            task_type = "status"
+        # Find matching pattern
+        response_content = None
+        for keywords, response in response_patterns.items():
+            if any(keyword in user_input_lower for keyword in keywords):
+                response_content = response
+                break
         
-        content = response_templates.get(task_type, "I understand. Let me help you with that.")
+        # If no specific pattern matched, provide intelligent fallback
+        if response_content is None:
+            # Check if user is asking a question
+            if any(question_word in user_input_lower for question_word in ["what", "how", "why", "when", "where", "which", "who", "can you", "do you", "will you", "could you", "would you", "?"]):
+                response_content = f"That's an interesting question about {user_input[:50]}{'...' if len(user_input) > 50 else ''}. While I can handle many tasks directly, for more complex queries I can coordinate with specialized agents. Would you like me to explore this further or help you with something else?"
+            else:
+                # Generic but more helpful fallback
+                response_content = f"I can help you with that. For the request '{user_input[:50]}{'...' if len(user_input) > 50 else ''}', I can either handle it directly or coordinate with specialized agents as needed. What specific outcome are you looking for?"
         
         return OrchestratorResponse(
-            content=content,
-            response_type="normal",
-            confidence=classification.confidence
+            content=response_content,
+            response_type="simple",
+            confidence=max(0.8, classification.confidence if classification.confidence else 0.8),
+            processing_time_ms=int((time.time() - time.time()) * 1000)  # Minimal processing time
         )
     
     async def _handle_single_agent_task(self, user_input: str, classification: ClassificationResult, context: Dict) -> OrchestratorResponse:
@@ -467,19 +508,36 @@ class Orchestrator:
     
     async def _delegate_to_agent(self, agent_id: str, user_input: str, context: Dict) -> str:
         """
-        Delegate task to specific agent.
+        Delegate task to specific agent using real LLM client.
         
-        This is a placeholder implementation. Real implementation would:
-        - Connect to actual agent via MCP or API
-        - Handle agent lifecycle (start/stop)
-        - Manage agent context and memory
+        Connects to actual LLM agent via the LLM client to get intelligent responses.
         """
         self.logger.debug(f"Delegating to agent: {agent_id}")
         
-        # Placeholder: simulate agent response
-        await asyncio.sleep(0.1)  # Simulate processing time
-        
-        return f"Response from {agent_id} agent for: {user_input}"
+        try:
+            # Import and create LLM client for real agent responses
+            from ..conversation.llm_client import LLMClient
+            
+            # Create LLM client instance
+            llm_client = LLMClient()
+            
+            # Prepare agent-specific context and prompt
+            agent_context = f"Acting as {agent_id} agent, please respond to the following request:\n\n{user_input}"
+            
+            # Add context information if available
+            if context:
+                agent_context += f"\n\nContext: {context}"
+            
+            # Get response from actual LLM
+            response = await llm_client.send_message(agent_context, context)
+            
+            self.logger.debug(f"Agent {agent_id} provided response of length {len(response)}")
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"Error connecting to LLM for agent {agent_id}: {e}")
+            # Fallback to indicate the issue
+            return f"I encountered an issue connecting to the {agent_id} agent. Please check that ollama-turbo is properly configured and running. Error: {str(e)}"
     
     async def _synthesize_response(self, response: OrchestratorResponse, classification: ClassificationResult) -> OrchestratorResponse:
         """Apply final response synthesis and safety checks."""

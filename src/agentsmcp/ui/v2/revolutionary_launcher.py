@@ -85,18 +85,24 @@ class RevolutionaryLauncher:
             Exit code (0 for success, 1 for error)
         """
         try:
+            print("🚀 Starting Revolutionary TUI Launcher")
             logger.info("🚀 Starting Revolutionary TUI Launcher")
             
             # Phase 1: Initialize feature detection
+            print("Phase 1: Initializing feature detection...")
             if not await self._initialize_feature_detection():
+                print("⚠️ Feature detection failed, falling back to basic TUI")
                 logger.warning("Feature detection failed, falling back to basic TUI")
                 return await self._launch_fallback_tui()
             
             # Phase 2: Determine optimal feature level
+            print("Phase 2: Determining feature level...")
             feature_level = await self._determine_feature_level()
+            print(f"✅ Determined feature level: {feature_level.name}")
             logger.info(f"Determined feature level: {feature_level.name}")
             
             # Phase 3: Launch appropriate TUI implementation
+            print(f"Phase 3: Launching {feature_level.name} TUI...")
             return await self._launch_tui_for_level(feature_level)
             
         except Exception as e:
@@ -205,97 +211,79 @@ class RevolutionaryLauncher:
     
     async def _launch_ultra_tui(self) -> int:
         """Launch Ultra-level TUI with all revolutionary features."""
+        print("🌟 Launching Ultra TUI with full revolutionary features")
         logger.info("🌟 Launching Ultra TUI with full revolutionary features")
         
         try:
-            # Try to load revolutionary integration layer
-            try:
-                # Try full integration layer first
-                try:
-                    from ..components.revolutionary_integration_layer import RevolutionaryIntegrationLayer
-                except ImportError:
-                    # Use simplified version if full version not available
-                    from ..components.revolutionary_integration_layer_simple import RevolutionaryIntegrationLayer
-                
-                # Try to load TUI enhancements
-                tui_enhancements = None
-                try:
-                    from ..components.revolutionary_tui_enhancements import RevolutionaryTUIEnhancements
-                    tui_enhancements = RevolutionaryTUIEnhancements()
-                    await asyncio.wait_for(tui_enhancements.initialize(), timeout=3.0)
-                    self._active_components.append(tui_enhancements)
-                except (ImportError, asyncio.TimeoutError) as e:
-                    logger.debug(f"TUI enhancements not available: {e}")
-                
-                # Create a basic event system for components that need it
-                try:
-                    from ..v2.event_system import AsyncEventSystem
-                    event_system = AsyncEventSystem()
-                except ImportError:
-                    event_system = None
-                
-                # Initialize integration layer
-                integration_layer = RevolutionaryIntegrationLayer(event_system)
-                await asyncio.wait_for(integration_layer.initialize(), timeout=2.0)
-                self._active_components.append(integration_layer)
-                
-                # Launch enhanced main app with revolutionary components
-                from .main_app import MainTUIApp
-                app = MainTUIApp(self.cli_config)
-                
-                # Inject revolutionary components if app supports them
-                if hasattr(app, 'integration_layer'):
-                    app.integration_layer = integration_layer
-                if tui_enhancements and hasattr(app, 'tui_enhancements'):
-                    app.tui_enhancements = tui_enhancements
-                
-                return await app.run()
-                
-            except (ImportError, asyncio.TimeoutError) as e:
-                # Revolutionary components not available, use enhanced mode
-                logger.info(f"Revolutionary components not available ({e}), using enhanced TUI")
-                return await self._launch_enhanced_tui()
+            # For ultra-level, use the Revolutionary TUI Interface with all features
+            print("Ultra mode: Using Revolutionary TUI Interface with all features...")
+            return await self._launch_revolutionary_tui()
             
-        except asyncio.TimeoutError:
-            logger.warning("Revolutionary component initialization timed out")
-            return await self._launch_enhanced_tui()
         except Exception as e:
+            print(f"❌ Ultra TUI launch failed: {e}")
             logger.warning(f"Ultra TUI launch failed: {e}")
+            print("Falling back to enhanced TUI...")
             return await self._launch_enhanced_tui()
     
     async def _launch_revolutionary_tui(self) -> int:
         """Launch Revolutionary-level TUI with core enhancements."""
+        print("🔥 Launching Revolutionary TUI with core enhancements")
         logger.info("🔥 Launching Revolutionary TUI with core enhancements")
         
         try:
-            # Try to load partial revolutionary features
-            try:
-                tui_enhancements = None
-                try:
-                    from ..components.revolutionary_tui_enhancements import RevolutionaryTUIEnhancements
-                    tui_enhancements = RevolutionaryTUIEnhancements()
-                    await asyncio.wait_for(tui_enhancements.initialize(), timeout=2.0)
-                    self._active_components.append(tui_enhancements)
-                except (ImportError, asyncio.TimeoutError) as e:
-                    logger.debug(f"TUI enhancements not available: {e}")
-                
-                # Launch main app with or without enhancements
-                from .main_app import MainTUIApp
-                app = MainTUIApp(self.cli_config)
-                if tui_enhancements and hasattr(app, 'tui_enhancements'):
-                    app.tui_enhancements = tui_enhancements
-                
-                return await app.run()
-                
-            except ImportError:
-                logger.info("Revolutionary components not available, using enhanced TUI")
-                return await self._launch_enhanced_tui()
+            # Import the Revolutionary TUI Interface
+            print("Importing Revolutionary TUI Interface...")
+            from .revolutionary_tui_interface import RevolutionaryTUIInterface, create_revolutionary_interface
             
-        except asyncio.TimeoutError:
-            logger.warning("Revolutionary enhancement initialization timed out")
-            return await self._launch_enhanced_tui()
+            print("Initializing Revolutionary TUI Interface...")
+            logger.info("Initializing Revolutionary TUI Interface...")
+            
+            # Try to initialize orchestrator integration
+            orchestrator_integration = None
+            try:
+                from .orchestrator_integration import initialize_orchestrator_integration
+                orchestrator_integration = await initialize_orchestrator_integration()
+            except Exception as e:
+                logger.warning(f"Orchestrator integration failed, continuing without: {e}")
+            
+            # Initialize revolutionary components
+            revolutionary_components = {}
+            try:
+                from ..components.symphony_dashboard import SymphonyDashboard
+                from ..components.ai_command_composer import AICommandComposer
+                from .event_system import AsyncEventSystem
+                
+                event_system = AsyncEventSystem()
+                await event_system.initialize()
+                revolutionary_components = {
+                    'symphony_dashboard': SymphonyDashboard(event_system),
+                    'ai_command_composer': AICommandComposer(event_system),
+                    'event_system': event_system
+                }
+                logger.info("Revolutionary components initialized successfully")
+                
+            except Exception as e:
+                logger.warning(f"Some revolutionary components failed to initialize: {e}")
+            
+            # Create the Revolutionary TUI Interface
+            revolutionary_interface = await create_revolutionary_interface(
+                cli_config=self.cli_config,
+                orchestrator_integration=orchestrator_integration,
+                revolutionary_components=revolutionary_components
+            )
+            
+            self._active_components.append(revolutionary_interface)
+            
+            logger.info("🚀 Revolutionary TUI Interface created successfully - launching...")
+            
+            # Launch the Revolutionary TUI Interface
+            return await revolutionary_interface.run()
+            
         except Exception as e:
-            logger.warning(f"Revolutionary TUI launch failed: {e}")
+            print(f"❌ Revolutionary TUI Interface launch failed: {e}")
+            logger.warning(f"Revolutionary TUI Interface launch failed: {e}")
+            print("Falling back to enhanced TUI...")
+            logger.info("Falling back to enhanced TUI...")
             return await self._launch_enhanced_tui()
     
     async def _launch_enhanced_tui(self) -> int:
@@ -303,19 +291,35 @@ class RevolutionaryLauncher:
         logger.info("✨ Launching Enhanced TUI with improved features")
         
         try:
-            # Try to use the main TUI app
+            # Try to use Revolutionary TUI Interface in enhanced mode
+            from .revolutionary_tui_interface import RevolutionaryTUIInterface, create_revolutionary_interface
+            
+            logger.info("Launching Revolutionary TUI Interface in enhanced mode...")
+            
+            # Initialize orchestrator integration
+            orchestrator_integration = None
             try:
-                from .main_app import MainTUIApp
-                app = MainTUIApp(self.cli_config)
-                return await app.run()
-            except ImportError:
-                # MainTUIApp not available, use basic launcher
-                logger.info("MainTUIApp not available, using TUI launcher")
-                from .main_app import launch_main_tui
-                return await launch_main_tui(self.cli_config)
+                from .orchestrator_integration import initialize_orchestrator_integration
+                orchestrator_integration = await initialize_orchestrator_integration()
+            except Exception as e:
+                logger.warning(f"Orchestrator integration failed: {e}")
+            
+            # Create Revolutionary interface with basic components
+            revolutionary_interface = await create_revolutionary_interface(
+                cli_config=self.cli_config,
+                orchestrator_integration=orchestrator_integration,
+                revolutionary_components={}  # Minimal components for enhanced mode
+            )
+            
+            self._active_components.append(revolutionary_interface)
+            
+            # Launch the interface
+            logger.info("Enhanced TUI (Revolutionary interface) initialized successfully")
+            return await revolutionary_interface.run()
             
         except Exception as e:
-            logger.warning(f"Enhanced TUI launch failed: {e}")
+            logger.warning(f"Enhanced TUI (Revolutionary interface) launch failed: {e}")
+            logger.info("Falling back to basic TUI...")
             return await self._launch_basic_tui()
     
     async def _launch_basic_tui(self) -> int:
@@ -323,14 +327,10 @@ class RevolutionaryLauncher:
         logger.info("🔧 Launching Basic TUI using fixed working implementation")
         
         try:
-            # First try the entry point adapter
-            try:
-                return await self.entry_adapter.launch_basic_tui(self.cli_config)
-            except:
-                # Direct fallback to fixed working TUI
-                logger.info("Using direct fallback to fixed working TUI")
-                from .fixed_working_tui import launch_fixed_working_tui
-                return await launch_fixed_working_tui()
+            # Direct fallback to fixed working TUI - skip adapter to avoid complexity
+            logger.info("Using direct fallback to fixed working TUI")
+            from .fixed_working_tui import launch_fixed_working_tui
+            return await launch_fixed_working_tui()
             
         except Exception as e:
             logger.warning(f"Basic TUI launch failed: {e}")
@@ -344,16 +344,21 @@ class RevolutionaryLauncher:
             # Use the fixed working TUI directly as last resort
             try:
                 from .fixed_working_tui import launch_fixed_working_tui
+                print("⚠️  Revolutionary TUI failed, launching fixed working TUI...")
                 return await launch_fixed_working_tui()
-            except ImportError:
-                # Even the fixed working TUI isn't available, try main_app
-                from .main_app import launch_main_tui
-                return await launch_main_tui(self.cli_config)
+            except ImportError as import_err:
+                logger.error(f"Fixed working TUI not available: {import_err}")
+                # Ultimate fallback: basic error message
+                print("❌ TUI launch failed completely. All TUI implementations unavailable.")
+                print("   Please use CLI mode with: agentsmcp --mode interactive")
+                return 1
             
         except Exception as e:
             logger.error(f"Fallback TUI launch failed: {e}")
-            # Ultimate fallback: basic error message
-            print("❌ TUI launch failed. Please use CLI mode with: agentsmcp simple \"<your message>\"")
+            # Ultimate fallback: basic error message with user guidance
+            print("❌ TUI launch failed completely due to system error.")
+            print(f"   Error: {str(e)}")
+            print("   Please use CLI mode with: agentsmcp --mode interactive")
             return 1
     
     async def shutdown(self):

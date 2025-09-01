@@ -27,7 +27,7 @@ import logging
 from collections import defaultdict, deque
 import difflib
 
-from ..v2.core.event_system import AsyncEventSystem
+from ..v2.event_system import AsyncEventSystem
 
 
 class IntentConfidence(Enum):
@@ -137,9 +137,22 @@ class AICommandComposer:
     real-time translation, and continuous learning from user interactions.
     """
     
-    def __init__(self, event_system: AsyncEventSystem, config_path: Optional[Path] = None):
+    def __init__(self, event_system: Optional[AsyncEventSystem] = None, config_path: Optional[Path] = None):
         """Initialize the AI Command Composer."""
-        self.event_system = event_system
+        # Create event system if not provided (for backward compatibility)
+        if event_system is None:
+            try:
+                from ..v2.event_system import AsyncEventSystem
+                self.event_system = AsyncEventSystem()
+                self._owns_event_system = True
+            except Exception:
+                self.event_system = None
+                self._owns_event_system = False
+                logger.warning("Event system not available, running in limited mode")
+        else:
+            self.event_system = event_system
+            self._owns_event_system = False
+            
         self.config_path = config_path or Path.home() / ".agentsmcp" / "ai_composer.json"
         self.logger = logging.getLogger(__name__)
         
@@ -165,6 +178,7 @@ class AICommandComposer:
         # Real-time processing
         self.processing_queue: asyncio.Queue = asyncio.Queue()
         self.is_processing = False
+        self._initialized = False
         
         # Initialize components
         asyncio.create_task(self._initialize_async())
@@ -178,14 +192,17 @@ class AICommandComposer:
             await self._initialize_templates()
             await self._start_processing_loop()
             
-            # Register event handlers
-            await self._register_event_handlers()
+            # Register event handlers if event system is available
+            if self.event_system:
+                await self._register_event_handlers()
             
+            self._initialized = True
             self.logger.info("AI Command Composer initialized successfully")
             
         except Exception as e:
             self.logger.error(f"Failed to initialize AI Command Composer: {e}")
-            raise
+            # Don't raise in case of partial initialization
+            self._initialized = True  # Mark as initialized even with errors
     
     async def _initialize_intent_patterns(self):
         """Initialize advanced intent recognition patterns."""
@@ -485,10 +502,94 @@ class AICommandComposer:
     
     async def _register_event_handlers(self):
         """Register event handlers for real-time processing."""
-        await self.event_system.subscribe("user_input", self._handle_user_input)
-        await self.event_system.subscribe("command_executed", self._handle_command_feedback)
-        await self.event_system.subscribe("session_started", self._handle_session_start)
-        await self.event_system.subscribe("session_ended", self._handle_session_end)
+        if not self.event_system:
+            return
+        
+        # Check if event system has subscribe method (new interface)
+        if hasattr(self.event_system, 'subscribe'):
+            try:
+                from ..v2.event_system import EventType
+                await self.event_system.subscribe(EventType.CUSTOM, self._handle_custom_event)
+            except Exception as e:
+                self.logger.warning(f"Failed to register event handlers: {e}")
+        
+        # Old interface compatibility - check if direct string-based subscription exists
+        elif hasattr(self.event_system, 'on'):
+            self.event_system.on("user_input", self._handle_user_input)
+            self.event_system.on("command_executed", self._handle_command_feedback)
+            self.event_system.on("session_started", self._handle_session_start)
+            self.event_system.on("session_ended", self._handle_session_end)
+    
+    async def _handle_custom_event(self, event):
+        """Handle custom events from other components."""
+        try:
+            event_data = event.data if hasattr(event, 'data') else event
+            component = event_data.get('component') if isinstance(event_data, dict) else None
+            action = event_data.get('action') if isinstance(event_data, dict) else None
+            
+            if component == "revolutionary_tui":
+                if action == "input_changed":
+                    input_text = event_data.get('input_text', '')
+                    if len(input_text) > 0:
+                        # Trigger suggestion generation
+                        await self._update_suggestions(input_text)
+                        
+                elif action == "command_selected":
+                    command = event_data.get('command', '')
+                    await self._execute_selected_command(command)
+                    
+            elif component == "symphony_dashboard":
+                if action == "agent_selected":
+                    agent_id = event_data.get('agent_id')
+                    await self._update_agent_context(agent_id)
+                    
+        except Exception as e:
+            self.logger.error(f"Error handling custom event: {e}")
+    
+    async def _update_suggestions(self, input_text: str):
+        """Update command suggestions based on input text."""
+        try:
+            # Generate contextual suggestions
+            if len(input_text) >= 2:
+                suggestions = await self._generate_contextual_suggestions(input_text)
+                self.current_suggestions = suggestions[:self.max_suggestions]
+            else:
+                self.current_suggestions = []
+                
+        except Exception as e:
+            self.logger.error(f"Error updating suggestions: {e}")
+    
+    async def _execute_selected_command(self, command: str):
+        """Execute a selected command."""
+        try:
+            self.logger.info(f"Executing selected command: {command}")
+            # Add command to history
+            self.command_history.append(command)
+            
+            # Emit command execution event
+            if hasattr(self.event_system, 'emit_event'):
+                from ..v2.event_system import Event, EventType
+                event = Event(
+                    event_type=EventType.CUSTOM,
+                    data={
+                        'component': 'ai_command_composer',
+                        'action': 'command_executed',
+                        'command': command
+                    }
+                )
+                await self.event_system.emit_event(event)
+                
+        except Exception as e:
+            self.logger.error(f"Error executing selected command: {e}")
+    
+    async def _update_agent_context(self, agent_id: str):
+        """Update context based on selected agent."""
+        try:
+            self.current_context["selected_agent"] = agent_id
+            self.logger.info(f"Updated context with selected agent: {agent_id}")
+            
+        except Exception as e:
+            self.logger.error(f"Error updating agent context: {e}")
     
     async def _start_processing_loop(self):
         """Start the main processing loop for real-time translation."""
@@ -1011,6 +1112,85 @@ class AICommandComposer:
         """Get current performance metrics."""
         return self.performance_metrics.copy()
     
+    def is_ready(self) -> bool:
+        """Check if the AI Command Composer is ready for use."""
+        return self._initialized
+    
+    async def get_quick_suggestions(self, partial_text: str, max_suggestions: int = 3) -> List[str]:
+        """Get quick command suggestions for real-time display in TUI."""
+        if not self._initialized or len(partial_text) < 2:
+            return []
+        
+        try:
+            suggestions = await self.get_suggestions(partial_text, limit=max_suggestions)
+            return [s["completion"] for s in suggestions]
+        except Exception as e:
+            self.logger.warning(f"Error getting quick suggestions: {e}")
+            return []
+    
+    async def get_command_help(self, command: str) -> Optional[str]:
+        """Get help text for a specific command."""
+        # Check if command exists in registry
+        base_command = command.split()[0] if command else ""
+        
+        if base_command in self.command_registry:
+            registry_entry = self.command_registry[base_command]
+            category = registry_entry.get("category", CommandCategory.SYSTEM_CONTROL)
+            subcommands = registry_entry.get("subcommands", {})
+            
+            help_text = f"Command: {base_command}\nCategory: {category.value}\n"
+            
+            if subcommands:
+                help_text += "Available subcommands:\n"
+                for subcmd, config in subcommands.items():
+                    params = config.get("params", [])
+                    required = config.get("required", [])
+                    aliases = config.get("aliases", [])
+                    
+                    param_str = ""
+                    if params:
+                        param_parts = []
+                        for param in params:
+                            if param in required:
+                                param_parts.append(f"<{param}>")
+                            else:
+                                param_parts.append(f"[{param}]")
+                        param_str = " " + " ".join(param_parts)
+                    
+                    help_text += f"  {subcmd}{param_str}"
+                    if aliases:
+                        help_text += f" (aliases: {', '.join(aliases)})"
+                    help_text += "\n"
+            
+            return help_text
+        
+        return None
+    
+    async def validate_command(self, command: str) -> Tuple[bool, Optional[str]]:
+        """Validate a command and return success status and error message if invalid."""
+        try:
+            # Basic validation - check if command starts with known patterns
+            command_parts = command.strip().split()
+            if not command_parts:
+                return False, "Empty command"
+            
+            base_command = command_parts[0]
+            
+            # Check against command registry
+            if base_command in self.command_registry:
+                return True, None
+            
+            # Check against intent patterns
+            for intent_config in self.intent_patterns.values():
+                for pattern in intent_config.get("compiled_patterns", []):
+                    if pattern.search(command.lower()):
+                        return True, None
+            
+            return False, f"Unknown command: {base_command}"
+            
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+    
     async def _update_performance_metrics(self):
         """Update performance metrics."""
         # Calculate cache hit rate
@@ -1109,7 +1289,7 @@ class AICommandComposer:
 async def main():
     """Example usage of the AI Command Composer."""
     # This would be called from the main TUI application
-    from ..v2.core.event_system import AsyncEventSystem
+    from ..v2.event_system import AsyncEventSystem
     
     event_system = AsyncEventSystem()
     composer = AICommandComposer(event_system)

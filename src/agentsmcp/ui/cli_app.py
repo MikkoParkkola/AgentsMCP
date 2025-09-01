@@ -363,22 +363,106 @@ class CLIApp:
             exit_code = await launch_revolutionary_tui(self.config)
             
             if exit_code != 0:
-                raise RuntimeError(f"Revolutionary TUI failed with exit code: {exit_code}")
+                print(f"⚠️  Revolutionary TUI exited with code: {exit_code}")
+                print("   Attempting fallback to fixed working TUI...")
+                return await self._run_fallback_tui()
             
             return exit_code
             
+        except ImportError as e:
+            print(f"⚠️  Revolutionary TUI components missing: {e}")
+            print("   Falling back to fixed working TUI...")
+            return await self._run_fallback_tui()
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
             logger.warning(f"Revolutionary TUI launch failed: {e}")
             
-            # Graceful fallback to fixed working TUI
-            print("⚠️  Revolutionary TUI unavailable, falling back to basic TUI...")
-            from .v2 import launch_main_tui
-            exit_code = await launch_main_tui(self.config)
+            print(f"⚠️  Revolutionary TUI failed: {e}")
+            print("   Falling back to fixed working TUI...")
+            return await self._run_fallback_tui()
+    
+    async def _run_fallback_tui(self):
+        """Run the basic fallback TUI when Revolutionary TUI fails."""
+        try:
+            from .v2.fixed_working_tui import launch_fixed_working_tui
+            return await launch_fixed_working_tui()
+        except ImportError as e:
+            print(f"❌ Fixed working TUI not available: {e}")
+            print("   No TUI implementation available. Switching to simple interactive mode...")
+            return await self._run_simple_interactive_mode()
+        except Exception as e:
+            print(f"❌ Fixed working TUI failed: {e}")
+            print("   No TUI implementation available. Switching to simple interactive mode...")
+            return await self._run_simple_interactive_mode()
+    
+    async def _run_simple_interactive_mode(self):
+        """Run a very basic interactive mode when TUI completely fails."""
+        print("🤖 AgentsMCP - Simple Interactive Mode")
+        print("─" * 50)
+        print("Type your message and press Enter. Type 'quit' or 'exit' to exit.")
+        print("Type 'help' for basic commands.")
+        print()
+        
+        try:
+            # Setup LLM client
+            sys.path.insert(0, '/Users/mikko/github/AgentsMCP/src')
+            from agentsmcp.conversation.llm_client import LLMClient
+            llm_client = LLMClient()
+            print(f"✅ Connected to {llm_client.provider} - {llm_client.model}")
             
-            if exit_code != 0:
-                raise RuntimeError(f"Fallback TUI failed with exit code: {exit_code}")
+        except Exception as e:
+            print(f"⚠️  LLM client failed to initialize: {e}")
+            print("   Continuing in demo mode...")
+            llm_client = None
+        
+        print()
+        
+        try:
+            while True:
+                try:
+                    user_input = input("> ").strip()
+                    
+                    if user_input.lower() in ['quit', 'exit', '/quit', '/exit']:
+                        print("👋 Goodbye!")
+                        return 0
+                    
+                    if user_input.lower() in ['help', '/help']:
+                        print("📚 Commands:")
+                        print("  help/quit/exit - Show help or exit")
+                        print("  Just type normally to chat with the LLM!")
+                        continue
+                    
+                    if not user_input:
+                        continue
+                    
+                    if llm_client:
+                        print("\n🤖 AgentsMCP:")
+                        try:
+                            response = await llm_client.chat_async([{"role": "user", "content": user_input}])
+                            print(response)
+                        except Exception as e:
+                            print(f"❌ Error: {str(e)}")
+                            print("   Please try again.")
+                    else:
+                        print(f"⚠️  LLM client unavailable. You said: \"{user_input}\"")
+                        print("   Try restarting the application to reconnect.")
+                    
+                    print()
+                    
+                except KeyboardInterrupt:
+                    print("\n👋 Goodbye!")
+                    return 0
+                except EOFError:
+                    print("\n👋 Goodbye!")
+                    return 0
+                except Exception as e:
+                    print(f"❌ Error: {str(e)}")
+                    continue
+                    
+        except Exception as e:
+            print(f"❌ Simple interactive mode failed: {str(e)}")
+            return 1
     
     async def _show_error(self, error_message: str):
         """Display error message beautifully"""

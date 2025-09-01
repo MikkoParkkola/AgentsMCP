@@ -30,7 +30,7 @@ from collections import defaultdict, deque
 import threading
 import weakref
 
-from ..v2.core.event_system import AsyncEventSystem
+from ..v2.event_system import AsyncEventSystem
 
 
 class AccessibilityCompliance(Enum):
@@ -1022,7 +1022,7 @@ class AccessibilityPerformanceEngine:
 # Example usage and integration
 async def main():
     """Example usage of Accessibility & Performance Engine."""
-    from ..v2.core.event_system import AsyncEventSystem
+    from ..v2.event_system import AsyncEventSystem
     
     event_system = AsyncEventSystem()
     engine = AccessibilityPerformanceEngine(event_system)

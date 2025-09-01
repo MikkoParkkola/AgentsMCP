@@ -26,7 +26,7 @@ import logging
 from collections import defaultdict, deque
 import time
 
-from ..v2.core.event_system import AsyncEventSystem
+from ..v2.event_system import AsyncEventSystem
 
 
 class SkillLevel(Enum):
@@ -1319,7 +1319,7 @@ class SmartOnboardingFlow:
 # Example usage and integration
 async def main():
     """Example usage of the Smart Onboarding Flow."""
-    from ..v2.core.event_system import AsyncEventSystem
+    from ..v2.event_system import AsyncEventSystem
     
     event_system = AsyncEventSystem()
     onboarding = SmartOnboardingFlow(event_system)

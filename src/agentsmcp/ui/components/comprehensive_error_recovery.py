@@ -29,7 +29,7 @@ import sys
 import inspect
 import weakref
 
-from ..v2.core.event_system import AsyncEventSystem
+from ..v2.event_system import AsyncEventSystem
 
 
 class ErrorSeverity(Enum):
@@ -1083,7 +1083,7 @@ def error_handler(component: str, auto_recover: bool = True):
 # Example usage
 async def main():
     """Example usage of Comprehensive Error Recovery."""
-    from ..v2.core.event_system import AsyncEventSystem
+    from ..v2.event_system import AsyncEventSystem
     
     event_system = AsyncEventSystem()
     recovery_system = ComprehensiveErrorRecovery(event_system)

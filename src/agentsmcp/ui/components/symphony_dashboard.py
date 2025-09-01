@@ -835,6 +835,47 @@ class SymphonyDashboard:
                         "task_completed"
                     )
     
+    def get_current_state(self) -> Dict[str, Any]:
+        """Get current dashboard state for external rendering."""
+        return {
+            "active": self.active,
+            "current_view": self.current_view,
+            "agent_count": len(self.agents),
+            "task_count": len(self.tasks),
+            "selected_agent": self.selected_agent_id,
+            "selected_task": self.selected_task_id,
+            "regions": {
+                name: {
+                    "content": region.content,
+                    "title": region.title,
+                    "x": region.x,
+                    "y": region.y,
+                    "width": region.width,
+                    "height": region.height
+                }
+                for name, region in self.regions.items()
+            },
+            "agents": {
+                agent_id: {
+                    "name": agent.name,
+                    "state": agent.state.value,
+                    "model": agent.model,
+                    "current_task": agent.current_task
+                }
+                for agent_id, agent in self.agents.items()
+            },
+            "tasks": {
+                task_id: {
+                    "title": task.title,
+                    "status": task.status.value,
+                    "progress": task.progress,
+                    "assigned_agent": task.assigned_agent_id
+                }
+                for task_id, task in self.tasks.items()
+            },
+            "animation_frame": self.animation_frame
+        }
+
     def get_performance_stats(self) -> Dict[str, Any]:
         """Get dashboard performance statistics."""
         avg_frame_time = sum(self.frame_times) / len(self.frame_times) if self.frame_times else 0
