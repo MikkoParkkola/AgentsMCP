@@ -494,6 +494,11 @@ class ReliableTUIInterface:
         self._shutdown_requested = True
         
         try:
+            # First, set the running flag to False on original TUI to stop its loops
+            if self._original_tui:
+                self._original_tui.running = False
+                logger.debug("Set original TUI running flag to False")
+                
             # Stop health monitoring
             if self._health_monitor:
                 await self._health_monitor.stop_monitoring()
@@ -535,9 +540,6 @@ class ReliableTUIInterface:
             0 on successful completion, 1 on error
         """
         logger.info("Starting ReliableTUIInterface.run() with reliability guarantees")
-        
-        # Flag to track if we should run cleanup in finally block
-        should_cleanup = True
         
         try:
             # Start the TUI with reliability protection
@@ -610,6 +612,7 @@ class ReliableTUIInterface:
                     
         except KeyboardInterrupt:
             logger.info("TUI interrupted by user")
+            self._shutdown_requested = True
             return 0
             
         except Exception as e:
@@ -618,21 +621,25 @@ class ReliableTUIInterface:
             return 1
             
         finally:
-            # CRITICAL: Only run cleanup if we actually need to shutdown
-            # This prevents premature shutdown when the TUI should still be running
-            if should_cleanup:
+            # CRITICAL FIX: Only run cleanup if shutdown was actually requested
+            # This prevents Guardian shutdown when the TUI should still be running
+            if self._shutdown_requested:
                 try:
+                    logger.info("Shutdown was requested - performing cleanup")
                     await self.stop()
                 except Exception as e:
                     logger.error(f"Error during TUI shutdown: {e}")
+            else:
+                logger.info("Finally block reached without shutdown request - skipping stop() to prevent Guardian shutdown")
     
     async def _wait_for_tui_completion(self):
         """
         Wait for the TUI to complete execution, mirroring the original TUI's pattern.
         
-        The original TUI's run() method creates background tasks and waits for them
-        to complete using asyncio.wait(). This method replicates that behavior
-        to ensure we don't return until the user actually exits the TUI.
+        The original TUI's _run_main_loop() creates background tasks (input_loop, periodic_update)
+        and waits for them to complete using asyncio.wait() with FIRST_COMPLETED.
+        This method replicates that exact pattern to ensure we don't return until 
+        the user actually exits the TUI.
         """
         if not self._original_tui:
             logger.error("Cannot wait for TUI completion - TUI not initialized")
@@ -641,23 +648,63 @@ class ReliableTUIInterface:
         logger.info("Waiting for TUI completion (until user exits)...")
         
         try:
-            # The key insight: we need to wait for the same condition the original TUI waits for
-            # The original TUI waits for its background tasks (input_loop, periodic_update) to complete
-            
             # If we're in fallback mode, the original TUI's run() method handles everything
             if self._fallback_mode:
                 # This should not be reached in fallback mode, but handle gracefully
                 logger.warning("_wait_for_tui_completion called in fallback mode - this should not happen")
                 return
                 
-            # In reliability mode, we need to wait for the TUI's main loop to actually complete
-            # The original TUI's _run_main_loop() creates tasks and waits for them
+            # CRITICAL FIX: Replicate the exact pattern from original TUI's _run_main_loop()
+            # Create the same background tasks that the original TUI creates and wait for them
             
-            # Start the main loop which will wait for user input/exit
-            await self.run_main_loop()
+            logger.info("⚙️ Creating event-driven background tasks like original TUI...")
+            
+            # Create the same tasks as the original TUI
+            input_task = asyncio.create_task(self._original_tui._input_loop())
+            periodic_update_task = asyncio.create_task(self._original_tui._periodic_update_trigger())
+            
+            logger.info("🎯 Event-driven background tasks created, waiting for completion...")
+            
+            # Use the same waiting pattern as the original TUI
+            # Wait for any task to complete (usually from user interruption/exit)
+            done, pending = await asyncio.wait(
+                [input_task, periodic_update_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            logger.info(f"Wait completed - {len(done)} tasks done, {len(pending)} pending")
+            
+            # Log which task completed first (same as original)
+            for task in done:
+                task_name = "unknown"
+                if task is input_task:
+                    task_name = "input_task"
+                elif task is periodic_update_task:
+                    task_name = "periodic_update_task"
+                
+                logger.info(f"Task completed first: {task_name}")
+                try:
+                    result = task.result()
+                    logger.debug(f"Task {task_name} result: {result}")
+                except Exception as e:
+                    logger.error(f"Task {task_name} failed: {e}")
+            
+            # Cancel remaining tasks (same as original)
+            for task in pending:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+            
+            logger.info("TUI completion wait finished - user has exited")
+            # Mark shutdown as requested since user has exited
+            self._shutdown_requested = True
             
         except Exception as e:
             logger.error(f"Error waiting for TUI completion: {e}")
+            # If there's an error, still mark shutdown as requested to prevent Guardian issues
+            self._shutdown_requested = True
             raise
             
     # Property access delegation
