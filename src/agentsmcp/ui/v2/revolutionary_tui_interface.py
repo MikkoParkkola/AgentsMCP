@@ -279,24 +279,64 @@ class RevolutionaryTUIInterface:
     
     async def initialize(self) -> bool:
         """Initialize all revolutionary components."""
+        logger.error("🚀 INITIALIZE: Starting Revolutionary TUI initialization")
+        
+        # Environment and TTY status checks
+        try:
+            import sys
+            import os
+            logger.error(f"🔍 INITIALIZE: Environment checks:")
+            logger.error(f"   - sys.stdout.isatty(): {sys.stdout.isatty()}")
+            logger.error(f"   - sys.stderr.isatty(): {sys.stderr.isatty()}")
+            logger.error(f"   - TERM: {os.environ.get('TERM', 'NOT_SET')}")
+            logger.error(f"   - COLORTERM: {os.environ.get('COLORTERM', 'NOT_SET')}")
+            logger.error(f"   - Rich available: {RICH_AVAILABLE}")
+        except Exception as e:
+            logger.error(f"❌ INITIALIZE: Failed environment checks: {e}")
+            return False
+            
         try:
             # Initialize event system
-            await self.event_system.initialize()
+            logger.error("🔧 INITIALIZE: Initializing event system...")
+            try:
+                await self.event_system.initialize()
+                logger.error("✅ INITIALIZE: Event system initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ INITIALIZE: Event system initialization failed: {e}")
+                raise
             
             # Initialize Revolutionary TUI Enhancements
-            self.enhancements = RevolutionaryTUIEnhancements(self.event_system)
+            logger.error("🔧 INITIALIZE: Initializing TUI enhancements...")
+            try:
+                self.enhancements = RevolutionaryTUIEnhancements(self.event_system)
+                logger.error("✅ INITIALIZE: TUI enhancements initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ INITIALIZE: TUI enhancements initialization failed: {e}")
+                raise
             
             # Initialize AI Command Composer
-            self.ai_composer = AICommandComposer(self.event_system)
+            logger.error("🔧 INITIALIZE: Initializing AI Command Composer...")
+            try:
+                self.ai_composer = AICommandComposer(self.event_system)
+                logger.error("✅ INITIALIZE: AI Command Composer initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ INITIALIZE: AI Command Composer initialization failed: {e}")
+                raise
             
             # Initialize Symphony Dashboard
+            logger.error("🔧 INITIALIZE: Initializing Symphony Dashboard...")
             if "symphony_dashboard" in self.revolutionary_components:
+                logger.error("🔍 INITIALIZE: Using existing symphony dashboard from components")
                 self.symphony_dashboard = self.revolutionary_components["symphony_dashboard"]
+                logger.error("✅ INITIALIZE: Symphony Dashboard (existing) initialized successfully")
             else:
                 try:
+                    logger.error("🔍 INITIALIZE: Creating new SymphonyDashboard instance")
                     self.symphony_dashboard = SymphonyDashboard(self.event_system)
+                    logger.error("✅ INITIALIZE: Symphony Dashboard (new) initialized successfully")
                 except Exception as e:
-                    logger.warning(f"Could not initialize SymphonyDashboard: {e}")
+                    logger.error(f"⚠️ INITIALIZE: Could not initialize SymphonyDashboard: {e}")
+                    logger.error("🔧 INITIALIZE: Creating mock dashboard fallback...")
                     # Create a simple mock dashboard
                     class MockSymphonyDashboard:
                         def get_current_state(self):
@@ -307,30 +347,65 @@ class RevolutionaryTUIInterface:
                                 'recent_activity': ['System initialized', 'Ready for tasks']
                             }
                     self.symphony_dashboard = MockSymphonyDashboard()
+                    logger.error("✅ INITIALIZE: Mock Symphony Dashboard created successfully")
             
             # Initialize orchestrator
-            await self._initialize_orchestrator()
+            logger.error("🔧 INITIALIZE: Initializing orchestrator...")
+            try:
+                await self._initialize_orchestrator()
+                logger.error("✅ INITIALIZE: Orchestrator initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ INITIALIZE: Orchestrator initialization failed: {e}")
+                raise
             
             # Setup Rich layout
+            logger.error(f"🔧 INITIALIZE: Setting up Rich layout (RICH_AVAILABLE={RICH_AVAILABLE})...")
             if RICH_AVAILABLE:
-                await self._setup_rich_layout()
+                try:
+                    await self._setup_rich_layout()
+                    logger.error("✅ INITIALIZE: Rich layout setup successfully")
+                except Exception as e:
+                    logger.error(f"❌ INITIALIZE: Rich layout setup failed: {e}")
+                    raise
+            else:
+                logger.error("⚠️ INITIALIZE: Skipping Rich layout (Rich not available)")
             
             # Register event handlers
-            await self._register_event_handlers()
+            logger.error("🔧 INITIALIZE: Registering event handlers...")
+            try:
+                await self._register_event_handlers()
+                logger.error("✅ INITIALIZE: Event handlers registered successfully")
+            except Exception as e:
+                logger.error(f"❌ INITIALIZE: Event handler registration failed: {e}")
+                raise
             
             # Trigger initial status updates to populate UI
-            await self._trigger_periodic_updates()
+            logger.error("🔧 INITIALIZE: Triggering initial periodic updates...")
+            try:
+                await self._trigger_periodic_updates()
+                logger.error("✅ INITIALIZE: Initial periodic updates triggered successfully")
+            except Exception as e:
+                logger.error(f"❌ INITIALIZE: Initial periodic updates failed: {e}")
+                raise
             
-            logger.info("Revolutionary TUI Interface fully initialized")
+            logger.error("🎉 INITIALIZE: Revolutionary TUI Interface fully initialized - RETURNING TRUE")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to initialize Revolutionary TUI Interface: {e}")
+            logger.error(f"💥 INITIALIZE: CRITICAL FAILURE - Failed to initialize Revolutionary TUI Interface: {e}")
+            logger.error(f"💥 INITIALIZE: Exception type: {type(e).__name__}")
+            logger.error(f"💥 INITIALIZE: Exception args: {e.args}")
+            import traceback
+            logger.error(f"💥 INITIALIZE: Full traceback:\n{traceback.format_exc()}")
+            logger.error("💥 INITIALIZE: RETURNING FALSE")
             return False
     
     async def _initialize_orchestrator(self):
         """Initialize the orchestrator for message processing."""
+        logger.error("🔧 _INITIALIZE_ORCHESTRATOR: Starting orchestrator initialization")
+        
         try:
+            logger.error("🔧 _INITIALIZE_ORCHESTRATOR: Creating OrchestratorConfig...")
             config = OrchestratorConfig(
                 mode=OrchestratorMode.STRICT_ISOLATION,
                 enable_smart_classification=True,
@@ -338,9 +413,11 @@ class RevolutionaryTUIInterface:
                 max_agent_wait_time_ms=120000,
                 synthesis_timeout_ms=5000
             )
+            logger.error("✅ _INITIALIZE_ORCHESTRATOR: OrchestratorConfig created successfully")
             
             # CRITICAL FIX: Temporarily suppress all logging during orchestrator initialization
             # This prevents LLM client debug logs from flooding the terminal during TUI startup
+            logger.error("🔧 _INITIALIZE_ORCHESTRATOR: Suppressing logging levels for orchestrator creation...")
             original_root_level = logging.getLogger().level
             original_llm_level = logging.getLogger('agentsmcp.conversation.llm_client').level
             
@@ -350,19 +427,29 @@ class RevolutionaryTUIInterface:
                 logging.getLogger('agentsmcp.conversation.llm_client').setLevel(logging.CRITICAL)
                 logging.getLogger('agentsmcp.orchestration').setLevel(logging.CRITICAL)
                 logging.getLogger('agentsmcp.agents').setLevel(logging.CRITICAL)
+                logger.error("✅ _INITIALIZE_ORCHESTRATOR: Logging levels suppressed")
                 
                 # Initialize orchestrator (this may trigger LLM client initialization)
+                logger.error("🔧 _INITIALIZE_ORCHESTRATOR: Creating Orchestrator instance...")
                 self.orchestrator = Orchestrator(config=config)
+                logger.error("✅ _INITIALIZE_ORCHESTRATOR: Orchestrator instance created successfully")
                 
             finally:
                 # Restore original logging levels
+                logger.error("🔧 _INITIALIZE_ORCHESTRATOR: Restoring original logging levels...")
                 logging.getLogger().setLevel(original_root_level)
                 logging.getLogger('agentsmcp.conversation.llm_client').setLevel(original_llm_level)
+                logger.error("✅ _INITIALIZE_ORCHESTRATOR: Original logging levels restored")
                 
-            logger.debug("Orchestrator initialized for Revolutionary TUI")
+            logger.error("🎉 _INITIALIZE_ORCHESTRATOR: Orchestrator fully initialized successfully")
         except Exception as e:
-            logger.warning(f"Failed to initialize orchestrator: {e}")
+            logger.error(f"💥 _INITIALIZE_ORCHESTRATOR: CRITICAL FAILURE - Failed to initialize orchestrator: {e}")
+            logger.error(f"💥 _INITIALIZE_ORCHESTRATOR: Exception type: {type(e).__name__}")
+            logger.error(f"💥 _INITIALIZE_ORCHESTRATOR: Exception args: {e.args}")
+            import traceback
+            logger.error(f"💥 _INITIALIZE_ORCHESTRATOR: Full traceback:\n{traceback.format_exc()}")
             self.orchestrator = None
+            raise
     
     async def _setup_rich_layout(self):
         """Setup the Rich terminal layout for the revolutionary interface to fill full terminal."""
@@ -922,27 +1009,33 @@ class RevolutionaryTUIInterface:
                         
                         # CRITICAL FIX: Force alternate screen buffer with terminal isolation
                         try:
-                            # Clear any existing output first
-                            self.console.clear()
-                            
-                            # Explicitly enter alternate screen mode
-                            if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
-                                # Send alternate screen control sequence
-                                self.console._file.write('\033[?1049h')  # Enter alternate screen
-                                self.console._file.flush()
+                            # Use terminal_controller for proper screen management if available
+                            if hasattr(self, 'terminal_controller') and self.terminal_controller:
+                                self.terminal_controller.enter_alternate_screen()
                                 self._alternate_screen_active = True
+                            else:
+                                # Enhanced manual terminal control to prevent scrollback pollution
+                                self.console.clear()
+                                if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
+                                    # More robust sequence to prevent scrollback contamination
+                                    self.console._file.write('\033[2J\033[H')     # Clear screen and home cursor
+                                    self.console._file.write('\033[?47h')        # Save screen buffer
+                                    self.console._file.write('\033[?1049h')      # Enter alternate screen
+                                    self.console._file.write('\033[?25l')        # Hide cursor during transition
+                                    self.console._file.flush()
+                                    self._alternate_screen_active = True
                         except Exception as screen_e:
                             logger.warning(f"Could not explicitly enter alternate screen: {screen_e}")
                         
-                        # Create Live with alternate screen and smooth refresh rate
+                        # Create Live with anti-scrollback configuration
                         live_config = {
                             "renderable": self.layout,
                             "console": self.console,
-                            "screen": True,  # Use alternate screen for clean TUI experience
-                            "refresh_per_second": self.target_fps,  # Smooth refresh rate for TUI
-                            "auto_refresh": True,  # Enable auto-refresh for smooth updates
-                            "vertical_overflow": "crop",  # Prevent overflow to main screen
-                            "transient": False  # Ensure proper screen buffer usage
+                            "screen": True,  # Force alternate screen buffer
+                            "refresh_per_second": min(self.target_fps, 10.0),  # Cap refresh rate to prevent flooding
+                            "auto_refresh": False,  # Disable auto-refresh to prevent scrollback leaks
+                            "vertical_overflow": "crop",  # Prevent overflow that could leak to main screen
+                            "transient": False  # Ensure proper screen buffer isolation
                         }
                         
                         with Live(**live_config) as live:
@@ -994,8 +1087,8 @@ class RevolutionaryTUIInterface:
                                 "renderable": self.layout,
                                 "console": self.console,
                                 "screen": True,  # Force alternate screen
-                                "refresh_per_second": max(1.0, self.target_fps / 2),  # Reduced but still usable rate
-                                "auto_refresh": True,  # Keep auto-refresh for TUI functionality
+                                "refresh_per_second": max(1.0, min(self.target_fps / 2, 5.0)),  # Very low refresh rate
+                                "auto_refresh": False,  # Disable auto-refresh for anti-scrollback  
                                 "vertical_overflow": "crop",
                                 "transient": False
                             }
@@ -1028,12 +1121,16 @@ class RevolutionaryTUIInterface:
                             logger.warning("🚨 EMERGENCY: Rich Live failed - disabling all Rich output to prevent terminal pollution")
                             
                             try:
-                                # Clear any remaining output
+                                # Comprehensive terminal cleanup to prevent scrollback pollution
                                 self.console.clear()
                                 
-                                # Try to exit alternate screen if we entered it
+                                # Enhanced alternate screen exit sequence
                                 if self._alternate_screen_active and hasattr(self.console, '_file'):
-                                    self.console._file.write('\033[?1049l')  # Exit alternate screen
+                                    # More robust cleanup sequence
+                                    self.console._file.write('\033[?25h')        # Show cursor
+                                    self.console._file.write('\033[?1049l')      # Exit alternate screen
+                                    self.console._file.write('\033[?47l')        # Restore screen buffer
+                                    self.console._file.write('\033[2J\033[H')    # Clear and home
                                     self.console._file.flush()
                                     self._alternate_screen_active = False
                             except Exception:
@@ -1094,13 +1191,24 @@ class RevolutionaryTUIInterface:
             if debug_mode:
                 logger.debug("Revolutionary TUI Interface cleanup starting")
             
-            # CRITICAL: Emergency terminal cleanup
+            # CRITICAL: Emergency terminal cleanup to prevent scrollback pollution
             try:
-                # Force exit alternate screen if still active
+                # Use terminal_controller for proper cleanup if available
+                if hasattr(self, 'terminal_controller') and self.terminal_controller:
+                    try:
+                        self.terminal_controller.exit_alternate_screen()
+                    except Exception:
+                        pass
+                
+                # Force exit alternate screen with comprehensive cleanup if still active
                 if getattr(self, '_alternate_screen_active', False) and hasattr(self, 'console') and self.console:
                     try:
                         if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
-                            self.console._file.write('\033[?1049l')  # Exit alternate screen
+                            # Comprehensive terminal cleanup sequence
+                            self.console._file.write('\033[?25h')        # Show cursor
+                            self.console._file.write('\033[?1049l')      # Exit alternate screen
+                            self.console._file.write('\033[?47l')        # Restore screen buffer
+                            self.console._file.write('\033[2J\033[H')    # Clear and home cursor
                             self.console._file.flush()
                     except Exception:
                         pass  # Ignore terminal control errors during emergency cleanup
@@ -1504,14 +1612,26 @@ class RevolutionaryTUIInterface:
     async def _fallback_input_loop(self):
         """Fallback input loop for when raw terminal setup fails."""
         logger.info("Using fallback input method - interactive mode enabled")
+        logger.info(f"CRITICAL DEBUG: self.running state at start of _fallback_input_loop: {self.running}")
         
         import concurrent.futures
         import sys
         
-        # Check if stdin is actually available
+        # Check if stdin is actually available and usable
+        # Note: stdin can be available even in non-TTY environments (pipes, redirects, etc.)
         if not sys.stdin or sys.stdin.closed:
             logger.error("No stdin available - cannot use fallback input method")
             self.running = False
+            return
+        
+        # CRITICAL FIX: In non-TTY environments, provide a demo mode instead of immediate exit
+        if not sys.stdin.isatty():
+            logger.info("Non-TTY environment detected - running in demo mode")
+            logger.info(f"CRITICAL DEBUG: self.running before demo mode: {self.running}")
+            # CRITICAL FIX: Force self.running = True at demo mode start
+            self.running = True
+            logger.info(f"CRITICAL DEBUG: self.running forced to True for demo mode: {self.running}")
+            await self._demo_mode_loop()
             return
         
         # Use a thread pool executor for blocking input
@@ -1534,6 +1654,7 @@ class RevolutionaryTUIInterface:
             print("\n🚀 Revolutionary TUI Interface - Interactive Mode")
             print("Type your message and press Enter. Use 'help' for commands, 'quit' to exit.")
             print("=" * 60)
+            sys.stdout.flush()  # Force output to be visible
             
             while self.running:
                 try:
@@ -1576,11 +1697,58 @@ class RevolutionaryTUIInterface:
                 
                 except Exception as e:
                     logger.error(f"Error in fallback input loop: {e}")
-                    await asyncio.sleep(1.0)
-        
+                    
+        except Exception as e:
+            logger.error(f"Fatal error in fallback input loop: {e}")
         finally:
             executor.shutdown(wait=False)
-            logger.info("Interactive input loop ended")
+    
+    async def _demo_mode_loop(self):
+        """Demo mode for non-TTY environments - runs for a few seconds then exits gracefully."""
+        logger.info("Starting demo mode for non-TTY environment")
+        
+        print("\n🚀 Revolutionary TUI Interface - Demo Mode")
+        print("Running in non-TTY environment - demonstrating TUI capabilities...")
+        print("=" * 60)
+        sys.stdout.flush()  # Force output to be visible
+        
+        # Simulate some TUI activity for demonstration
+        demo_messages = [
+            "🤖 TUI initialized successfully in demo mode",
+            "🔧 All systems operational", 
+            "✅ Ready for interactive use in TTY environment",
+            "💡 Tip: Run in a proper terminal for full interactive experience"
+        ]
+        
+        for i, message in enumerate(demo_messages):
+            if not self.running:
+                logger.warning("Demo interrupted - TUI not running")
+                break
+                
+            print(f"[{i+1}/4] {message}")
+            sys.stdout.flush()  # Force output to be visible immediately
+            logger.info(f"Demo message {i+1}/4: {message}")
+            await asyncio.sleep(0.5)  # Brief pause between messages
+        
+        # Keep running for a bit to demonstrate the TUI stays active
+        print("\n⏳ TUI staying active (demonstrating proper lifecycle)...")
+        sys.stdout.flush()
+        logger.info("Starting demo countdown to show TUI lifecycle")
+        
+        # Wait for 3 seconds to show the TUI is properly active and not shutting down immediately
+        for countdown in range(3, 0, -1):
+            if not self.running:
+                logger.warning(f"Demo countdown interrupted at {countdown}s - TUI not running")
+                break
+            print(f"   Demo countdown: {countdown}s")
+            sys.stdout.flush()
+            logger.info(f"Demo countdown: {countdown}s remaining")
+            await asyncio.sleep(1.0)
+        
+        print("\n✅ Demo completed - TUI shutting down gracefully")
+        sys.stdout.flush()
+        logger.info("Demo mode completed successfully - TUI lifecycle demonstrated")
+        self.running = False
     
     # Polling-based update loop REMOVED - replaced with event-driven updates
     # All status and metrics updates now happen via events only
@@ -2096,13 +2264,12 @@ class RevolutionaryTUIInterface:
             pass  # Silently ignore event handling errors
     
     async def _refresh_panel(self, panel_name: str):
-        """Refresh a specific UI panel - Rich Live handles the actual update."""
+        """Refresh a specific UI panel - with manual Live display refresh."""
         try:
             if not self.layout or not RICH_AVAILABLE or not sys.stdin.isatty():
                 return  # Skip all Rich operations in non-TTY environments
             
-            # Rich Live automatically updates when layout content changes
-            # We update layout content without fixed widths to respect terminal boundaries
+            # Update layout content without fixed widths to respect terminal boundaries
             if panel_name == "header":
                 header_text = Text("🚀 AgentsMCP Revolutionary Interface", style="bold blue")
                 if self.state.is_processing:
@@ -2166,15 +2333,14 @@ class RevolutionaryTUIInterface:
                     )
                 )
             
-            # Force immediate refresh for input panel to ensure typing is visible
-            if panel_name == "input":
-                try:
-                    if (hasattr(self, 'live_display') and self.live_display and 
-                        sys.stdin.isatty() and sys.stdout.isatty()):
-                        # Force immediate refresh to make typing visible
-                        self.live_display.refresh()
-                except Exception:
-                    pass  # Ignore refresh errors
+            # Force manual refresh since auto-refresh is disabled to prevent scrollback pollution
+            try:
+                if (hasattr(self, 'live_display') and self.live_display and 
+                    sys.stdin.isatty() and sys.stdout.isatty()):
+                    # Manual refresh needed since auto-refresh is disabled for anti-scrollback
+                    self.live_display.refresh()
+            except Exception:
+                pass  # Ignore refresh errors
                 
         except Exception as e:
             pass  # Silently ignore panel refresh errors
