@@ -1,0 +1,56 @@
+"""
+Reliability Package - Critical TUI reliability and timeout protection modules.
+
+This package provides the essential components to prevent TUI hangs and ensure
+reliable startup and operation of the Revolutionary TUI Interface.
+
+Key Modules:
+- startup_orchestrator: Guarantees TUI startup within 10 seconds with fallback modes
+- timeout_guardian: Wraps all async operations with guaranteed cancellation
+
+The primary goal is to eliminate the current issue where the TUI hangs completely
+after "Initializing Revolutionary TUI Interface..." and becomes unresponsive.
+"""
+
+from .startup_orchestrator import (
+    StartupOrchestrator,
+    StartupResult, 
+    StartupPhase,
+    StartupConfig,
+    coordinate_tui_startup,
+    create_startup_config
+)
+
+from .timeout_guardian import (
+    TimeoutGuardian,
+    TimeoutState,
+    OperationContext,
+    get_global_guardian,
+    timeout_protection,
+    timeout_protected,
+    protect_coro
+)
+
+__all__ = [
+    # Startup orchestration
+    'StartupOrchestrator',
+    'StartupResult',
+    'StartupPhase', 
+    'StartupConfig',
+    'coordinate_tui_startup',
+    'create_startup_config',
+    
+    # Timeout protection
+    'TimeoutGuardian',
+    'TimeoutState',
+    'OperationContext', 
+    'get_global_guardian',
+    'timeout_protection',
+    'timeout_protected',
+    'protect_coro'
+]
+
+# Version info
+__version__ = "1.0.0"
+__author__ = "reliability_architect_c1"
+__description__ = "Critical TUI reliability and timeout protection"
