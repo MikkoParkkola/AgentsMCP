@@ -106,8 +106,34 @@ class RevolutionaryTUIInterface:
         self.ai_composer: Optional[AICommandComposer] = None
         self.symphony_dashboard: Optional[SymphonyDashboard] = None
         
-        # Rich terminal setup
-        self.console = Console() if RICH_AVAILABLE else None
+        # Rich terminal setup with proper width detection and constraints
+        if RICH_AVAILABLE:
+            # Get terminal width with fallbacks and reasonable limits
+            try:
+                term_width = shutil.get_terminal_size().columns
+            except:
+                term_width = 80
+                
+            # Constrain to reasonable limits to prevent overflow
+            max_width = min(120, max(80, term_width - 2))  # Leave margin for borders
+            
+            # Initialize console with width constraints and explicit alternate screen support
+            self.console = Console(
+                width=max_width,
+                force_terminal=True,
+                legacy_windows=False,
+                # Force proper terminal control for alternate screen
+                file=sys.stdout,
+                stderr=False,
+                # Ensure no output leaks to scrollback
+                quiet=False,
+                # Enable proper alternate screen buffer handling
+                soft_wrap=False
+            )
+            self.max_panel_width = max_width - 4  # Account for panel borders
+        else:
+            self.console = None
+            self.max_panel_width = 76
         self.layout = None
         self.live_display = None
         
@@ -116,12 +142,16 @@ class RevolutionaryTUIInterface:
         self.input_history = deque(maxlen=100)
         self.history_index = -1
         
-        # Performance and animation - Optimized for smooth responsive UI
-        # Balanced for performance while maintaining smooth user experience
+        # Performance and animation - CRITICAL: Reduced to prevent terminal flooding
+        # EMERGENCY: Lower refresh rates to prevent scrollback pollution
         self.last_render_time = 0.0
         self.frame_count = 0
-        self.target_fps = 15.0  # Smooth refresh rate: 15 FPS for responsive feel
-        self.max_fps = 30.0  # Reasonable cap to balance performance and responsiveness
+        self.target_fps = 5.0   # EMERGENCY: Reduced from 15 to 5 FPS to prevent flooding
+        self.max_fps = 10.0     # EMERGENCY: Reduced from 30 to 10 FPS maximum
+        
+        # Terminal control flags
+        self._alternate_screen_active = False
+        self._terminal_pollution_detected = False
         
         # Layout initialized flag
         self._layout_initialized = False
@@ -259,7 +289,9 @@ class RevolutionaryTUIInterface:
                 Panel(
                     Align.center(header_text),
                     box=box.ROUNDED,
-                    style="bright_blue"
+                    style="bright_blue",
+                    width=self.max_panel_width,
+                    expand=False
                 )
             )
             
@@ -270,7 +302,9 @@ class RevolutionaryTUIInterface:
                     status_content,
                     title="Agent Status",
                     box=box.ROUNDED,
-                    style="green"
+                    style="green",
+                    width=self.max_panel_width // 4,  # Sidebar panel
+                    expand=False
                 )
             )
             
@@ -281,7 +315,9 @@ class RevolutionaryTUIInterface:
                     dashboard_content,
                     title="Symphony Dashboard",
                     box=box.ROUNDED,
-                    style="magenta"
+                    style="magenta",
+                    width=self.max_panel_width // 4,  # Sidebar panel
+                    expand=False
                 )
             )
             
@@ -292,7 +328,9 @@ class RevolutionaryTUIInterface:
                     chat_content,
                     title="Conversation",
                     box=box.ROUNDED,
-                    style="white"
+                    style="white",
+                    width=self.max_panel_width * 3 // 4,  # Main content panel
+                    expand=False
                 )
             )
             
@@ -303,7 +341,9 @@ class RevolutionaryTUIInterface:
                     input_content,
                     title="AI Command Composer",
                     box=box.ROUNDED,
-                    style="cyan"
+                    style="cyan",
+                    width=self.max_panel_width * 3 // 4,  # Main content panel
+                    expand=False
                 )
             )
             
@@ -313,26 +353,31 @@ class RevolutionaryTUIInterface:
                 Panel(
                     footer_content,
                     box=box.ROUNDED,
-                    style="dim"
+                    style="dim",
+                    width=self.max_panel_width,
+                    expand=False
                 )
             )
             
         except Exception as e:
             logger.warning(f"Error initializing layout panels: {e}")
     
-    def _create_status_panel(self) -> str:
+    def _create_status_panel(self) -> Text:
         """Create the agent status panel content."""
         if not self.state.agent_status:
-            return "🔄 Init • 📊 Loading"
+            return Text("🔄 Init • 📊 Loading", overflow="ellipsis")
         
-        content = []
+        # Create Rich Text with wrapping enabled
+        text = Text(overflow="ellipsis")
         
         # Agent status - ultra compact display
         for agent_name, status in self.state.agent_status.items():
             status_icon = "🟢" if status == "active" else "🔴" if status == "error" else "🟡"
             # Shorten agent names for compact display
             short_name = agent_name.replace("_", "").replace("orchestrator", "orch").replace("symphony_dashboard", "dash").replace("tui_enhancements", "ui").replace("ai_composer", "ai")
-            content.append(f"{status_icon} {short_name}: {status}")
+            # Limit line length to prevent overflow
+            line = f"{status_icon} {short_name}: {status}"[:18] + ("..." if len(f"{status_icon} {short_name}: {status}") > 18 else "")
+            text.append(line + "\n")
         
         # System metrics - ultra compact display on fewer lines
         if self.state.system_metrics:
@@ -342,13 +387,14 @@ class RevolutionaryTUIInterface:
             cpu = self.state.system_metrics.get('cpu_percent', 0)
             tasks = self.state.system_metrics.get('active_tasks', 0)
             
-            content.append(f"📊 FPS:{fps} • RAM:{memory:.0f}MB")
-            content.append(f"⚡ CPU:{cpu:.0f}% • Tasks:{tasks}")
+            # Limit line length to prevent overflow
+            metrics_line1 = f"📊 FPS:{fps} • RAM:{memory:.0f}MB"[:18]
+            metrics_line2 = f"⚡ CPU:{cpu:.0f}% • Tasks:{tasks}"[:18]
+            text.append(metrics_line1 + "\n" + metrics_line2)
         
-        # Keep all content lines to maintain consistent panel structure
-        return "\n".join(content)
+        return text
     
-    async def _create_dashboard_panel(self) -> str:
+    async def _create_dashboard_panel(self) -> Text:
         """Create the Symphony dashboard panel content."""
         try:
             if self.symphony_dashboard:
@@ -368,40 +414,43 @@ class RevolutionaryTUIInterface:
                         'recent_activity': ['Task completed', 'New agent spawned', 'System optimized']
                     }
                 
-                content = []
+                # Create Rich Text with wrapping enabled
+                text = Text(overflow="ellipsis")
+                
                 # Ultra compact header and metrics
                 agents = dashboard_data.get('active_agents', 0)
                 tasks = dashboard_data.get('running_tasks', 0)
                 success = dashboard_data.get('success_rate', 0)
                 
-                content.append(f"🎼 Agents:{agents} Tasks:{tasks}")
-                content.append(f"✅ Success:{success:.0f}%")
+                # Limit line length to prevent overflow
+                line1 = f"🎼 Agents:{agents} Tasks:{tasks}"[:18]
+                line2 = f"✅ Success:{success:.0f}%"[:18]
+                text.append(line1 + "\n" + line2 + "\n")
                 
                 # Recent activity - ultra compact, single line each
                 recent_activity = dashboard_data.get('recent_activity', [])
                 if recent_activity:
-                    content.append("📈 Recent:")
+                    text.append("📈 Recent:\n")
                     for activity in recent_activity[-2:]:
-                        # Truncate long activities for compactness
-                        short_activity = activity[:25] + "..." if len(activity) > 25 else activity
-                        content.append(f"• {short_activity}")
+                        # Truncate activities to prevent overflow
+                        short_activity = activity[:15] + "..." if len(activity) > 15 else activity
+                        text.append(f"• {short_activity}\n")
                 
-                # Filter empty strings and strip whitespace to prevent Rich rendering corruption
-                content = [line.strip() for line in content if line.strip()]
-                return "\n".join(content)
+                return text
             else:
-                return "🎼 Loading..."  # Ultra compact loading
+                return Text("🎼 Loading...", overflow="ellipsis")  # Ultra compact loading
                 
         except Exception as e:
             logger.warning(f"Error creating dashboard panel: {e}")
-            return f"🎼 Error: {str(e)[:20]}..."
+            return Text(f"🎼 Error: {str(e)[:15]}...", overflow="ellipsis")
     
-    def _create_chat_panel(self) -> str:
+    def _create_chat_panel(self) -> Text:
         """Create the chat conversation panel content."""
         if not self.state.conversation_history:
-            return "🚀 Revolutionary TUI\nType below to start"
-
-        content = []
+            return Text("🚀 Revolutionary TUI\nType below to start", overflow="fold")
+        
+        # Create Rich Text with wrapping enabled
+        text = Text(overflow="fold")
         
         # Show recent conversation - ultra compact format
         for entry in self.state.conversation_history[-10:]:  # Show more messages due to compactness
@@ -413,8 +462,8 @@ class RevolutionaryTUIInterface:
             if not message.strip():
                 continue
             
-            # Truncate long messages for better density
-            max_msg_len = 60
+            # Truncate long messages for better density (adjust for chat panel width)
+            max_msg_len = 45  # Reduced to fit in content panel
             if len(message) > max_msg_len:
                 message = message[:max_msg_len] + "..."
             
@@ -422,18 +471,18 @@ class RevolutionaryTUIInterface:
             short_time = timestamp.split(':')[-1] if ':' in timestamp else timestamp[-2:]
             
             if role == 'user':
-                content.append(f"👤{short_time} {message.strip()}")
+                text.append(f"👤{short_time} {message.strip()}\n")
             elif role == 'assistant':
-                content.append(f"🤖{short_time} {message.strip()}")
+                text.append(f"🤖{short_time} {message.strip()}\n")
             elif role == 'system':
-                content.append(f"⚙️{short_time} {message.strip()}")
+                text.append(f"⚙️{short_time} {message.strip()}\n")
         
-        # Keep all content lines to maintain consistent panel structure
-        return "\n".join(content)
+        return text
     
-    def _create_input_panel(self) -> str:
+    def _create_input_panel(self) -> Text:
         """Create the AI command composer input panel content."""
-        content = []
+        # Create Rich Text with wrapping enabled
+        text = Text(overflow="fold")
         
         # Current input with cursor indicator - ultra compact
         input_display = self.state.current_input or ""
@@ -449,7 +498,12 @@ class RevolutionaryTUIInterface:
             else:
                 input_display += " "
         
-        content.append(f"💬 {input_display}")
+        # Truncate input display to prevent panel overflow
+        max_input_len = 40  # Reduced to fit in content panel
+        if len(input_display) > max_input_len:
+            input_display = input_display[:max_input_len] + "..."
+        
+        text.append(f"💬 {input_display}\n")
         
         # Ultra compact tips and status on single line where possible
         status_items = []
@@ -460,24 +514,28 @@ class RevolutionaryTUIInterface:
         if self.history_index > -1:
             status_items.append(f"📋{self.history_index + 1}/{len(self.input_history)}")
         
-        # Combine status items into single line
+        # Combine status items into single line, truncated to prevent overflow
         if status_items:
-            status_line = " • ".join(status_items).strip()
-            if status_line:
-                content.append(status_line)
+            status_line = " • ".join(status_items)[:35] + ("..." if len(" • ".join(status_items)) > 35 else "")
+            if status_line.strip():
+                text.append(status_line + "\n")
         
-        # Ultra compact suggestions - single line format
+        # Ultra compact suggestions - single line format, truncated
         if self.state.input_suggestions:
-            suggestions_text = " ".join([f"{i+1}.{suggestion[:20]}..." if len(suggestion) > 20 else f"{i+1}.{suggestion}" 
+            suggestions_text = " ".join([f"{i+1}.{suggestion[:15]}..." if len(suggestion) > 15 else f"{i+1}.{suggestion}" 
                                         for i, suggestion in enumerate(self.state.input_suggestions[:2])])
             if suggestions_text.strip():
-                content.append(f"✨ {suggestions_text}")
+                # Truncate suggestions to prevent overflow
+                suggestions_text = suggestions_text[:35] + ("..." if len(suggestions_text) > 35 else "")
+                text.append(f"✨ {suggestions_text}")
         
-        # Keep all content lines to maintain consistent panel structure
-        return "\n".join(content)
+        return text
     
-    def _create_footer_panel(self) -> str:
+    def _create_footer_panel(self) -> Text:
         """Create the footer panel with help and shortcuts."""
+        # Create Rich Text with wrapping enabled
+        text = Text(overflow="ellipsis")
+        
         # Ultra compact help items
         help_items = [
             "↵Send",
@@ -489,11 +547,16 @@ class RevolutionaryTUIInterface:
         # Compact performance info
         fps_info = f"F{self.frame_count % 61}"
         
-        # Filter empty items and ensure clean formatting
+        # Filter empty items and combine into single line, truncated to prevent overflow
         help_items = [item.strip() for item in help_items if item.strip()]
         footer_content = " • ".join(help_items) + f" • {fps_info}"
         
-        return footer_content.strip()
+        # Truncate to fit panel width
+        if len(footer_content) > 70:  # Conservative limit for full width
+            footer_content = footer_content[:67] + "..."
+        
+        text.append(footer_content)
+        return text
     
     async def run(self) -> int:
         """Run the Revolutionary TUI Interface."""
@@ -555,13 +618,38 @@ class RevolutionaryTUIInterface:
                         logger.debug(f"Is TTY: {sys.stdin.isatty()}")
                         logger.debug(f"TERM env: {os.environ.get('TERM', 'not set')}")
                     
-                    # Try with screen=True for proper terminal control - THREAT: Screen buffer fallbacks pollute scrollback
-                    # MITIGATION: Always use alternate screen to prevent scrollback pollution
+                    # CRITICAL: Force alternate screen mode with proper terminal isolation
+                    # MITIGATION: Explicit terminal control to prevent any scrollback pollution
                     try:
                         if debug_mode:
                             logger.debug("Attempting Live context with screen=True (alternate screen)")
                         
-                        with Live(self.layout, refresh_per_second=self.target_fps, screen=True) as live:
+                        # CRITICAL FIX: Force alternate screen buffer with terminal isolation
+                        try:
+                            # Clear any existing output first
+                            self.console.clear()
+                            
+                            # Explicitly enter alternate screen mode
+                            if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
+                                # Send alternate screen control sequence
+                                self.console._file.write('\033[?1049h')  # Enter alternate screen
+                                self.console._file.flush()
+                                self._alternate_screen_active = True
+                        except Exception as screen_e:
+                            logger.warning(f"Could not explicitly enter alternate screen: {screen_e}")
+                        
+                        # Create Live with strict alternate screen enforcement
+                        live_config = {
+                            "renderable": self.layout,
+                            "console": self.console,
+                            "screen": True,  # CRITICAL: Must use alternate screen
+                            "refresh_per_second": self.target_fps,  # Already reduced to 5 FPS
+                            "auto_refresh": True,
+                            "vertical_overflow": "crop",  # Prevent overflow to main screen
+                            "transient": False  # Ensure proper screen buffer usage
+                        }
+                        
+                        with Live(**live_config) as live:
                             logger.info("📺 Rich Live display context entered successfully (alternate screen)")
                             if debug_mode:
                                 logger.debug("Rich Live display context active (alternate screen)")
@@ -584,12 +672,37 @@ class RevolutionaryTUIInterface:
                             logger.debug(f"Live context (alternate screen) failed: {type(live_e).__name__}: {live_e}")
                             logger.debug("Retrying with alternate screen buffer")
                         
-                        # Retry with alternate screen - Optimized for smooth display
-                        # Balanced refresh rate for smooth visual experience
+                        # EMERGENCY RETRY: Force alternate screen with reduced refresh rate
+                        # CRITICAL: Must prevent any scrollback buffer pollution
                         try:
                             import time
                             time.sleep(0.1)  # Brief pause before retry
-                            with Live(self.layout, refresh_per_second=10.0, screen=True) as live:
+                            
+                            # EMERGENCY: Force terminal reset and alternate screen
+                            try:
+                                # Clear console and force terminal reset
+                                self.console.clear()
+                                
+                                # Force alternate screen control sequence
+                                if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
+                                    self.console._file.write('\033[?1049h')  # Force alternate screen
+                                    self.console._file.flush()
+                                    self._alternate_screen_active = True
+                            except Exception:
+                                pass  # Ignore errors in emergency mode
+                            
+                            # Force alternate screen with emergency fallback config
+                            emergency_live_config = {
+                                "renderable": self.layout,
+                                "console": self.console,
+                                "screen": True,  # EMERGENCY: Force alternate screen
+                                "refresh_per_second": 2.0,  # EMERGENCY: Ultra-low rate to prevent flooding
+                                "auto_refresh": True,
+                                "vertical_overflow": "crop",
+                                "transient": False
+                            }
+                            
+                            with Live(**emergency_live_config) as live:
                                 logger.info("📺 Rich Live display context entered successfully (retry)")
                                 if debug_mode:
                                     logger.debug("Rich Live display context active (retry)")
@@ -610,9 +723,24 @@ class RevolutionaryTUIInterface:
                             if debug_mode:
                                 logger.debug(f"Retry also failed: {retry_e}")
                             logger.error(f"❌ Both Rich Live attempts failed: {retry_e}")
-                            # Use fallback mode instead of screen=False - THREAT: Direct terminal output floods scrollback
-                            # MITIGATION: Controlled fallback prevents scrollback pollution
-                            await self._run_fallback_loop()
+                            
+                            # EMERGENCY FALLBACK: Disable Rich entirely to prevent scrollback pollution
+                            logger.warning("🚨 EMERGENCY: Rich Live failed - disabling all Rich output to prevent terminal pollution")
+                            
+                            try:
+                                # Clear any remaining output
+                                self.console.clear()
+                                
+                                # Try to exit alternate screen if we entered it
+                                if self._alternate_screen_active and hasattr(self.console, '_file'):
+                                    self.console._file.write('\033[?1049l')  # Exit alternate screen
+                                    self.console._file.flush()
+                                    self._alternate_screen_active = False
+                            except Exception:
+                                pass  # Ignore cleanup errors in emergency
+                            
+                            # Use minimal fallback mode with ZERO Rich output
+                            await self._run_emergency_fallback_loop()
                             return 0
                 
                 except Exception as e:
@@ -648,6 +776,20 @@ class RevolutionaryTUIInterface:
         finally:
             if debug_mode:
                 logger.debug("Revolutionary TUI Interface cleanup starting")
+            
+            # CRITICAL: Emergency terminal cleanup
+            try:
+                # Force exit alternate screen if still active
+                if getattr(self, '_alternate_screen_active', False) and hasattr(self, 'console') and self.console:
+                    try:
+                        if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
+                            self.console._file.write('\033[?1049l')  # Exit alternate screen
+                            self.console._file.flush()
+                    except Exception:
+                        pass  # Ignore terminal control errors during emergency cleanup
+            except Exception:
+                pass  # Ignore all errors during emergency cleanup
+            
             await self._cleanup()
             if debug_mode:
                 logger.debug("Revolutionary TUI Interface cleanup completed")
@@ -664,19 +806,11 @@ class RevolutionaryTUIInterface:
         # Start event-driven background tasks - no more polling
         logger.info("⚙️ Creating event-driven background tasks...")
         
-        if debug_mode:
-            logger.debug("Creating input task...")
-        
         input_task = asyncio.create_task(self._input_loop())
-        logger.debug("✅ Input task created")
         
         # Optional: Create a periodic update trigger task for occasional status checks
         # This replaces the continuous polling loop with an occasional update trigger
-        if debug_mode:
-            logger.debug("Creating periodic update trigger task...")
-        
         periodic_update_task = asyncio.create_task(self._periodic_update_trigger())
-        logger.debug("✅ Periodic update trigger task created")
         
         logger.info("🎯 Event-driven background tasks created, waiting for completion...")
         
@@ -701,17 +835,11 @@ class RevolutionaryTUIInterface:
                 elif task is periodic_update_task:
                     task_name = "periodic_update_task"
                 
-                if debug_mode:
-                    logger.debug(f"Task completed: {task_name}")
-                    if task.exception():
-                        logger.debug(f"Task {task_name} exception: {task.exception()}")
-                    else:
-                        logger.debug(f"Task {task_name} result: {task.result()}")
-                
                 logger.info(f"Task completed first: {task_name}")
                 try:
                     result = task.result()
-                    logger.debug(f"Task {task_name} result: {result}")
+                    if debug_mode:
+                        logger.debug(f"Task {task_name} result: {result}")
                 except Exception as e:
                     logger.error(f"Task {task_name} failed: {e}")
             
@@ -727,19 +855,20 @@ class RevolutionaryTUIInterface:
             logger.error(f"Error in main loop: {e}")
     
     async def _periodic_update_trigger(self):
-        """Periodic update trigger - much less frequent than old polling loop."""
+        """Periodic update trigger - EMERGENCY: Much less frequent to prevent flooding."""
         while self.running:
             try:
-                # Trigger periodic updates only occasionally (every 10 seconds)
-                # This replaces continuous polling with infrequent status checks
-                await asyncio.sleep(10.0)  # Much longer interval than old polling
+                # EMERGENCY: Trigger periodic updates very infrequently (every 30 seconds)
+                # This prevents terminal flooding from frequent updates
+                await asyncio.sleep(30.0)  # EMERGENCY: Extended from 10s to 30s to prevent flooding
                 
-                # Trigger status and metrics updates which will emit events if changed
-                await self._trigger_periodic_updates()
+                # Only trigger updates if we haven't detected terminal pollution
+                if not self._terminal_pollution_detected:
+                    await self._trigger_periodic_updates()
                 
             except Exception as e:
                 logger.error(f"Error in periodic update trigger: {e}")
-                await asyncio.sleep(5.0)  # Brief pause on error
+                await asyncio.sleep(10.0)  # Longer pause on error to prevent spam
     
     async def _run_fallback_loop(self):
         """Fallback loop without Rich (basic terminal output)."""
@@ -768,6 +897,40 @@ class RevolutionaryTUIInterface:
                 logger.info("KeyboardInterrupt in simple input loop - exiting")
                 break
     
+    async def _run_emergency_fallback_loop(self):
+        """Emergency fallback loop with minimal output to prevent scrollback pollution."""
+        logger.info("🚨 EMERGENCY FALLBACK: Minimal output mode to prevent terminal pollution")
+        
+        # NO Rich output whatsoever - only essential logging
+        import sys
+        
+        if not sys.stdin or sys.stdin.closed or not sys.stdin.isatty():
+            logger.info("🚨 No TTY available - running in silent demonstration mode")
+            
+            # Silent demo mode with minimal output
+            demo_commands = ["help", "status", "quit"]
+            for cmd in demo_commands:
+                if not self.running:
+                    break
+                await asyncio.sleep(3)  # Slow demo to prevent output flooding
+                await self._process_user_input(cmd)
+            return
+        
+        # Minimal TTY mode with essential prompts only
+        logger.info("🚨 Emergency TTY mode - type 'quit' to exit")
+        while self.running:
+            try:
+                # Minimal prompt to prevent output pollution
+                user_input = input("> ").strip()
+                if user_input.lower() in ['quit', 'exit']:
+                    self.running = False
+                    break
+                if user_input:
+                    await self._process_user_input(user_input)
+            except (EOFError, KeyboardInterrupt):
+                logger.info("Emergency fallback interrupted - exiting")
+                break
+    
     # Render loop removed - Rich Live handles all rendering automatically
     # This eliminates the layout corruption that occurred when manually updating panels
     
@@ -791,67 +954,35 @@ class RevolutionaryTUIInterface:
             import select
             
             is_tty = sys.stdin.isatty()
-            logger.debug(f"TTY detection: sys.stdin.isatty() = {is_tty}")
-            if debug_mode:
-                logger.debug(f"sys.stdin.isatty() = {is_tty}")
             
             if is_tty:
                 # Try to access stdin as TTY first
                 try:
                     stdin_fd = sys.stdin.fileno()
-                    if debug_mode:
-                        logger.debug(f"stdin fileno = {stdin_fd}")
-                    
                     attrs = termios.tcgetattr(stdin_fd)
                     tty_available = True
-                    logger.debug("TTY detection: stdin TTY access successful")
-                    if debug_mode:
-                        logger.debug("stdin TTY access successful")
-                        logger.debug(f"Terminal attrs available: {len(attrs) if attrs else 0} entries")
                         
                 except (termios.error, OSError) as e:
-                    logger.debug(f"TTY detection: stdin failed ({e}), trying /dev/tty")
-                    if debug_mode:
-                        logger.debug(f"stdin TTY failed: {type(e).__name__}: {e}")
-                        logger.debug("Trying /dev/tty fallback...")
-                    
                     # Fall back to /dev/tty if stdin doesn't work
                     try:
                         test_fd = os.open('/dev/tty', os.O_RDONLY)
-                        if debug_mode:
-                            logger.debug(f"/dev/tty opened, fd = {test_fd}")
-                        
                         attrs = termios.tcgetattr(test_fd)
                         os.close(test_fd)
                         tty_available = True
-                        logger.debug("TTY detection: /dev/tty access successful")
-                        if debug_mode:
-                            logger.debug("/dev/tty access successful")
                             
                     except (OSError, termios.error) as e2:
-                        logger.debug(f"TTY detection: /dev/tty failed ({e2})")
-                        if debug_mode:
-                            logger.debug(f"/dev/tty also failed: {type(e2).__name__}: {e2}")
                         tty_available = False
             else:
-                logger.debug("TTY detection: stdin is not a TTY")
-                if debug_mode:
-                    logger.debug("stdin is not a TTY")
+                tty_available = False
                 
         except ImportError as e:
-            logger.debug(f"TTY detection: Import failed ({e})")
-            if debug_mode:
-                logger.debug(f"TTY import failed: {e}")
             tty_available = False
         
-        logger.info(f"TTY detection result: tty_available = {tty_available}")
         if debug_mode:
-            logger.debug(f"Final TTY detection result: {tty_available}")
+            logger.debug(f"TTY detection result: tty_available = {tty_available}")
         
         if not tty_available:
             logger.warning("TTY not available, using fallback input method")
-            if debug_mode:
-                logger.debug("TTY not available, calling fallback input loop")
             return await self._fallback_input_loop()
         
         # Setup terminal for raw input
@@ -861,36 +992,20 @@ class RevolutionaryTUIInterface:
         
         # Get the current event loop to pass to the reader thread
         current_loop = asyncio.get_running_loop()
-        if debug_mode:
-            logger.debug(f"_input_loop got main event loop: {current_loop}")
         
         def reader_thread(loop):
             nonlocal fd, original_settings
-            if debug_mode:
-                logger.debug("reader_thread() started")
-                logger.debug(f"reader_thread received event loop: {loop}")
             try:
                 # Try stdin first, then fall back to /dev/tty
                 try:
                     fd = sys.stdin.fileno()
-                    if debug_mode:
-                        logger.debug(f"reader_thread using stdin fd: {fd}")
                     original_settings = termios.tcgetattr(fd)
                     tty.setraw(fd)
-                    if debug_mode:
-                        logger.debug("reader_thread stdin set to raw mode")
                 except (termios.error, OSError) as e:
-                    if debug_mode:
-                        logger.debug(f"reader_thread stdin failed: {e}, trying /dev/tty")
                     # Fallback to /dev/tty
                     fd = os.open('/dev/tty', os.O_RDONLY)
                     original_settings = termios.tcgetattr(fd)
                     tty.setraw(fd)
-                    if debug_mode:
-                        logger.debug(f"reader_thread using /dev/tty fd: {fd}")
-                
-                if debug_mode:
-                    logger.debug("reader_thread ready to process input")
                 
                 while not stop_flag["stop"] and self.running:
                     try:
@@ -906,7 +1021,6 @@ class RevolutionaryTUIInterface:
                             else:
                                 continue
                         except (OSError, ValueError) as e:
-                            logger.debug(f"Error reading from terminal: {e}")
                             continue
                             
                         if not data:
@@ -1013,15 +1127,10 @@ class RevolutionaryTUIInterface:
                                 continue
                         
                     except Exception as e:
-                        logger.debug(f"Error in reader thread: {e}")
                         time.sleep(0.1)
                         
             except Exception as e:
                 logger.error(f"Failed to setup raw terminal input: {e}")
-                if debug_mode:
-                    logger.debug(f"reader_thread setup exception: {type(e).__name__}: {e}")
-                    logger.debug("reader_thread setting use_fallback flag")
-                    logger.debug("reader_thread exception traceback:", exc_info=True)
                 # Set flag to indicate fallback is needed - main thread will handle it
                 stop_flag["use_fallback"] = True
             
@@ -1041,28 +1150,16 @@ class RevolutionaryTUIInterface:
         
         # Start the reader thread, passing the event loop
         thread = threading.Thread(target=reader_thread, args=(current_loop,), daemon=True)
-        if debug_mode:
-            logger.debug("Starting reader thread with event loop parameter")
         thread.start()
-        
-        # Keep the async function alive while input thread runs
-        if debug_mode:
-            logger.debug(f"_input_loop starting main monitoring loop, thread alive: {thread.is_alive()}")
         
         try:
             loop_iterations = 0
             while self.running and thread.is_alive():
                 loop_iterations += 1
-                if debug_mode and loop_iterations == 1:
-                    logger.debug("_input_loop main monitoring loop started")
-                elif debug_mode and loop_iterations % 50 == 0:  # Log every 5 seconds
-                    logger.debug(f"_input_loop monitoring loop iteration {loop_iterations}, thread alive: {thread.is_alive()}")
                 
                 # Check if thread requested fallback
                 if stop_flag.get("use_fallback", False):
                     logger.info("Reader thread requested fallback, switching to fallback input method")
-                    if debug_mode:
-                        logger.debug("_input_loop use_fallback flag detected, switching to fallback")
                     stop_flag["stop"] = True
                     if thread.is_alive():
                         thread.join(timeout=1.0)
@@ -1074,16 +1171,10 @@ class RevolutionaryTUIInterface:
                 # No more polling for suggestions
                         
         finally:
-            if debug_mode:
-                logger.debug(f"_input_loop main loop exited, thread alive: {thread.is_alive()}")
-                logger.debug(f"_input_loop self.running: {self.running}")
-                logger.debug(f"_input_loop stop_flag: {stop_flag}")
             # Signal thread to stop
             stop_flag["stop"] = True
             if thread.is_alive():
                 thread.join(timeout=1.0)
-            if debug_mode:
-                logger.debug("_input_loop completed, returning None")
     
     async def _fallback_input_loop(self):
         """Fallback input loop for when raw terminal setup fails."""
@@ -1112,7 +1203,6 @@ class RevolutionaryTUIInterface:
                 if sys.stdin.isatty():
                     # In TTY mode, use normal input - show header only once
                     if not header_shown:
-                        logger.debug("Revolutionary TUI (TTY Mode) - Commands: help, quit, status")
                         header_shown = True
                     return input("💬 > ")
                 else:
@@ -1150,8 +1240,6 @@ class RevolutionaryTUIInterface:
                     if get_input.command_index < len(sample_commands):
                         cmd = sample_commands[get_input.command_index]
                         time.sleep(8)  # Wait 8 seconds between commands to reduce output rate
-                        # Only log commands for debug purposes
-                        logger.debug(f"Demo command: {cmd}")
                         get_input.command_index += 1
                         return cmd
                     
@@ -1185,9 +1273,7 @@ class RevolutionaryTUIInterface:
                     user_input = future.result()
                     if user_input is None:
                         # EOF or interrupt - check if we're in a proper terminal
-                        logger.info("Input returned None - checking if stdin is available")
                         if sys.stdin and not sys.stdin.closed:
-                            logger.debug("Input interrupted. Type 'quit' to exit cleanly.")
                             continue
                         else:
                             logger.info("stdin closed or unavailable - exiting")
@@ -1205,7 +1291,6 @@ class RevolutionaryTUIInterface:
                     if user_input:
                         # Handle demo messages
                         if user_input.startswith("Demo:"):
-                            logger.debug(f"Demo: {user_input} - Simulating revolutionary TUI capabilities")
                             continue
                         
                         # Process the input
@@ -1216,11 +1301,6 @@ class RevolutionaryTUIInterface:
                         
                         # Log any new responses that were added to conversation history
                         new_conversation_length = len(self.state.conversation_history)
-                        if new_conversation_length > old_conversation_length:
-                            # Log the assistant's response(s) for debugging
-                            for msg in self.state.conversation_history[old_conversation_length:]:
-                                if msg["role"] == "assistant":
-                                    logger.debug(f"Assistant response: {msg['content'][:100]}...")
                     
                 except Exception as e:
                     logger.error(f"Error in fallback input loop: {e}")
@@ -1592,8 +1672,6 @@ class RevolutionaryTUIInterface:
             await self.event_system.subscribe("agent_status_change", self._handle_agent_status_change)
             await self.event_system.subscribe("performance_update", self._handle_performance_update)
             
-            logger.debug("All event handlers registered successfully")
-            
         except Exception as e:
             logger.warning(f"Error registering event handlers: {e}")
     
@@ -1631,7 +1709,8 @@ class RevolutionaryTUIInterface:
             await self._refresh_panel("input")
             
         except Exception as e:
-            logger.debug(f"Error handling input change event: {e}")
+            if debug_mode:
+                logger.debug(f"Error handling input change event: {e}")
     
     async def _on_agent_status_changed(self, event_data: Dict[str, Any]):
         """Handle agent status change events and update status panel."""
@@ -1639,7 +1718,7 @@ class RevolutionaryTUIInterface:
             # Update status panel
             await self._refresh_panel("status")
         except Exception as e:
-            logger.debug(f"Error handling agent status change event: {e}")
+            pass  # Silently ignore event handling errors
     
     async def _on_metrics_updated(self, event_data: Dict[str, Any]):
         """Handle metrics update events and update status panel."""
@@ -1647,7 +1726,7 @@ class RevolutionaryTUIInterface:
             # Update status panel with new metrics
             await self._refresh_panel("status")
         except Exception as e:
-            logger.debug(f"Error handling metrics update event: {e}")
+            pass  # Silently ignore event handling errors
     
     async def _on_conversation_updated(self, event_data: Dict[str, Any]):
         """Handle conversation update events and update chat panel."""
@@ -1655,7 +1734,7 @@ class RevolutionaryTUIInterface:
             # Update chat panel
             await self._refresh_panel("chat")
         except Exception as e:
-            logger.debug(f"Error handling conversation update event: {e}")
+            pass  # Silently ignore event handling errors
     
     async def _on_processing_state_changed(self, event_data: Dict[str, Any]):
         """Handle processing state change events and update header/input panels."""
@@ -1664,7 +1743,7 @@ class RevolutionaryTUIInterface:
             await self._refresh_panel("header")
             await self._refresh_panel("input")
         except Exception as e:
-            logger.debug(f"Error handling processing state change event: {e}")
+            pass  # Silently ignore event handling errors
     
     async def _on_ui_refresh(self, event_data: Dict[str, Any]):
         """Handle UI refresh events for specific panels."""
@@ -1673,7 +1752,7 @@ class RevolutionaryTUIInterface:
             for panel in panels:
                 await self._refresh_panel(panel)
         except Exception as e:
-            logger.debug(f"Error handling UI refresh event: {e}")
+            pass  # Silently ignore event handling errors
     
     async def _refresh_panel(self, panel_name: str):
         """Refresh a specific UI panel - Rich Live handles the actual update."""
@@ -1693,7 +1772,9 @@ class RevolutionaryTUIInterface:
                     Panel(
                         Align.center(header_text),
                         box=box.ROUNDED,
-                        style="bright_blue"
+                        style="bright_blue",
+                        width=self.max_panel_width,
+                        expand=False
                     )
                 )
             
@@ -1704,7 +1785,9 @@ class RevolutionaryTUIInterface:
                         status_content,
                         title="Agent Status",
                         box=box.ROUNDED,
-                        style="green"
+                        style="green",
+                        width=self.max_panel_width // 4,
+                        expand=False
                     )
                 )
             
@@ -1715,7 +1798,9 @@ class RevolutionaryTUIInterface:
                         chat_content,
                         title="Conversation",
                         box=box.ROUNDED,
-                        style="white"
+                        style="white",
+                        width=self.max_panel_width * 3 // 4,
+                        expand=False
                     )
                 )
             
@@ -1726,7 +1811,9 @@ class RevolutionaryTUIInterface:
                         input_content,
                         title="AI Command Composer",
                         box=box.ROUNDED,
-                        style="cyan"
+                        style="cyan",
+                        width=self.max_panel_width * 3 // 4,
+                        expand=False
                     )
                 )
             
@@ -1737,12 +1824,14 @@ class RevolutionaryTUIInterface:
                         dashboard_content,
                         title="Symphony Dashboard",
                         box=box.ROUNDED,
-                        style="magenta"
+                        style="magenta",
+                        width=self.max_panel_width // 4,
+                        expand=False
                     )
                 )
                 
         except Exception as e:
-            logger.debug(f"Error refreshing {panel_name} panel: {e}")
+            pass  # Silently ignore panel refresh errors
     
     # Event publishing methods
     async def _publish_input_changed(self, current_input: str = None, suggestions: List[str] = None):
@@ -1753,7 +1842,7 @@ class RevolutionaryTUIInterface:
                 "suggestions": suggestions or self.state.input_suggestions
             })
         except Exception as e:
-            logger.debug(f"Error publishing input changed event: {e}")
+            pass  # Silently ignore event publishing errors
     
     async def _publish_agent_status_changed(self, agent: str = None, status: str = None):
         """Publish agent status changed event."""
@@ -1764,7 +1853,7 @@ class RevolutionaryTUIInterface:
                 "all_status": self.state.agent_status.copy()
             })
         except Exception as e:
-            logger.debug(f"Error publishing agent status changed event: {e}")
+            pass  # Silently ignore event publishing errors
     
     async def _publish_metrics_updated(self, metrics: Dict[str, Any] = None):
         """Publish metrics updated event."""
@@ -1773,7 +1862,7 @@ class RevolutionaryTUIInterface:
                 "metrics": metrics or self.state.system_metrics.copy()
             })
         except Exception as e:
-            logger.debug(f"Error publishing metrics updated event: {e}")
+            pass  # Silently ignore event publishing errors
     
     async def _publish_conversation_updated(self, new_message: Dict[str, str] = None):
         """Publish conversation updated event."""
@@ -1783,7 +1872,7 @@ class RevolutionaryTUIInterface:
                 "new_message": new_message
             })
         except Exception as e:
-            logger.debug(f"Error publishing conversation updated event: {e}")
+            pass  # Silently ignore event publishing errors
     
     async def _publish_processing_state_changed(self, is_processing: bool = None, message: str = None):
         """Publish processing state changed event."""
@@ -1793,12 +1882,29 @@ class RevolutionaryTUIInterface:
                 "message": message or self.state.processing_message
             })
         except Exception as e:
-            logger.debug(f"Error publishing processing state changed event: {e}")
+            pass  # Silently ignore event publishing errors
     
     async def _cleanup(self):
-        """Cleanup resources."""
+        """Cleanup resources and ensure proper terminal state."""
         try:
             self.running = False
+            
+            # CRITICAL: Ensure we exit alternate screen if active
+            if self._alternate_screen_active and hasattr(self.console, '_file'):
+                try:
+                    self.console._file.write('\033[?1049l')  # Exit alternate screen
+                    self.console._file.flush()
+                    self._alternate_screen_active = False
+                    logger.info("Exited alternate screen buffer")
+                except Exception as e:
+                    logger.warning(f"Could not exit alternate screen: {e}")
+            
+            # Clear console one final time
+            if self.console:
+                try:
+                    self.console.clear()
+                except Exception:
+                    pass  # Ignore cleanup errors
             
             # Cleanup components
             if self.enhancements:
