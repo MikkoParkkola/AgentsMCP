@@ -106,25 +106,11 @@ class RevolutionaryTUIInterface:
         self.ai_composer: Optional[AICommandComposer] = None
         self.symphony_dashboard: Optional[SymphonyDashboard] = None
         
-        # Rich terminal setup with full terminal width utilization
+        # Rich terminal setup with proper terminal size detection
         if RICH_AVAILABLE:
-            # Get terminal dimensions for full space utilization
-            try:
-                term_size = shutil.get_terminal_size()
-                term_width = term_size.columns
-                term_height = term_size.lines
-            except:
-                term_width = 80
-                term_height = 24
-            
-            # Use full terminal width (no artificial constraints)
-            # Only leave minimal margin to prevent edge overflow
-            full_width = max(80, term_width - 1)  # Just 1 char margin for safety
-            
-            # Initialize console to use full terminal dimensions
+            # Initialize console without fixed dimensions to allow auto-detection
+            # Rich Console can automatically detect terminal size better than shutil
             self.console = Console(
-                width=full_width,
-                height=term_height,
                 force_terminal=True,
                 legacy_windows=False,
                 # Force proper terminal control for alternate screen
@@ -135,9 +121,23 @@ class RevolutionaryTUIInterface:
                 # Enable proper alternate screen buffer handling
                 soft_wrap=False
             )
-            # Store terminal dimensions for dynamic panel sizing
-            self.terminal_width = full_width
-            self.terminal_height = term_height
+            
+            # Get actual terminal dimensions from Rich Console
+            # Rich handles terminal size detection more reliably
+            try:
+                console_size = self.console.size
+                self.terminal_width = console_size.width
+                self.terminal_height = console_size.height
+            except Exception as e:
+                # Fallback to shutil if Rich detection fails
+                try:
+                    term_size = shutil.get_terminal_size()
+                    self.terminal_width = term_size.columns
+                    self.terminal_height = term_size.lines
+                except Exception:
+                    self.terminal_width = 80
+                    self.terminal_height = 24
+                logger.warning(f"Terminal size detection failed, using fallback: {self.terminal_width}x{self.terminal_height}")
         else:
             self.console = None
             self.terminal_width = 80
@@ -162,6 +162,10 @@ class RevolutionaryTUIInterface:
         
         # Layout initialized flag
         self._layout_initialized = False
+        
+        # Terminal resize handling
+        self._last_terminal_size = (self.terminal_width, self.terminal_height)
+        self._resize_pending = False
         
         # Debug control - THREAT: Debug output floods scrollback buffer
         # MITIGATION: Strict debug mode control with logging instead of print statements
@@ -302,16 +306,32 @@ class RevolutionaryTUIInterface:
             Layout(name="dashboard", ratio=1)   # Dashboard gets half of sidebar height
         )
         
-        # Initialize panels with full-width support
+        # Initialize panels with proper terminal-aware support
         await self._initialize_layout_panels()
+        
+        # Store layout initialization state
+        self._layout_initialized = True
     
     async def _initialize_layout_panels(self):
-        """Initialize layout panels with full terminal space utilization."""
+        """Initialize layout panels with proper terminal size awareness."""
         if not RICH_AVAILABLE or not self.layout:
             return
         
         try:
-            # Header panel - Expands to full terminal width
+            # Get current terminal dimensions for responsive layout
+            try:
+                current_size = self.console.size
+                current_width = current_size.width
+                current_height = current_size.height
+            except Exception:
+                current_width = self.terminal_width
+                current_height = self.terminal_height
+            
+            # Calculate responsive panel widths based on actual terminal size
+            sidebar_width = max(25, min(35, current_width // 4))  # 25% of width, min 25, max 35
+            content_width = current_width - sidebar_width - 4  # Account for layout margins
+            
+            # Header panel - No fixed width, let Rich handle terminal width
             header_text = Text("🚀 AgentsMCP Revolutionary Interface", style="bold blue")
             if self.state.is_processing:
                 header_text.append(" • ", style="dim")
@@ -321,67 +341,67 @@ class RevolutionaryTUIInterface:
                 Panel(
                     Align.center(header_text),
                     box=box.ROUNDED,
-                    style="bright_blue",
-                    expand=True  # Fill available width
+                    style="bright_blue"
+                    # No width specified - let Rich handle terminal width
                 )
             )
             
-            # Status panel - Expands to fill sidebar width
+            # Status panel - Use calculated sidebar width
             status_content = self._create_status_panel()
             self.layout["status"].update(
                 Panel(
                     status_content,
                     title="Agent Status",
                     box=box.ROUNDED,
-                    style="green",
-                    expand=True  # Fill available sidebar width
+                    style="green"
+                    # No width specified - let layout manager handle
                 )
             )
             
-            # Dashboard panel - Expands to fill sidebar width
+            # Dashboard panel - Use calculated sidebar width
             dashboard_content = await self._create_dashboard_panel()
             self.layout["dashboard"].update(
                 Panel(
                     dashboard_content,
                     title="Symphony Dashboard",
                     box=box.ROUNDED,
-                    style="magenta",
-                    expand=True  # Fill available sidebar width
+                    style="magenta"
+                    # No width specified - let layout manager handle
                 )
             )
             
-            # Chat panel - Expands to fill content area width
+            # Chat panel - Use calculated content width
             chat_content = self._create_chat_panel()
             self.layout["chat"].update(
                 Panel(
                     chat_content,
                     title="Conversation",
                     box=box.ROUNDED,
-                    style="white",
-                    expand=True  # Fill available content width
+                    style="white"
+                    # No width specified - let layout manager handle
                 )
             )
             
-            # Input panel - Expands to fill content area width
+            # Input panel - Use calculated content width
             input_content = self._create_input_panel()
             self.layout["input"].update(
                 Panel(
                     input_content,
                     title="AI Command Composer",
                     box=box.ROUNDED,
-                    style="cyan",
-                    expand=True  # Fill available content width
+                    style="cyan"
+                    # No width specified - let layout manager handle
                 )
             )
             
-            # Footer - Expands to full terminal width
+            # Footer - No fixed width, let Rich handle terminal width
             footer_content = self._create_footer_panel()
             self.layout["footer"].update(
                 Panel(
                     footer_content,
                     box=box.ROUNDED,
-                    style="dim",
-                    expand=True  # Fill available width
+                    style="dim"
+                    # No width specified - let Rich handle terminal width
                 )
             )
             
@@ -389,9 +409,19 @@ class RevolutionaryTUIInterface:
             logger.warning(f"Error initializing layout panels: {e}")
     
     def _create_status_panel(self) -> Text:
-        """Create the agent status panel content with full-width support."""
+        """Create the agent status panel content with terminal size awareness."""
         if not self.state.agent_status:
             return Text("🔄 Initializing • 📊 Loading metrics...", overflow="fold")
+        
+        # Get current terminal dimensions for content sizing
+        try:
+            if RICH_AVAILABLE and self.console:
+                current_size = self.console.size
+                max_width = max(20, current_size.width // 4 - 2)  # Sidebar width minus padding
+            else:
+                max_width = 25  # Fallback width
+        except Exception:
+            max_width = 25
         
         # Create Rich Text with wrapping enabled for wider panels
         text = Text(overflow="fold")
@@ -473,15 +503,28 @@ class RevolutionaryTUIInterface:
             return Text(f"🎼 Dashboard Error:\n{str(e)}", overflow="fold")
     
     def _create_chat_panel(self) -> Text:
-        """Create the chat conversation panel content with full-width support."""
+        """Create the chat conversation panel content with terminal size awareness."""
         if not self.state.conversation_history:
             return Text("🚀 Revolutionary TUI Interface\n\nWelcome to the enhanced chat experience!\nType your messages below to begin conversation.", overflow="fold")
+        
+        # Get current terminal dimensions for content sizing
+        try:
+            if RICH_AVAILABLE and self.console:
+                current_size = self.console.size
+                max_width = max(40, current_size.width - current_size.width // 4 - 6)  # Content width minus padding
+                max_messages = max(5, (current_size.height - 10) // 3)  # Based on terminal height
+            else:
+                max_width = 60  # Fallback width
+                max_messages = 10  # Fallback message count
+        except Exception:
+            max_width = 60
+            max_messages = 10
         
         # Create Rich Text with wrapping enabled for wider chat panel
         text = Text(overflow="fold")
         
-        # Show recent conversation with expanded format for wider content area
-        recent_messages = self.state.conversation_history[-15:]  # Show more messages in expanded view
+        # Show recent conversation with responsive message count based on terminal height
+        recent_messages = self.state.conversation_history[-max_messages:]  # Responsive message count
         
         for entry in recent_messages:
             role = entry.get('role', 'unknown')
@@ -1453,15 +1496,60 @@ class RevolutionaryTUIInterface:
         except Exception as e:
             logger.warning(f"Error updating system metrics: {e}")
     
+    async def _check_terminal_resize(self):
+        """Check for terminal resize and update layout if needed."""
+        if not RICH_AVAILABLE or not self.console:
+            return False
+        
+        try:
+            current_size = self.console.size
+            current_width = current_size.width
+            current_height = current_size.height
+            
+            # Check if terminal size changed
+            if (current_width, current_height) != self._last_terminal_size:
+                logger.info(f"Terminal resize detected: {self._last_terminal_size} -> {(current_width, current_height)}")
+                
+                # Update stored dimensions
+                self.terminal_width = current_width
+                self.terminal_height = current_height
+                self._last_terminal_size = (current_width, current_height)
+                
+                # Mark for layout refresh
+                self._resize_pending = True
+                
+                # Reinitialize layout panels with new dimensions
+                if self._layout_initialized and self.layout:
+                    await self._initialize_layout_panels()
+                
+                return True
+            
+        except Exception as e:
+            logger.warning(f"Error checking terminal resize: {e}")
+        
+        return False
+    
     async def _trigger_periodic_updates(self):
         """Trigger periodic updates via events instead of polling."""
         try:
+            # Check for terminal resize first
+            resize_detected = await self._check_terminal_resize()
+            
             # Update agent status and metrics, which will emit events if changed
             await self._update_agent_status()
             await self._update_system_metrics()
             
             # Update timestamp
             self.state.last_update = time.time()
+            
+            # If resize was detected, refresh all panels
+            if resize_detected:
+                await self._refresh_panel("header")
+                await self._refresh_panel("status")
+                await self._refresh_panel("dashboard")
+                await self._refresh_panel("chat")
+                await self._refresh_panel("input")
+                self._resize_pending = False
             
         except Exception as e:
             logger.warning(f"Error in periodic updates: {e}")
@@ -1867,7 +1955,7 @@ class RevolutionaryTUIInterface:
                     pass  # Ignore refresh errors
             
             # Rich Live automatically updates when layout content changes
-            # We just need to update the layout content with full-width panels
+            # We update layout content without fixed widths to respect terminal boundaries
             if panel_name == "header":
                 header_text = Text("🚀 AgentsMCP Revolutionary Interface", style="bold blue")
                 if self.state.is_processing:
@@ -1878,8 +1966,8 @@ class RevolutionaryTUIInterface:
                     Panel(
                         Align.center(header_text),
                         box=box.ROUNDED,
-                        style="bright_blue",
-                        expand=True  # Fill full terminal width
+                        style="bright_blue"
+                        # No width/expand specified - let Rich handle terminal boundaries
                     )
                 )
             
@@ -1890,8 +1978,8 @@ class RevolutionaryTUIInterface:
                         status_content,
                         title="Agent Status",
                         box=box.ROUNDED,
-                        style="green",
-                        expand=True  # Fill sidebar width
+                        style="green"
+                        # No width/expand specified - let layout manager handle
                     )
                 )
             
@@ -1902,8 +1990,8 @@ class RevolutionaryTUIInterface:
                         chat_content,
                         title="Conversation",
                         box=box.ROUNDED,
-                        style="white",
-                        expand=True  # Fill content area width
+                        style="white"
+                        # No width/expand specified - let layout manager handle
                     )
                 )
             
@@ -1914,8 +2002,8 @@ class RevolutionaryTUIInterface:
                         input_content,
                         title="AI Command Composer",
                         box=box.ROUNDED,
-                        style="cyan",
-                        expand=True  # Fill content area width
+                        style="cyan"
+                        # No width/expand specified - let layout manager handle
                     )
                 )
             
@@ -1926,8 +2014,8 @@ class RevolutionaryTUIInterface:
                         dashboard_content,
                         title="Symphony Dashboard",
                         box=box.ROUNDED,
-                        style="magenta",
-                        expand=True  # Fill sidebar width
+                        style="magenta"
+                        # No width/expand specified - let layout manager handle
                     )
                 )
                 
