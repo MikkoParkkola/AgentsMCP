@@ -266,8 +266,8 @@ class DisplayManager:
                         Layout(name="sidebar", size=30)
                     )
                 
-                # Create default regions
-                await self._create_default_regions()
+                # Create default regions (lock already held, use internal method)
+                await self._create_default_regions_internal()
                 
                 # Start background tasks
                 self._refresh_task = asyncio.create_task(self._refresh_loop())
@@ -520,6 +520,79 @@ class DisplayManager:
         
         for region in regions:
             await self.register_region(region)
+    
+    async def _create_default_regions_internal(self) -> None:
+        """Create default display regions - internal version without lock."""
+        if not self._terminal_controller:
+            return
+        
+        terminal_state = await self._terminal_controller.get_terminal_state()
+        if not terminal_state:
+            # Fallback dimensions
+            width, height = 80, 24
+        else:
+            width = terminal_state.size.width
+            height = terminal_state.size.height
+        
+        # Create standard regions
+        regions = [
+            DisplayRegion(
+                region_id="header",
+                region_type=RegionType.HEADER,
+                x=0, y=0,
+                width=width, height=3,
+                z_index=1
+            ),
+            DisplayRegion(
+                region_id="main",
+                region_type=RegionType.MAIN,
+                x=0, y=3,
+                width=width-30, height=height-6,
+                z_index=0
+            ),
+            DisplayRegion(
+                region_id="sidebar",
+                region_type=RegionType.SIDEBAR,
+                x=width-30, y=3,
+                width=30, height=height-6,
+                z_index=1
+            ),
+            DisplayRegion(
+                region_id="footer",
+                region_type=RegionType.FOOTER,
+                x=0, y=height-3,
+                width=width, height=3,
+                z_index=1
+            )
+        ]
+        
+        # Register regions directly without lock (lock already held in initialize)
+        for region in regions:
+            await self._register_region_internal(region)
+    
+    async def _register_region_internal(self, region: DisplayRegion) -> bool:
+        """Register a region internally without lock (used when lock is already held)."""
+        if not self._initialized:
+            return False
+        
+        # Check for conflicts
+        for existing_region in self._regions.values():
+            if (existing_region.region_id != region.region_id and
+                existing_region.z_index == region.z_index and
+                self._conflict_detector._regions_overlap(region, existing_region)):
+                logger.warning(f"Region overlap detected: {region.region_id} with {existing_region.region_id}")
+        
+        self._regions[region.region_id] = region
+        
+        # Update Rich layout if applicable
+        if RICH_AVAILABLE and self._layout and region.region_id in ["header", "main", "footer", "sidebar"]:
+            try:
+                self._layout[region.region_id].update(Panel("", title=region.region_id))
+            except Exception as e:
+                logger.warning(f"Failed to update Rich layout for region {region.region_id}: {e}")
+        
+        logger.debug(f"Registered display region: {region.region_id}")
+        return True
     
     async def _refresh_loop(self) -> None:
         """Background refresh loop."""

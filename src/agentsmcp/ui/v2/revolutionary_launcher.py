@@ -272,18 +272,18 @@ class RevolutionaryLauncher:
         logger.info("🔥 Launching Revolutionary TUI with core enhancements")
         
         try:
-            # Import the Revolutionary TUI Interface
-            print("Importing Revolutionary TUI Interface...")
+            # Import the Reliable TUI Interface (replaces Revolutionary for reliability)
+            print("Importing Reliable TUI Interface...")
             if debug_mode:
-                print("🔧 Debug: Importing revolutionary_tui_interface module...")
+                print("🔧 Debug: Importing reliability integration layer module...")
             
-            from .revolutionary_tui_interface import RevolutionaryTUIInterface, create_revolutionary_interface
+            from .reliability.integration_layer import ReliableTUIInterface, create_reliable_tui
             
             if debug_mode:
-                print("🔧 Debug: Revolutionary TUI Interface classes imported successfully")
+                print("🔧 Debug: Reliable TUI Interface classes imported successfully")
             
-            print("Initializing Revolutionary TUI Interface...")
-            logger.info("Initializing Revolutionary TUI Interface...")
+            print("Initializing Reliable TUI Interface...")
+            logger.info("Initializing Reliable TUI Interface...")
             
             # Try to initialize orchestrator integration
             orchestrator_integration = None
@@ -340,26 +340,35 @@ class RevolutionaryLauncher:
                 print(f"🔧 Debug: Orchestrator integration: {orchestrator_integration}")
                 print(f"🔧 Debug: Revolutionary components count: {len(revolutionary_components)}")
             
-            revolutionary_interface = await create_revolutionary_interface(
-                cli_config=self.cli_config,
-                orchestrator_integration=orchestrator_integration,
-                revolutionary_components=revolutionary_components
-            )
+            # CRITICAL: Use ReliableTUIInterface with built-in timeout protection
+            try:
+                reliable_interface = await asyncio.wait_for(
+                    create_reliable_tui(
+                        agent_orchestrator=orchestrator_integration,
+                        agent_state=None,  # Using default state
+                        config=None,  # Use default reliability config
+                        cli_config=self.cli_config,
+                        revolutionary_components=revolutionary_components
+                    ),
+                    timeout=12.0  # 12 second timeout - reliable interface has internal protections
+                )
+            except asyncio.TimeoutError:
+                raise Exception("Reliable TUI Interface creation timed out after 12 seconds")
             
             if debug_mode:
-                print(f"🔧 Debug: Revolutionary interface created: {type(revolutionary_interface)}")
+                print(f"🔧 Debug: Reliable interface created: {type(reliable_interface)}")
             
-            self._active_components.append(revolutionary_interface)
+            self._active_components.append(reliable_interface)
             
-            logger.info("🚀 Revolutionary TUI Interface created successfully - launching...")
+            logger.info("🚀 Reliable TUI Interface created successfully - launching...")
             if debug_mode:
-                print("🔧 Debug: About to call revolutionary_interface.run()...")
+                print("🔧 Debug: About to call reliable_interface.run()...")
             
-            # Launch the Revolutionary TUI Interface
-            result = await revolutionary_interface.run()
+            # Launch the Reliable TUI Interface
+            result = await reliable_interface.run()
             
             if debug_mode:
-                print(f"🔧 Debug: Revolutionary interface run() completed with result: {result}")
+                print(f"🔧 Debug: Reliable interface run() completed with result: {result}")
             
             return result
             
@@ -380,10 +389,10 @@ class RevolutionaryLauncher:
         logger.info("✨ Launching Enhanced TUI with improved features")
         
         try:
-            # Try to use Revolutionary TUI Interface in enhanced mode
-            from .revolutionary_tui_interface import RevolutionaryTUIInterface, create_revolutionary_interface
+            # Try to use Reliable TUI Interface in enhanced mode
+            from .reliability.integration_layer import ReliableTUIInterface, create_reliable_tui
             
-            logger.info("Launching Revolutionary TUI Interface in enhanced mode...")
+            logger.info("Launching Reliable TUI Interface in enhanced mode...")
             
             # Initialize orchestrator integration
             orchestrator_integration = None
@@ -393,18 +402,26 @@ class RevolutionaryLauncher:
             except Exception as e:
                 logger.warning(f"Orchestrator integration failed: {e}")
             
-            # Create Revolutionary interface with basic components
-            revolutionary_interface = await create_revolutionary_interface(
-                cli_config=self.cli_config,
-                orchestrator_integration=orchestrator_integration,
-                revolutionary_components={}  # Minimal components for enhanced mode
-            )
+            # Create Reliable interface with basic components
+            try:
+                reliable_interface = await asyncio.wait_for(
+                    create_reliable_tui(
+                        agent_orchestrator=orchestrator_integration,
+                        agent_state=None,
+                        config=None,  # Use default reliability config
+                        cli_config=self.cli_config,
+                        revolutionary_components={}  # Minimal components for enhanced mode
+                    ),
+                    timeout=12.0  # 12 second timeout for enhanced mode
+                )
+            except asyncio.TimeoutError:
+                raise Exception("Enhanced TUI Interface creation timed out after 12 seconds")
             
-            self._active_components.append(revolutionary_interface)
+            self._active_components.append(reliable_interface)
             
             # Launch the interface
-            logger.info("Enhanced TUI (Revolutionary interface) initialized successfully")
-            return await revolutionary_interface.run()
+            logger.info("Enhanced TUI (Reliable interface) initialized successfully")
+            return await reliable_interface.run()
             
         except Exception as e:
             logger.warning(f"Enhanced TUI (Revolutionary interface) launch failed: {e}")
@@ -416,22 +433,30 @@ class RevolutionaryLauncher:
         logger.info("🔧 Launching Basic TUI - trying Revolutionary TUI in fallback mode")
         
         try:
-            # First try: Revolutionary TUI Interface in basic/fallback mode
-            logger.info("Attempting Revolutionary TUI Interface in basic mode...")
-            from .revolutionary_tui_interface import RevolutionaryTUIInterface, create_revolutionary_interface
+            # First try: Reliable TUI Interface in basic/fallback mode
+            logger.info("Attempting Reliable TUI Interface in basic mode...")
+            from .reliability.integration_layer import ReliableTUIInterface, create_reliable_tui
             
-            # Create Revolutionary interface with minimal components for basic mode
-            revolutionary_interface = await create_revolutionary_interface(
-                cli_config=self.cli_config,
-                orchestrator_integration=None,  # No orchestrator for basic mode
-                revolutionary_components={}     # No extra components for basic mode
-            )
+            # Create Reliable interface with minimal components for basic mode
+            try:
+                reliable_interface = await asyncio.wait_for(
+                    create_reliable_tui(
+                        agent_orchestrator=None,  # No orchestrator for basic mode
+                        agent_state=None,
+                        config=None,  # Use default reliability config
+                        cli_config=self.cli_config,
+                        revolutionary_components={}     # No extra components for basic mode
+                    ),
+                    timeout=10.0  # 10 second timeout for basic mode with reliability
+                )
+            except asyncio.TimeoutError:
+                raise Exception("Basic TUI Interface creation timed out after 10 seconds")
             
-            self._active_components.append(revolutionary_interface)
+            self._active_components.append(reliable_interface)
             
             # Launch the interface - it will detect TTY status and use fallback input
-            logger.info("Basic TUI (Revolutionary interface in fallback mode) initialized")
-            return await revolutionary_interface.run()
+            logger.info("Basic TUI (Reliable interface in fallback mode) initialized")
+            return await reliable_interface.run()
             
         except Exception as e:
             logger.warning(f"Revolutionary TUI in basic mode failed: {e}")

@@ -18,7 +18,9 @@ Key Features:
 """
 
 import asyncio
+import logging
 import os
+import shutil
 import sys
 import time
 import signal
@@ -56,6 +58,8 @@ from ..components.ai_command_composer import AICommandComposer
 from ..components.symphony_dashboard import SymphonyDashboard
 from .event_system import AsyncEventSystem
 from ...orchestration import Orchestrator, OrchestratorConfig, OrchestratorMode
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -197,6 +201,10 @@ class RevolutionaryTUIInterface:
         
         # Orchestrator setup
         self.orchestrator = None
+        
+        # Track startup time for uptime display
+        import time
+        self._startup_time = time.time()
         
         # Safe logging using unified architecture
         self._safe_log("info", "Revolutionary TUI Interface initialized")
@@ -499,7 +507,10 @@ class RevolutionaryTUIInterface:
     def _create_status_panel(self) -> Text:
         """Create the agent status panel content using unified text layout engine."""
         if not self.state.agent_status:
-            return self._safe_layout_text("🔄 Initializing • 📊 Loading metrics...", 30)
+            # Show activity indicator with timestamp to prove TUI is alive
+            import time
+            current_time = time.strftime("%H:%M:%S")
+            return self._safe_layout_text(f"🔄 Initializing...\n📊 Loading metrics...\n⏰ {current_time}\n🎯 TUI Active & Ready", 30)
         
         # Get current terminal dimensions for content sizing
         try:
@@ -513,6 +524,15 @@ class RevolutionaryTUIInterface:
         
         # Build content as string first, then use text layout engine
         content_lines = []
+        
+        # Always show TUI status and activity indicator first
+        import time
+        current_time = time.strftime("%H:%M:%S")
+        uptime_mins = (time.time() - getattr(self, '_startup_time', time.time())) / 60
+        content_lines.append(f"🎯 TUI Ready & Active")
+        content_lines.append(f"⏰ {current_time}")
+        content_lines.append(f"📡 Up {uptime_mins:.1f}min")
+        content_lines.append("")  # Separator
         
         # Agent status - expanded display for wider sidebar
         for agent_name, status in self.state.agent_status.items():
@@ -603,7 +623,20 @@ class RevolutionaryTUIInterface:
     def _create_chat_panel(self) -> Text:
         """Create the chat conversation panel content using unified text layout engine."""
         if not self.state.conversation_history:
-            return self._safe_layout_text("🚀 Revolutionary TUI Interface\n\nWelcome to the enhanced chat experience!\nType your messages below to begin conversation.", 80)
+            # Enhanced startup message with clear instructions
+            startup_message = (
+                "🚀 Revolutionary TUI Interface - Ready for Input!\n\n"
+                "✨ Welcome to the enhanced chat experience!\n\n"
+                "💡 Available Commands:\n"
+                "   • Type your message and press Enter to chat\n"
+                "   • /help - Show detailed help\n" 
+                "   • /quit or /exit - Exit the interface\n"
+                "   • /clear - Clear conversation history\n"
+                "   • /status - Show system status\n\n"
+                "🎯 The interface is active and waiting for your input...\n"
+                "💬 Start typing below to begin!"
+            )
+            return self._safe_layout_text(startup_message, 80)
         
         # Get current terminal dimensions for content sizing
         try:
@@ -698,7 +731,14 @@ class RevolutionaryTUIInterface:
         # Expanded status and help information  
         if not self.state.current_input and not self.state.is_processing:
             content_lines.append("")
-            content_lines.append("💡 Tips: Type your message • ↑↓ for history • Enter to send • Ctrl+C to exit")
+            content_lines.append("💡 Quick Help: Type message & press Enter • /help for commands • /quit to exit")
+            content_lines.append("🎯 TUI is Ready & Waiting for Input!")
+            if hasattr(self, '_startup_time'):
+                uptime_secs = time.time() - self._startup_time
+                if uptime_secs < 60:
+                    content_lines.append(f"⏱️  Running for {uptime_secs:.0f}s")
+                else:
+                    content_lines.append(f"⏱️  Running for {uptime_secs/60:.1f}min")
         
         # History navigation indicator
         if self.history_index > -1:
@@ -765,6 +805,10 @@ class RevolutionaryTUIInterface:
         # Use unified logging architecture to prevent console pollution
         if self.logging_manager:
             await self.logging_manager.activate_isolation(tui_active=True, log_level=LogLevel.INFO)
+        
+        # Store original logging levels for restoration in finally block
+        original_log_level = logging.getLogger().level
+        original_llm_client_level = logging.getLogger('agentsmcp.conversation.llm_client').level
         original_orchestrator_level = logging.getLogger('agentsmcp.orchestration').level
         
         try:
@@ -1087,6 +1131,14 @@ class RevolutionaryTUIInterface:
         
         logger.info("🎯 Event-driven background tasks created, waiting for completion...")
         
+        # Add startup status messages to show TUI is ready
+        import time
+        self.state.conversation_history.append({
+            "role": "system",
+            "content": "🚀 Revolutionary TUI Interface Ready! Type your message and press Enter to start chatting. Use /help for available commands.",
+            "timestamp": time.time()
+        })
+        
         if debug_mode:
             logger.debug("Tasks created, waiting for first completion...")
         
@@ -1131,8 +1183,9 @@ class RevolutionaryTUIInterface:
         """Periodic update trigger for status refreshes."""
         while self.running:
             try:
-                # Trigger periodic updates every 10 seconds for reasonable responsiveness
-                await asyncio.sleep(10.0)
+                # Trigger periodic updates every 5 seconds for more responsive status display
+                # This shows users that the TUI is active and waiting for input
+                await asyncio.sleep(5.0)
                 
                 # Only trigger updates if we haven't detected terminal pollution
                 if not self._terminal_pollution_detected:
@@ -1450,7 +1503,7 @@ class RevolutionaryTUIInterface:
     
     async def _fallback_input_loop(self):
         """Fallback input loop for when raw terminal setup fails."""
-        logger.info("Using fallback input method - will wait for Enter key")
+        logger.info("Using fallback input method - interactive mode enabled")
         
         import concurrent.futures
         import sys
@@ -1464,60 +1517,11 @@ class RevolutionaryTUIInterface:
         # Use a thread pool executor for blocking input
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         
-        # Track whether we've shown the header already
-        header_shown = False
-        
         def get_input():
             """Get input from stdin in blocking mode."""
-            nonlocal header_shown
             try:
-                # Check if stdin is actually readable
-                if sys.stdin.isatty():
-                    # In TTY mode, use normal input - show header only once
-                    if not header_shown:
-                        header_shown = True
-                    return input("💬 > ")
-                else:
-                    # In non-TTY mode, try to read from stdin if available, otherwise simulate
-                    try:
-                        # First try to read from stdin with a short timeout
-                        import select
-                        ready, _, _ = select.select([sys.stdin], [], [], 0.1)
-                        if ready:
-                            # There's input available, read it
-                            return input()
-                    except:
-                        pass  # Fall through to simulation mode
-                    
-                    # No stdin input available - run simulation mode
-                    if not header_shown:
-                        logger.info("Non-TTY environment detected - using simulated input mode")
-                        header_shown = True
-                    
-                    # Simulate some sample commands for demo purposes
-                    import time
-                    if not hasattr(get_input, 'command_index'):
-                        get_input.command_index = 0
-                    
-                    sample_commands = [
-                        "status", 
-                        "help", 
-                        "status",
-                        "Demo: Processing sample task...",
-                        "Demo: Checking system health...", 
-                        "Demo: Revolutionary TUI demonstration complete!",
-                        "quit"
-                    ]
-                    
-                    if get_input.command_index < len(sample_commands):
-                        cmd = sample_commands[get_input.command_index]
-                        time.sleep(8)  # Wait 8 seconds between commands to reduce output rate
-                        get_input.command_index += 1
-                        return cmd
-                    
-                    # After all demo commands, return quit to exit gracefully
-                    return "quit"
-                    
+                # Always try to get actual user input first
+                return input("💬 > ")
             except (EOFError, KeyboardInterrupt):
                 logger.info("Input interrupted or EOF reached")
                 return None
@@ -1526,17 +1530,19 @@ class RevolutionaryTUIInterface:
                 return None
         
         try:
-            # Log welcome message for fallback mode
-            logger.info("Revolutionary TUI Interface - Fallback Mode - Running without raw terminal access")
+            # Show welcome message
+            print("\n🚀 Revolutionary TUI Interface - Interactive Mode")
+            print("Type your message and press Enter. Use 'help' for commands, 'quit' to exit.")
+            print("=" * 60)
             
             while self.running:
                 try:
                     # Get input asynchronously
                     future = executor.submit(get_input)
                     
-                    # Wait for input with periodic updates (no Rich updates in fallback mode)
+                    # Wait for input with periodic status checks
                     while not future.done() and self.running:
-                        await asyncio.sleep(0.5)  # Longer sleep since no display updates needed
+                        await asyncio.sleep(0.1)
                     
                     if not self.running:
                         future.cancel()
@@ -1544,46 +1550,37 @@ class RevolutionaryTUIInterface:
                     
                     user_input = future.result()
                     if user_input is None:
-                        # EOF or interrupt - check if we're in a proper terminal
-                        if sys.stdin and not sys.stdin.closed:
-                            continue
-                        else:
-                            logger.info("stdin closed or unavailable - exiting")
-                            break
+                        # EOF or interrupt
+                        logger.info("Input stream ended - exiting TUI")
+                        break
                     
                     user_input = user_input.strip()
-                    if user_input.lower() in ['quit', 'exit']:
-                        logger.info("Exiting Revolutionary TUI...")
+                    if user_input.lower() in ['quit', 'exit', 'q']:
+                        print("👋 Exiting Revolutionary TUI...")
                         self.running = False
                         break
                     
-                    # Special commands are now handled in _process_user_input()
-                    # Remove duplicate handlers to prevent conflicts
+                    if not user_input:
+                        continue
                     
-                    if user_input:
-                        # Handle demo messages
-                        if user_input.startswith("Demo:"):
-                            continue
-                        
-                        # Process the input
-                        self.state.current_input = user_input
-                        old_conversation_length = len(self.state.conversation_history)
-                        await self._process_user_input(user_input)
-                        self.state.current_input = ""
-                        
-                        # Log any new responses that were added to conversation history
-                        new_conversation_length = len(self.state.conversation_history)
+                    # Process the input
+                    self.state.current_input = user_input
+                    await self._process_user_input(user_input)
+                    self.state.current_input = ""
                     
+                    # Show last assistant response if any
+                    if self.state.conversation_history:
+                        last_msg = self.state.conversation_history[-1]
+                        if last_msg.get('role') == 'assistant':
+                            print(f"🤖 {last_msg.get('content', '')}")
+                
                 except Exception as e:
                     logger.error(f"Error in fallback input loop: {e}")
                     await asyncio.sleep(1.0)
         
         finally:
             executor.shutdown(wait=False)
-            logger.info("Fallback input loop ended")
-            
-            # Log completion message
-            logger.info("Revolutionary TUI demo completed - For interactive mode, run from a real terminal")
+            logger.info("Interactive input loop ended")
     
     # Polling-based update loop REMOVED - replaced with event-driven updates
     # All status and metrics updates now happen via events only

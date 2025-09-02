@@ -1,0 +1,64 @@
+{
+  "accept": false,
+  "issues": [
+    {
+      "severity": "critical",
+      "category": "logic",
+      "description": "ReliableTUIInterface.run() method causes immediate shutdown due to premature Guardian termination. The finally block calls stop() which shuts down the TimeoutGuardian after only ~0.6 seconds, preventing normal user interaction.",
+      "location": "/Users/mikko/github/AgentsMCP/src/agentsmcp/ui/v2/reliability/integration_layer.py:620-627",
+      "impact": "TUI completely unusable - terminates immediately instead of waiting for user input, breaking all user workflows"
+    },
+    {
+      "severity": "critical", 
+      "category": "logic",
+      "description": "_wait_for_tui_completion() method returns immediately instead of waiting for actual user completion. This causes the run() method to think the TUI is finished when it should still be running.",
+      "location": "/Users/mikko/github/AgentsMCP/src/agentsmcp/ui/v2/reliability/integration_layer.py:629-662",
+      "impact": "Main loop lifecycle is broken - TUI thinks it's complete when user hasn't even started interacting"
+    },
+    {
+      "severity": "critical",
+      "category": "logic", 
+      "description": "Guardian shutdown timing is incorrect - shutdown() called during normal operation instead of only when TUI should actually terminate. The 'Guardian shutdown' warning appears during normal startup.",
+      "location": "/Users/mikko/github/AgentsMCP/src/agentsmcp/ui/v2/reliability/integration_layer.py:514",
+      "impact": "TimeoutGuardian cancels all operations prematurely, preventing the TUI from entering its main interactive loop"
+    },
+    {
+      "severity": "major",
+      "category": "testing",
+      "description": "All 8 comprehensive end-to-end tests fail with 0% pass rate. Critical user acceptance criteria not met - TUI doesn't start without immediate shutdown, user cannot interact, graceful exit impossible.",
+      "location": "test_end_to_end_user_workflow.py comprehensive test suite",
+      "impact": "No user workflows function correctly - complete regression in TUI functionality"
+    },
+    {
+      "severity": "major",
+      "category": "contract",
+      "description": "CLI command help returns error code 1 instead of success code 0, violating expected command line interface contract for help operations.",
+      "location": "/Users/mikko/github/AgentsMCP/agentsmcp CLI wrapper",
+      "impact": "CLI integration broken - help command appears to fail even when help text is displayed"
+    },
+    {
+      "severity": "minor",
+      "category": "performance",
+      "description": "Performance benchmarking impossible due to immediate shutdown - cannot measure startup/shutdown times or interaction responsiveness.",
+      "location": "test_end_to_end_user_workflow.py:_test_performance_benchmarks()",
+      "impact": "Unable to verify performance requirements are met"
+    }
+  ],
+  "patches": [
+    {
+      "file": "/Users/mikko/github/AgentsMCP/src/agentsmcp/ui/v2/reliability/integration_layer.py",
+      "description": "Fix ReliableTUIInterface.run() method to not call stop() in finally block unless shutdown was actually requested or startup failed",
+      "code": "        finally:\n            # CRITICAL FIX: Only run cleanup if we actually need to shutdown\n            # Don't shutdown Guardian if TUI should still be running\n            if self._shutdown_requested or startup_failed:\n                try:\n                    await self.stop()\n                except Exception as e:\n                    logger.error(f\"Error during TUI shutdown: {e}\")"
+    },
+    {
+      "file": "/Users/mikko/github/AgentsMCP/src/agentsmcp/ui/v2/reliability/integration_layer.py", 
+      "description": "Fix _wait_for_tui_completion() to properly wait for user exit instead of returning immediately",
+      "code": "    async def _wait_for_tui_completion(self):\n        \"\"\"\n        Wait for the TUI to complete execution - blocks until user exits.\n        \n        This method should not return until user types quit/exit.\n        \"\"\"\n        if not self._original_tui:\n            logger.error(\"Cannot wait for TUI completion - TUI not initialized\")\n            return\n            \n        logger.info(\"Waiting for TUI completion (until user exits)...\")\n        \n        try:\n            # In fallback mode, let original TUI handle everything\n            if self._fallback_mode:\n                logger.warning(\"_wait_for_tui_completion called in fallback mode\")\n                return\n                \n            # Wait for the original TUI's main loop to actually complete\n            # This should block until user types quit/exit\n            await self.run_main_loop()\n            \n        except Exception as e:\n            logger.error(f\"Error waiting for TUI completion: {e}\")\n            raise"
+    },
+    {
+      "file": "/Users/mikko/github/AgentsMCP/src/agentsmcp/ui/v2/reliability/integration_layer.py",
+      "description": "Remove timeout protection from main loop to allow indefinite user interaction",
+      "code": "    async def run_main_loop(self, *args, **kwargs):\n        \"\"\"Run main loop without timeout - should run until user exits.\"\"\"\n        if not self._original_tui:\n            logger.error(\"Cannot run main loop - TUI not initialized\")\n            return\n            \n        try:\n            # Record UI activity for health monitoring\n            if self._health_monitor:\n                await self._health_monitor.record_ui_update()\n                await self._health_monitor.record_event_processed()\n                \n            # CRITICAL FIX: Remove timeout protection for main loop\n            # The main loop should run indefinitely until user exits\n            if hasattr(self._original_tui, '_run_main_loop'):\n                logger.info(\"Starting main loop (will run until user exits)\")\n                return await self._original_tui._run_main_loop(*args, **kwargs)\n            else:\n                logger.error(\"RevolutionaryTUIInterface._run_main_loop method not found\")\n                return\n                \n        except Exception as e:\n            logger.error(f\"Main loop failed: {e}\")\n            # Don't attempt recovery for user-initiated exit\n            if \"quit\" in str(e).lower() or \"exit\" in str(e).lower():\n                return\n            raise"
+    }
+  ]
+}

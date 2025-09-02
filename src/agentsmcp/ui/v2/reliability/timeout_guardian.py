@@ -95,6 +95,10 @@ class TimeoutGuardian:
         self._monitor_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
         
+        # Startup protection - grace period to prevent immediate timeouts
+        self._startup_grace_period = 2.0  # 2 second grace period after reset
+        self._last_reset_time = 0.0
+        
         # Statistics
         self.total_operations = 0
         self.timed_out_operations = 0
@@ -114,6 +118,11 @@ class TimeoutGuardian:
             while not self._shutdown_event.is_set():
                 current_time = time.time()
                 timed_out_ops = []
+                
+                # Respect startup grace period to prevent immediate timeouts after reset
+                if current_time - self._last_reset_time < self._startup_grace_period:
+                    await asyncio.sleep(self.detection_precision)
+                    continue
                 
                 # Check all active operations for timeout
                 for op_id, context in self.active_operations.items():
@@ -380,6 +389,29 @@ class TimeoutGuardian:
             })
         
         return operations
+    
+    async def reset_state(self):
+        """Reset Guardian state for fresh TUI session."""
+        logger.info("Resetting Guardian state for new TUI session")
+        
+        # Cancel any existing operations first
+        if self.active_operations:
+            logger.warning(f"Clearing {len(self.active_operations)} stale operations from previous session")
+            await self.cancel_all_operations("State reset - clearing stale operations")
+        
+        # Clear all tracking state
+        self.active_operations.clear()
+        self.operation_counter = 0
+        
+        # Set startup grace period to prevent immediate timeouts
+        self._last_reset_time = time.time()
+        
+        # Reset statistics but keep historical totals for debugging
+        logger.debug(f"Previous session stats - Total: {self.total_operations}, Timeouts: {self.timed_out_operations}, Completed: {self.completed_operations}")
+        
+        # Don't reset historical counters completely - just mark the reset point
+        # This helps with debugging across sessions while ensuring clean state
+        logger.info(f"Guardian state reset complete - startup grace period active for {self._startup_grace_period}s")
     
     async def cancel_all_operations(self, reason: str = "Guardian shutdown"):
         """Cancel all active operations."""

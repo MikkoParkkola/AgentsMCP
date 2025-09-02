@@ -219,9 +219,16 @@ class ReliableTUIInterface:
         logger.debug("Initializing reliability components")
         
         try:
-            # Initialize timeout guardian
+            # Initialize timeout guardian with clean state
             self._timeout_guardian = get_global_guardian()
-            logger.debug("Timeout guardian initialized")
+            
+            # Reset Guardian state to clear any stale operations from previous TUI sessions
+            try:
+                await self._timeout_guardian.reset_state()  # Clear stale operations
+                logger.debug("Timeout guardian initialized with clean state")
+            except Exception as e:
+                logger.warning(f"Guardian reset failed but continuing: {e}")
+                # Continue with potentially stale guardian rather than failing completely
             
             # Initialize startup orchestrator
             startup_config = create_startup_config(

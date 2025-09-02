@@ -57,6 +57,20 @@ from .health_monitor import (
     start_tui_health_monitoring
 )
 
+from .recovery_manager import (
+    RecoveryManager,
+    RecoveryStrategy,
+    RecoveryStatus,
+    ComponentFailureType,
+    ComponentFailure,
+    RecoveryResult,
+    RecoveryConfig,
+    ComponentRecoveryInterface,
+    get_global_recovery_manager,
+    setup_tui_recovery_system,
+    trigger_component_recovery
+)
+
 __all__ = [
     # Startup orchestration
     'StartupOrchestrator',
@@ -95,7 +109,20 @@ __all__ = [
     'PerformanceReport',
     'HangDetectionConfig',
     'get_global_health_monitor',
-    'start_tui_health_monitoring'
+    'start_tui_health_monitoring',
+    
+    # Recovery management
+    'RecoveryManager',
+    'RecoveryStrategy',
+    'RecoveryStatus',
+    'ComponentFailureType',
+    'ComponentFailure',
+    'RecoveryResult',
+    'RecoveryConfig',
+    'ComponentRecoveryInterface',
+    'get_global_recovery_manager',
+    'setup_tui_recovery_system',
+    'trigger_component_recovery'
 ]
 
 # Version info

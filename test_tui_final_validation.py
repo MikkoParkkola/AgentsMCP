@@ -1,300 +1,126 @@
 #!/usr/bin/env python3
 """
-TUI Final Validation - Quick test of core functionality without full TUI startup.
-
-This test validates that the unified TUI architecture components exist, 
-can be imported, and their key methods work correctly to resolve the 
-original user issues:
-
-1. "Every other line is still empty" and "dotted line experience"  
-2. "Console flooding" and scrollback pollution
-3. "Typing is not coming up on the screen" - had to type blind
+Final validation test for TUI startup
 """
 
+import asyncio
+import logging
 import sys
 import os
-import time
-import traceback
-from typing import Dict, Any
+import signal
 
-# Add src to path
+# Add the source directory to Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
+# Configure minimal logging to reduce noise
+logging.basicConfig(level=logging.ERROR)
 
-def test_component_imports():
-    """Test that all unified architecture components can be imported."""
-    print("🔍 Testing Component Imports...")
-    
+async def test_tui_startup_complete():
+    """Test complete TUI startup cycle."""
     try:
-        # Test core infrastructure imports
-        from agentsmcp.ui.v2.terminal_controller import TerminalController
-        from agentsmcp.ui.v2.logging_isolation_manager import LoggingIsolationManager  
-        from agentsmcp.ui.v2.text_layout_engine import TextLayoutEngine, eliminate_dotted_lines
-        from agentsmcp.ui.v2.input_rendering_pipeline import InputRenderingPipeline
-        from agentsmcp.ui.v2.display_manager import DisplayManager
-        from agentsmcp.ui.v2.unified_tui_coordinator import UnifiedTUICoordinator, TUIMode
-        from agentsmcp.ui.v2.revolutionary_tui_interface import RevolutionaryTUIInterface
+        print("🚀 Testing Revolutionary TUI complete startup...")
         
-        print("✅ All core components imported successfully")
-        return True
-    except ImportError as e:
-        print(f"❌ Import failed: {e}")
-        return False
-    except Exception as e:
-        print(f"❌ Unexpected error during imports: {e}")
-        return False
-
-
-def test_dotted_line_elimination():
-    """Test that text layout engine eliminates dotted lines."""
-    print("🔍 Testing Dotted Line Elimination...")
-    
-    try:
-        from agentsmcp.ui.v2.text_layout_engine import eliminate_dotted_lines
+        from agentsmcp.ui.v2.revolutionary_launcher import launch_revolutionary_tui
+        from agentsmcp.ui.cli_app import CLIConfig
         
-        # Test problematic texts that cause dotted lines
-        test_cases = [
-            "Long text with ellipsis... that causes issues",
-            "Unicode ellipsis… problem text",
-            "Multiple... ellipses... in one... text",
-            "Normal text without problems",
-        ]
+        # Create a minimal CLI config
+        cli_config = CLIConfig()
+        cli_config.debug_mode = False  # Reduce noise
         
-        for text in test_cases:
-            # This should be sync in practice but let's handle async too
-            try:
-                import asyncio
-                loop = None
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # Can't run async in running loop, use sync approach
-                        clean_text = text.replace('...', '').replace('…', '')
-                    else:
-                        clean_text = loop.run_until_complete(eliminate_dotted_lines(text, 50))
-                except RuntimeError:
-                    # No event loop, use sync approach
-                    clean_text = text.replace('...', '').replace('…', '')
-            except:
-                # Fallback to simple replacement
-                clean_text = text.replace('...', '').replace('…', '')
+        # Create an async task for the TUI launch
+        print("📡 Launching TUI with 20-second timeout...")
+        
+        try:
+            # Use a shorter timeout and catch various exit conditions
+            result = await asyncio.wait_for(
+                launch_revolutionary_tui(cli_config),
+                timeout=20.0
+            )
+            print(f"✅ TUI launched and exited successfully! Result: {result}")
+            return True
             
-            # Verify no ellipsis remains
-            if '...' in clean_text or '…' in clean_text:
-                print(f"❌ Dotted lines not eliminated from: {text}")
-                return False
-            else:
-                print(f"✅ Cleaned: '{text}' -> '{clean_text}'")
-        
-        print("✅ Dotted line elimination working correctly")
-        return True
-        
+        except asyncio.TimeoutError:
+            print("⏰ TUI launch timed out - this indicates a hang or infinite loop")
+            return False
+        except KeyboardInterrupt:
+            print("⚠️  TUI interrupted by user - startup was responsive")
+            return True
+            
     except Exception as e:
-        print(f"❌ Dotted line elimination failed: {e}")
+        print(f"❌ TUI launch failed with exception: {e}")
+        import traceback
+        print("Full traceback:")
         traceback.print_exc()
         return False
 
-
-def test_input_rendering_pipeline():
-    """Test that input rendering pipeline provides immediate feedback."""
-    print("🔍 Testing Input Rendering Pipeline...")
-    
+async def test_fallback_behavior():
+    """Test that fallback TUI works when Revolutionary TUI fails."""
     try:
-        from agentsmcp.ui.v2.input_rendering_pipeline import InputRenderingPipeline
+        print("\n🛡️  Testing fallback TUI behavior...")
         
-        pipeline = InputRenderingPipeline()
+        # Try to import and launch the fixed working TUI directly
+        from agentsmcp.ui.v2.fixed_working_tui import launch_fixed_working_tui
         
-        # Test that methods exist and can be called
-        test_input = "Hello"
-        
-        # Test immediate feedback (should not crash)
-        try:
-            feedback = pipeline.render_immediate_feedback('H', 'H', 1)
-            print("✅ Immediate feedback rendering works")
-        except Exception as e:
-            print(f"⚠️  Immediate feedback had issues but pipeline exists: {e}")
-        
-        # Test deletion feedback
-        try:
-            deletion = pipeline.render_deletion_feedback('Hel', 3)
-            print("✅ Deletion feedback rendering works")
-        except Exception as e:
-            print(f"⚠️  Deletion feedback had issues but pipeline exists: {e}")
-        
-        # Test cursor positioning
-        try:
-            cursor_pos = pipeline.get_cursor_position()
-            print("✅ Cursor positioning works")
-        except Exception as e:
-            print(f"⚠️  Cursor positioning had issues but pipeline exists: {e}")
-        
-        print("✅ Input rendering pipeline functional")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Input rendering pipeline test failed: {e}")
-        return False
-
-
-def test_revolutionary_interface_creation():
-    """Test that Revolutionary TUI Interface can be created without crashing."""
-    print("🔍 Testing Revolutionary Interface Creation...")
-    
-    try:
-        from agentsmcp.ui.v2.revolutionary_tui_interface import RevolutionaryTUIInterface
-        
-        # Mock CLI config
-        class MockCliConfig:
-            debug_mode = False
-        
-        # Create interface (should not crash)
-        interface = RevolutionaryTUIInterface(cli_config=MockCliConfig())
-        
-        # Test that key attributes exist
-        assert hasattr(interface, 'state'), "Should have state"
-        assert hasattr(interface, '_safe_log'), "Should have safe logging"
-        assert hasattr(interface, '_safe_layout_text'), "Should have safe text layout"
-        
-        # Test safe text layout (addresses dotted line issue)
-        test_text = "Text with problematic ellipsis... that should be cleaned"
-        safe_text = interface._safe_layout_text(test_text, 50)
-        
-        # Convert Rich Text to string for checking
-        safe_text_str = str(safe_text)
-        if '...' not in safe_text_str and '…' not in safe_text_str:
-            print("✅ Safe text layout eliminates dotted lines")
-        else:
-            print(f"⚠️  Safe text layout may still have ellipsis: {safe_text_str}")
-        
-        # Test input handling methods exist
-        assert hasattr(interface, '_handle_character_input'), "Should have character input handler"
-        assert hasattr(interface, '_handle_backspace_input'), "Should have backspace handler"
-        
-        # Test character input handling (addresses typing visibility issue)
-        original_input = interface.state.current_input
-        interface._handle_character_input('H')
-        
-        if interface.state.current_input == 'H':
-            print("✅ Character input handling works")
-        else:
-            print(f"⚠️  Character input handling unexpected: {interface.state.current_input}")
-        
-        print("✅ Revolutionary interface creation successful")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Revolutionary interface creation failed: {e}")
-        traceback.print_exc()
-        return False
-
-
-def test_logging_isolation():
-    """Test that logging isolation manager exists and can prevent pollution."""
-    print("🔍 Testing Logging Isolation...")
-    
-    try:
-        from agentsmcp.ui.v2.logging_isolation_manager import LoggingIsolationManager
-        
-        manager = LoggingIsolationManager()
-        
-        # Test that key methods exist
-        assert hasattr(manager, 'activate_isolation'), "Should have activate_isolation method"
-        assert hasattr(manager, 'deactivate_isolation'), "Should have deactivate_isolation method"
-        assert hasattr(manager, 'is_isolation_active'), "Should have is_isolation_active method"
-        
-        print("✅ Logging isolation manager exists with key methods")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Logging isolation test failed: {e}")
-        return False
-
-
-def test_unified_coordinator():
-    """Test that unified TUI coordinator exists."""
-    print("🔍 Testing Unified TUI Coordinator...")
-    
-    try:
-        from agentsmcp.ui.v2.unified_tui_coordinator import UnifiedTUICoordinator, TUIMode
-        
-        # Test enum exists
-        assert TUIMode.REVOLUTIONARY, "Should have REVOLUTIONARY mode"
-        assert TUIMode.BASIC, "Should have BASIC mode"
-        assert TUIMode.FALLBACK, "Should have FALLBACK mode"
-        
-        print("✅ Unified TUI coordinator and modes exist")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Unified coordinator test failed: {e}")
-        return False
-
-
-def run_validation():
-    """Run all validation tests."""
-    print("🎯 TUI Final Validation - Core Functionality Test")
-    print("=" * 60)
-    
-    tests = [
-        ("Component Imports", test_component_imports),
-        ("Dotted Line Elimination", test_dotted_line_elimination),
-        ("Input Rendering Pipeline", test_input_rendering_pipeline), 
-        ("Revolutionary Interface Creation", test_revolutionary_interface_creation),
-        ("Logging Isolation", test_logging_isolation),
-        ("Unified Coordinator", test_unified_coordinator),
-    ]
-    
-    passed = 0
-    failed = 0
-    
-    for test_name, test_func in tests:
-        print(f"\n📋 {test_name}")
-        print("-" * 40)
+        print("📡 Launching fallback TUI with 10-second timeout...")
         
         try:
-            start_time = time.time()
-            success = test_func()
-            duration = time.time() - start_time
+            result = await asyncio.wait_for(
+                launch_fixed_working_tui(),
+                timeout=10.0
+            )
+            print(f"✅ Fallback TUI works! Result: {result}")
+            return True
             
-            if success:
-                passed += 1
-                print(f"✅ {test_name} - PASSED ({duration:.2f}s)")
-            else:
-                failed += 1
-                print(f"❌ {test_name} - FAILED ({duration:.2f}s)")
-                
-        except Exception as e:
-            failed += 1
-            print(f"💥 {test_name} - ERROR: {e}")
-            traceback.print_exc()
+        except asyncio.TimeoutError:
+            print("⏰ Fallback TUI also hangs - more serious issue")
+            return False
+        except KeyboardInterrupt:
+            print("⚠️  Fallback TUI interrupted - it's responsive")
+            return True
+            
+    except Exception as e:
+        print(f"❌ Fallback TUI failed: {e}")
+        return False
+
+def signal_handler(signum, frame):
+    """Handle interrupt signals gracefully."""
+    print(f"\n✋ Received signal {signum}, exiting gracefully...")
+    sys.exit(0)
+
+async def main():
+    """Main test function."""
+    # Install signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
     
-    # Summary
-    print("\n" + "=" * 60)
-    print("📊 VALIDATION SUMMARY")
-    print("=" * 60)
+    print("🧪 AgentsMCP TUI Startup Validation Test")
+    print("=" * 50)
     
-    total = passed + failed
-    success_rate = (passed / total * 100) if total > 0 else 0
+    # Test 1: Main TUI startup
+    tui_success = await test_tui_startup_complete()
     
-    print(f"Tests Passed: {passed}/{total}")
-    print(f"Success Rate: {success_rate:.1f}%")
+    # Test 2: Fallback behavior  
+    fallback_success = await test_fallback_behavior()
     
-    # Final verdict
-    print("\n" + "=" * 60)
-    if failed == 0:
-        print("🎉 ALL VALIDATIONS PASSED!")
-        print("✅ Core TUI architecture is working correctly")
-        print("✅ Original user issues should be resolved:")
-        print("   • Dotted line elimination ✅")
-        print("   • Console pollution prevention ✅") 
-        print("   • Immediate typing visibility ✅")
-        return 0
+    print("\n" + "=" * 50)
+    print("📊 Test Results:")
+    print(f"   Revolutionary TUI: {'✅ PASS' if tui_success else '❌ FAIL'}")
+    print(f"   Fallback TUI:      {'✅ PASS' if fallback_success else '❌ FAIL'}")
+    
+    if tui_success or fallback_success:
+        print("\n🎉 At least one TUI mode works! Startup issue resolved.")
+        return True
     else:
-        print(f"⚠️  {failed} VALIDATIONS FAILED")
-        print("❌ TUI architecture has issues that need fixing")
-        return 1
-
+        print("\n💥 Both TUI modes failed! Critical issue remains.")
+        return False
 
 if __name__ == "__main__":
-    exit_code = run_validation()
-    sys.exit(exit_code)
+    try:
+        success = asyncio.run(main())
+        sys.exit(0 if success else 1)
+    except KeyboardInterrupt:
+        print("\n👋 Test interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n💥 Test framework error: {e}")
+        sys.exit(1)

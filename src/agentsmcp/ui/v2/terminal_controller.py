@@ -97,7 +97,7 @@ class TerminalController:
     
     def __init__(self):
         """Initialize the terminal controller."""
-        self._lock = threading.RLock()
+        self._lock = asyncio.Lock()
         self._initialized = False
         self._active_contexts: Set[weakref.ref] = set()
         
@@ -126,7 +126,7 @@ class TerminalController:
         Returns:
             True if initialization successful, False otherwise
         """
-        async with asyncio.Lock():
+        async with self._lock:
             if self._initialized:
                 return True
                 
@@ -197,7 +197,7 @@ class TerminalController:
             # THREAT: UI freeze from blocking terminal operations
             # MITIGATION: Apply timeout to async operations
             async with asyncio.timeout(2.0):  # 2 second timeout
-                with self._lock:
+                async with self._lock:
                     if not self._initialized or not self._current_state:
                         return False
                     
@@ -254,7 +254,7 @@ class TerminalController:
         start_time = asyncio.get_event_loop().time()
         
         try:
-            with self._lock:
+            async with self._lock:
                 if not self._alternate_screen_active:
                     return True
                 
@@ -294,7 +294,7 @@ class TerminalController:
         start_time = asyncio.get_event_loop().time()
         
         try:
-            with self._lock:
+            async with self._lock:
                 if not self._initialized or not self._current_state:
                     return False
                 
@@ -339,7 +339,20 @@ class TerminalController:
         Args:
             callback: Function to call when size changes
         """
-        with self._lock:
+        # Note: Using asyncio.run since this is a sync function but we have an async lock
+        # This is not ideal but needed for backward compatibility
+        try:
+            loop = asyncio.get_running_loop()
+            # If we're in an async context, we can't use async with from a sync function
+            # Instead, just add the callback directly - the lock is mainly for initialization
+            self._size_callbacks.add(callback)
+        except RuntimeError:
+            # No event loop running, safe to create one temporarily
+            asyncio.run(self._add_callback_async(callback))
+    
+    async def _add_callback_async(self, callback: Callable[[SizeChangedEvent], None]) -> None:
+        """Helper method to add callback with async lock."""
+        async with self._lock:
             self._size_callbacks.add(callback)
     
     def unregister_size_change_callback(self, callback: Callable[[SizeChangedEvent], None]) -> None:
@@ -349,7 +362,18 @@ class TerminalController:
         Args:
             callback: Function to remove from callbacks
         """
-        with self._lock:
+        # Same pattern as register - avoid async with in sync function
+        try:
+            loop = asyncio.get_running_loop()
+            # If we're in an async context, just remove directly
+            self._size_callbacks.discard(callback)
+        except RuntimeError:
+            # No event loop running, safe to create one temporarily
+            asyncio.run(self._remove_callback_async(callback))
+    
+    async def _remove_callback_async(self, callback: Callable[[SizeChangedEvent], None]) -> None:
+        """Helper method to remove callback with async lock."""
+        async with self._lock:
             self._size_callbacks.discard(callback)
     
     @contextmanager
@@ -424,7 +448,7 @@ class TerminalController:
                 operations_completed += 1
             
             # Clear state
-            with self._lock:
+            async with self._lock:
                 self._initialized = False
                 self._current_state = None
                 self._size_callbacks.clear()
