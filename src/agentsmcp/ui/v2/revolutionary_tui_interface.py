@@ -619,7 +619,6 @@ class RevolutionaryTUIInterface:
         content_lines.append(f"🎯 TUI Ready & Active")
         content_lines.append(f"⏰ {current_time}")
         content_lines.append(f"📡 Up {uptime_mins:.1f}min")
-        content_lines.append("")  # Separator
         
         # Agent status - expanded display for wider sidebar
         for agent_name, status in self.state.agent_status.items():
@@ -631,7 +630,6 @@ class RevolutionaryTUIInterface:
         
         # System metrics - add to content lines
         if self.state.system_metrics:
-            content_lines.append("")  # Empty line separator
             content_lines.append("📊 System Metrics:")
             
             fps = self.state.system_metrics.get('fps', 0)
@@ -759,22 +757,16 @@ class RevolutionaryTUIInterface:
             # Expanded format with full timestamps
             time_display = f"[{timestamp}]" if timestamp else ""
             
-            # Role-specific formatting - build as strings
+            # Role-specific formatting - build as strings (compact layout without empty separators)
             if role == 'user':
                 content_lines.append(f"👤 User {time_display}:")
                 content_lines.append(display_message)
-                if i < len(recent_messages) - 1:  # Add separator if not last
-                    content_lines.append("")
             elif role == 'assistant':
                 content_lines.append(f"🤖 Assistant {time_display}:")
                 content_lines.append(display_message)
-                if i < len(recent_messages) - 1:  # Add separator if not last
-                    content_lines.append("")
             elif role == 'system':
                 content_lines.append(f"⚙️ System {time_display}:")
                 content_lines.append(display_message)
-                if i < len(recent_messages) - 1:  # Add separator if not last
-                    content_lines.append("")
         
         # Use text layout engine to create final text
         content_text = "\n".join(content_lines) if content_lines else "No messages yet"
@@ -817,7 +809,6 @@ class RevolutionaryTUIInterface:
         
         # Expanded status and help information  
         if not self.state.current_input and not self.state.is_processing:
-            content_lines.append("")
             content_lines.append("💡 Quick Help: Type message & press Enter • /help for commands • /quit to exit")
             content_lines.append("🎯 TUI is Ready & Waiting for Input!")
             if hasattr(self, '_startup_time'):
@@ -829,12 +820,10 @@ class RevolutionaryTUIInterface:
         
         # History navigation indicator
         if self.history_index > -1:
-            content_lines.append("")
             content_lines.append(f"📋 History: {self.history_index + 1}/{len(self.input_history)}")
         
         # AI suggestions with expanded display
         if self.state.input_suggestions:
-            content_lines.append("")
             content_lines.append("✨ AI Suggestions:")
             suggestion_items = self.state.input_suggestions[:3]  # Show more suggestions
             for i, suggestion in enumerate(suggestion_items):
