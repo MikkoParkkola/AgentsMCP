@@ -9,6 +9,7 @@ import asyncio
 import logging
 import time
 import psutil
+import platform
 import threading
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
@@ -507,8 +508,8 @@ class PerformanceMonitor:
                 'cpu_count': psutil.cpu_count(),
                 'memory_total_gb': psutil.virtual_memory().total / (1024**3),
                 'disk_total_gb': psutil.disk_usage('/').total / (1024**3),
-                'platform': psutil.platform.platform(),
-                'python_version': psutil.platform.python_version()
+                'platform': platform.platform(),
+                'python_version': platform.python_version()
             }
         except Exception as e:
             logger.warning(f"Could not get system info: {e}")

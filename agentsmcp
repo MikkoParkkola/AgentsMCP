@@ -56,6 +56,11 @@ def show_tui_help():
     print("  ./agentsmcp tui [OPTIONS]          Start TUI with default settings")
     print("  ./agentsmcp ui [OPTIONS]           Alias for 'tui'")
     print()
+    print("TUI BEHAVIOR:")
+    print("  • Interactive mode: When run from a real terminal/TTY")
+    print("  • Demo mode: When run from non-TTY environment (e.g., IDE)")
+    print("  • Auto-detects environment and adapts accordingly")
+    print()
     print("TUI OPTIONS:")
     print("  --theme {auto|light|dark}          Set color theme (default: auto)")
     print("  --no-welcome                       Skip welcome screen")
@@ -78,18 +83,23 @@ def show_tui_help():
     print("  ollama                 - Basic Ollama agent")
     print()
     print("EXAMPLES:")
-    print("  ./agentsmcp tui                          # Start with auto theme")
+    print("  ./agentsmcp tui                          # Start (auto-detects mode)")
     print("  ./agentsmcp ui --theme dark              # Dark theme")
     print("  ./agentsmcp tui --debug                  # Debug mode")
     print("  ./agentsmcp tui --no-welcome             # Skip intro")
     print("  ./agentsmcp tui --agent codex            # Use Codex agent")
     print("  ./agentsmcp ui --orchestrator-model o1   # Set orchestrator model")
     print()
-    print("KEYBOARD SHORTCUTS:")
+    print("INTERACTIVE MODE (TTY):")
     print("  Ctrl+C     - Exit TUI")
     print("  /quit      - Exit command")
     print("  /help      - Show TUI help")
     print("  /clear     - Clear chat history")
+    print()
+    print("DEMO MODE (Non-TTY):")
+    print("  • Shows Revolutionary TUI capabilities")
+    print("  • Runs automated demonstration sequence")
+    print("  • Exits automatically after demo completion")
     print()
     print("TROUBLESHOOTING:")
     print("  • Ensure terminal is at least 80x24 characters")
@@ -208,16 +218,23 @@ def handle_tui_command(args: List[str]) -> int:
     
     try:
         # Import and run the TUI with processed arguments
-        if "--debug" in args:
+        debug_mode = "--debug" in args
+        if debug_mode:
             print(f"🔧 Debug: Starting Modern TUI with arguments: {cli_args}")
         
         # Convert CLI args to config and run the TUI
+        if debug_mode:
+            print("🔧 Debug: Importing CLIApp and CLIConfig...")
         from agentsmcp.ui.cli_app import CLIApp, CLIConfig
         import asyncio
         
+        if debug_mode:
+            print("🔧 Debug: Creating CLIConfig...")
         # Build config from CLI args
         config = CLIConfig()
         
+        if debug_mode:
+            print("🔧 Debug: Parsing CLI arguments...")
         # Parse the processed CLI args
         i = 0
         while i < len(cli_args):
@@ -237,12 +254,21 @@ def handle_tui_command(args: List[str]) -> int:
                     pass
             i += 1
         
+        if debug_mode:
+            print(f"🔧 Debug: Final config - debug_mode: {config.debug_mode}, theme: {getattr(config, 'theme_mode', 'default')}")
+            print("🔧 Debug: Creating CLIApp in TUI mode...")
+        
         # Create CLI app in TUI mode
         app = CLIApp(config, mode="tui")
+        
+        if debug_mode:
+            print("🔧 Debug: Starting CLIApp with asyncio.run()...")
+        
         result = asyncio.run(app.start())
         
-        if config.debug_mode:
+        if debug_mode:
             print(f"🔧 Debug: TUI session result: {result}")
+            print("🔧 Debug: TUI session completed normally")
         
         return 0
     except KeyboardInterrupt:
@@ -250,6 +276,14 @@ def handle_tui_command(args: List[str]) -> int:
         return 0
     except Exception as e:
         print(f"❌ TUI failed to start: {e}")
+        
+        if debug_mode:
+            print("\n🔧 Debug: Full exception traceback:")
+            import traceback
+            traceback.print_exc()
+            print(f"🔧 Debug: Exception type: {type(e)}")
+            print(f"🔧 Debug: Exception args: {e.args}")
+        
         print()
         print("TROUBLESHOOTING STEPS:")
         print("1. Check Python version: python3 --version")
@@ -329,7 +363,7 @@ def show_main_help():
     print("=" * 70)
     print()
     print("QUICK START:")
-    print("  ./agentsmcp tui                   🎨 Launch modern TUI (recommended)")
+    print("  ./agentsmcp tui                   🎨 Launch modern TUI (demo mode)")
     print("  ./agentsmcp ui                    🎨 Alias for TUI")
     print("  ./agentsmcp status                🔍 Check system readiness")
     print("  ./agentsmcp init setup            🛠️  First-time setup wizard")
@@ -342,6 +376,11 @@ def show_main_help():
     print("  knowledge                       Knowledge base & model management")
     print("  server                          Server lifecycle & integration")
     print("  config                          Configuration management")
+    print()
+    print("TUI NOTES:")
+    print("  • TUI runs in demo mode when no TTY is available")
+    print("  • For true interactive use, run from a real terminal/console")
+    print("  • In non-TTY environments, TUI shows capabilities demonstration")
     print()
     print("TUI EXAMPLES:")
     print("  ./agentsmcp tui --theme dark     Dark theme")

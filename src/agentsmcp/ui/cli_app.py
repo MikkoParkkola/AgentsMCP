@@ -185,14 +185,25 @@ class CLIApp:
     
     async def start(self) -> Dict[str, Any]:
         """Start the CLI application"""
+        if self.config.debug_mode:
+            print(f"🔧 Debug: CLIApp.start() called with mode: {self.current_mode}")
+            
         self.is_running = True
         self.session_start_time = asyncio.get_event_loop().time()
+        
+        if self.config.debug_mode:
+            print(f"🔧 Debug: Session start time: {self.session_start_time}")
+            print(f"🔧 Debug: Theme mode: {self.config.theme_mode}")
         
         # Apply theme configuration
         if self.config.theme_mode != "auto":
             self.theme_manager.set_theme(self.config.theme_mode)
         else:
             self.theme_manager.auto_detect_theme()
+        
+        if self.config.debug_mode:
+            print(f"🔧 Debug: Theme applied, checking welcome screen...")
+            print(f"🔧 Debug: show_welcome={self.config.show_welcome}, current_mode={self.current_mode}")
         
         # Show welcome screen (skip for TUI to avoid ASCII art)
         if self.config.show_welcome and self.current_mode != "tui":
@@ -211,15 +222,26 @@ class CLIApp:
             pass
         
         # Start main application loop
+        if self.config.debug_mode:
+            print(f"🔧 Debug: Starting main application loop with mode: {self.current_mode}")
+            
         try:
             if self.current_mode == "interactive":
+                if self.config.debug_mode:
+                    print("🔧 Debug: Launching interactive mode...")
                 # Legacy basic REPL (unchanged).
                 await self._run_interactive_mode()
             elif self.current_mode == "dashboard":
+                if self.config.debug_mode:
+                    print("🔧 Debug: Launching dashboard mode...")
                 await self._run_dashboard_mode()
             elif self.current_mode == "stats":
+                if self.config.debug_mode:
+                    print("🔧 Debug: Launching statistics mode...")
                 await self._run_statistics_mode()
             elif self.current_mode == "tui":
+                if self.config.debug_mode:
+                    print("🔧 Debug: Launching TUI mode - calling _run_modern_tui()...")
                 # Launch the rich terminal interface
                 try:
                     await self._run_modern_tui()
@@ -355,11 +377,22 @@ class CLIApp:
         - Provides graceful fallback to basic TUI on any failures
         - Maintains complete backward compatibility
         """
+        if self.config.debug_mode:
+            print("🔧 Debug: _run_modern_tui() called")
+            
         print("🚀 Starting Revolutionary TUI system...")
         
         try:
+            if self.config.debug_mode:
+                print("🔧 Debug: Importing revolutionary_launcher...")
+                
             # Import and launch Revolutionary TUI system
             from .v2.revolutionary_launcher import launch_revolutionary_tui
+            
+            if self.config.debug_mode:
+                print("🔧 Debug: Calling launch_revolutionary_tui()...")
+                print(f"🔧 Debug: Config passed - debug_mode: {self.config.debug_mode}")
+                
             exit_code = await launch_revolutionary_tui(self.config)
             
             if exit_code != 0:

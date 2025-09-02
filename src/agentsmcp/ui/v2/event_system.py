@@ -431,7 +431,9 @@ class AsyncEventSystem:
     def __del__(self):
         """Cleanup on deletion."""
         if self._running:
-            logger.warning("Event system deleted while running")
+            logger.debug("Event system deleted while running - scheduling cleanup")
+            # Don't log as warning since this can happen during normal shutdown
+            # when Python's garbage collector runs before explicit cleanup
 
 
 class KeyboardEventHandler(EventHandler):

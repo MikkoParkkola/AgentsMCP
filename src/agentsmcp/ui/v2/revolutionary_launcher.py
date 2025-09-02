@@ -84,33 +84,72 @@ class RevolutionaryLauncher:
         Returns:
             Exit code (0 for success, 1 for error)
         """
+        debug_mode = getattr(self.cli_config, 'debug_mode', False)
+        
         try:
             print("🚀 Starting Revolutionary TUI Launcher")
             logger.info("🚀 Starting Revolutionary TUI Launcher")
             
+            if debug_mode:
+                print(f"🔧 Debug: Revolutionary launcher initialized with config: {self.cli_config}")
+                print(f"🔧 Debug: Feature manager type: {type(self.feature_manager)}")
+                print(f"🔧 Debug: Entry adapter type: {type(self.entry_adapter)}")
+            
             # Phase 1: Initialize feature detection
             print("Phase 1: Initializing feature detection...")
+            if debug_mode:
+                print("🔧 Debug: Starting feature detection initialization...")
+            
             if not await self._initialize_feature_detection():
                 print("⚠️ Feature detection failed, falling back to basic TUI")
                 logger.warning("Feature detection failed, falling back to basic TUI")
+                if debug_mode:
+                    print("🔧 Debug: Feature detection failed, launching fallback TUI")
                 return await self._launch_fallback_tui()
+            
+            if debug_mode:
+                print("🔧 Debug: Feature detection initialization completed successfully")
             
             # Phase 2: Determine optimal feature level
             print("Phase 2: Determining feature level...")
+            if debug_mode:
+                print("🔧 Debug: Starting feature level determination...")
+            
             feature_level = await self._determine_feature_level()
             print(f"✅ Determined feature level: {feature_level.name}")
             logger.info(f"Determined feature level: {feature_level.name}")
             
+            if debug_mode:
+                print(f"🔧 Debug: Feature level determined: {feature_level.name} ({feature_level.value})")
+            
             # Phase 3: Launch appropriate TUI implementation
             print(f"Phase 3: Launching {feature_level.name} TUI...")
-            return await self._launch_tui_for_level(feature_level)
+            if debug_mode:
+                print(f"🔧 Debug: About to launch TUI for level: {feature_level.name}")
+            
+            result = await self._launch_tui_for_level(feature_level)
+            
+            if debug_mode:
+                print(f"🔧 Debug: TUI launch completed with result: {result}")
+            
+            return result
             
         except Exception as e:
             logger.exception(f"Revolutionary launcher failed: {e}")
+            if debug_mode:
+                print(f"🔧 Debug: Revolutionary launcher exception: {type(e).__name__}: {e}")
+                print("🔧 Debug: Full exception traceback:")
+                import traceback
+                traceback.print_exc()
             # Always fallback gracefully
+            print("🔧 Debug: Falling back to fallback TUI due to exception" if debug_mode else "")
             return await self._launch_fallback_tui()
         finally:
+            if debug_mode:
+                print("🔧 Debug: Revolutionary launcher cleanup starting...")
             await self._cleanup()
+            if debug_mode:
+                print("🔧 Debug: Revolutionary launcher cleanup completed")
     
     async def _initialize_feature_detection(self) -> bool:
         """Initialize the feature activation manager.
@@ -227,13 +266,21 @@ class RevolutionaryLauncher:
     
     async def _launch_revolutionary_tui(self) -> int:
         """Launch Revolutionary-level TUI with core enhancements."""
+        debug_mode = getattr(self.cli_config, 'debug_mode', False)
+        
         print("🔥 Launching Revolutionary TUI with core enhancements")
         logger.info("🔥 Launching Revolutionary TUI with core enhancements")
         
         try:
             # Import the Revolutionary TUI Interface
             print("Importing Revolutionary TUI Interface...")
+            if debug_mode:
+                print("🔧 Debug: Importing revolutionary_tui_interface module...")
+            
             from .revolutionary_tui_interface import RevolutionaryTUIInterface, create_revolutionary_interface
+            
+            if debug_mode:
+                print("🔧 Debug: Revolutionary TUI Interface classes imported successfully")
             
             print("Initializing Revolutionary TUI Interface...")
             logger.info("Initializing Revolutionary TUI Interface...")
@@ -241,20 +288,36 @@ class RevolutionaryLauncher:
             # Try to initialize orchestrator integration
             orchestrator_integration = None
             try:
+                if debug_mode:
+                    print("🔧 Debug: Attempting to initialize orchestrator integration...")
                 from .orchestrator_integration import initialize_orchestrator_integration
                 orchestrator_integration = await initialize_orchestrator_integration()
+                if debug_mode:
+                    print(f"🔧 Debug: Orchestrator integration initialized: {orchestrator_integration}")
             except Exception as e:
                 logger.warning(f"Orchestrator integration failed, continuing without: {e}")
+                if debug_mode:
+                    print(f"🔧 Debug: Orchestrator integration failed: {type(e).__name__}: {e}")
             
             # Initialize revolutionary components
             revolutionary_components = {}
             try:
+                if debug_mode:
+                    print("🔧 Debug: Attempting to import revolutionary components...")
                 from ..components.symphony_dashboard import SymphonyDashboard
                 from ..components.ai_command_composer import AICommandComposer
                 from .event_system import AsyncEventSystem
                 
+                if debug_mode:
+                    print("🔧 Debug: Revolutionary components imported successfully")
+                    print("🔧 Debug: Creating event system...")
+                
                 event_system = AsyncEventSystem()
                 await event_system.initialize()
+                
+                if debug_mode:
+                    print("🔧 Debug: Event system initialized, creating component dict...")
+                
                 revolutionary_components = {
                     'symphony_dashboard': SymphonyDashboard(event_system),
                     'ai_command_composer': AICommandComposer(event_system),
@@ -262,26 +325,52 @@ class RevolutionaryLauncher:
                 }
                 logger.info("Revolutionary components initialized successfully")
                 
+                if debug_mode:
+                    print(f"🔧 Debug: Revolutionary components created: {list(revolutionary_components.keys())}")
+                
             except Exception as e:
                 logger.warning(f"Some revolutionary components failed to initialize: {e}")
+                if debug_mode:
+                    print(f"🔧 Debug: Revolutionary components initialization failed: {type(e).__name__}: {e}")
             
             # Create the Revolutionary TUI Interface
+            if debug_mode:
+                print("🔧 Debug: Creating Revolutionary TUI Interface...")
+                print(f"🔧 Debug: CLI config: {self.cli_config}")
+                print(f"🔧 Debug: Orchestrator integration: {orchestrator_integration}")
+                print(f"🔧 Debug: Revolutionary components count: {len(revolutionary_components)}")
+            
             revolutionary_interface = await create_revolutionary_interface(
                 cli_config=self.cli_config,
                 orchestrator_integration=orchestrator_integration,
                 revolutionary_components=revolutionary_components
             )
             
+            if debug_mode:
+                print(f"🔧 Debug: Revolutionary interface created: {type(revolutionary_interface)}")
+            
             self._active_components.append(revolutionary_interface)
             
             logger.info("🚀 Revolutionary TUI Interface created successfully - launching...")
+            if debug_mode:
+                print("🔧 Debug: About to call revolutionary_interface.run()...")
             
             # Launch the Revolutionary TUI Interface
-            return await revolutionary_interface.run()
+            result = await revolutionary_interface.run()
+            
+            if debug_mode:
+                print(f"🔧 Debug: Revolutionary interface run() completed with result: {result}")
+            
+            return result
             
         except Exception as e:
             print(f"❌ Revolutionary TUI Interface launch failed: {e}")
             logger.warning(f"Revolutionary TUI Interface launch failed: {e}")
+            if debug_mode:
+                print(f"🔧 Debug: Revolutionary TUI launch exception: {type(e).__name__}: {e}")
+                print("🔧 Debug: Full exception traceback:")
+                import traceback
+                traceback.print_exc()
             print("Falling back to enhanced TUI...")
             logger.info("Falling back to enhanced TUI...")
             return await self._launch_enhanced_tui()
@@ -323,18 +412,37 @@ class RevolutionaryLauncher:
             return await self._launch_basic_tui()
     
     async def _launch_basic_tui(self) -> int:
-        """Launch Basic-level TUI using the fixed working implementation."""
-        logger.info("🔧 Launching Basic TUI using fixed working implementation")
+        """Launch Basic-level TUI - try Revolutionary TUI in fallback mode first."""
+        logger.info("🔧 Launching Basic TUI - trying Revolutionary TUI in fallback mode")
         
         try:
-            # Direct fallback to fixed working TUI - skip adapter to avoid complexity
-            logger.info("Using direct fallback to fixed working TUI")
-            from .fixed_working_tui import launch_fixed_working_tui
-            return await launch_fixed_working_tui()
+            # First try: Revolutionary TUI Interface in basic/fallback mode
+            logger.info("Attempting Revolutionary TUI Interface in basic mode...")
+            from .revolutionary_tui_interface import RevolutionaryTUIInterface, create_revolutionary_interface
+            
+            # Create Revolutionary interface with minimal components for basic mode
+            revolutionary_interface = await create_revolutionary_interface(
+                cli_config=self.cli_config,
+                orchestrator_integration=None,  # No orchestrator for basic mode
+                revolutionary_components={}     # No extra components for basic mode
+            )
+            
+            self._active_components.append(revolutionary_interface)
+            
+            # Launch the interface - it will detect TTY status and use fallback input
+            logger.info("Basic TUI (Revolutionary interface in fallback mode) initialized")
+            return await revolutionary_interface.run()
             
         except Exception as e:
-            logger.warning(f"Basic TUI launch failed: {e}")
-            return await self._launch_fallback_tui()
+            logger.warning(f"Revolutionary TUI in basic mode failed: {e}")
+            # Fall back to fixed working TUI if Revolutionary TUI fails
+            try:
+                logger.info("Falling back to fixed working TUI")
+                from .fixed_working_tui import launch_fixed_working_tui
+                return await launch_fixed_working_tui()
+            except Exception as fixed_e:
+                logger.warning(f"Fixed working TUI also failed: {fixed_e}")
+                return await self._launch_fallback_tui()
     
     async def _launch_fallback_tui(self) -> int:
         """Launch the most basic fallback TUI implementation."""
