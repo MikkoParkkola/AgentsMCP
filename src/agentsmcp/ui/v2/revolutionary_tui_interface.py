@@ -116,14 +116,24 @@ class RevolutionaryTUIInterface:
         self.input_history = deque(maxlen=100)
         self.history_index = -1
         
-        # Performance and animation
+        # Performance and animation - Optimized for smooth responsive UI
+        # Balanced for performance while maintaining smooth user experience
         self.last_render_time = 0.0
         self.frame_count = 0
-        self.target_fps = 0.5  # Minimal refresh rate to prevent scrollback flooding
+        self.target_fps = 15.0  # Smooth refresh rate: 15 FPS for responsive feel
+        self.max_fps = 30.0  # Reasonable cap to balance performance and responsiveness
         
-        # Content change detection
+        # Content change detection - Optimized for responsive updates
+        # Smart content hashing with balanced throttling for smooth experience
         self._panel_content_hashes = {}
         self._last_global_update = 0.0
+        self._global_throttle_interval = 0.1  # Minimum 100ms between global updates for responsiveness
+        
+        # Debug control - THREAT: Debug output floods scrollback buffer
+        # MITIGATION: Strict debug mode control with logging instead of print statements
+        self._debug_mode = os.environ.get('REVOLUTIONARY_TUI_DEBUG', '').lower() in ('1', 'true', 'yes')
+        self._debug_print_throttle = 0.0
+        self._debug_throttle_interval = 2.0  # Minimum 2s between debug prints
     
     def _get_content_hash(self, content: str, extra_data: str = "") -> str:
         """Generate a stable hash for content comparison."""
@@ -241,9 +251,10 @@ class RevolutionaryTUIInterface:
         if not RICH_AVAILABLE or not self.layout:
             return
         
-        # Global throttle - prevent excessive updates
+        # Optimized global throttle - Balanced for smooth updates with performance
+        # Smart throttling with content change detection for responsive experience
         current_time = time.time()
-        if current_time - self._last_global_update < 2.0:  # Minimum 2 second interval
+        if current_time - self._last_global_update < self._global_throttle_interval:
             return
         
         try:
@@ -351,23 +362,27 @@ class RevolutionaryTUIInterface:
     def _create_status_panel(self) -> str:
         """Create the agent status panel content."""
         if not self.state.agent_status:
-            return "🔄 Initializing agents...\n📊 Metrics loading..."
+            return "🔄 Init • 📊 Loading"
         
         content = []
         
-        # Agent status
+        # Agent status - ultra compact display
         for agent_name, status in self.state.agent_status.items():
             status_icon = "🟢" if status == "active" else "🔴" if status == "error" else "🟡"
-            content.append(f"{status_icon} {agent_name}: {status}")
+            # Shorten agent names for compact display
+            short_name = agent_name.replace("_", "").replace("orchestrator", "orch").replace("symphony_dashboard", "dash").replace("tui_enhancements", "ui").replace("ai_composer", "ai")
+            content.append(f"{status_icon} {short_name}: {status}")
         
-        # System metrics
+        # System metrics - ultra compact display on fewer lines
         if self.state.system_metrics:
-            content.append("📊 Performance:")
-            for metric, value in self.state.system_metrics.items():
-                if isinstance(value, float):
-                    content.append(f"  {metric}: {value:.2f}")
-                else:
-                    content.append(f"  {metric}: {value}")
+            # Combine metrics on single lines where possible
+            fps = self.state.system_metrics.get('fps', 0)
+            memory = self.state.system_metrics.get('memory_mb', 0)
+            cpu = self.state.system_metrics.get('cpu_percent', 0)
+            tasks = self.state.system_metrics.get('active_tasks', 0)
+            
+            content.append(f"📊 FPS:{fps} • RAM:{memory:.0f}MB")
+            content.append(f"⚡ CPU:{cpu:.0f}% • Tasks:{tasks}")
         
         return "\n".join(content)
     
@@ -392,50 +407,58 @@ class RevolutionaryTUIInterface:
                     }
                 
                 content = []
-                content.append("🎼 Symphony Status")
-                content.append(f"Active Agents: {dashboard_data.get('active_agents', 0)}")
-                content.append(f"Tasks Running: {dashboard_data.get('running_tasks', 0)}")
-                content.append(f"Success Rate: {dashboard_data.get('success_rate', 0):.1f}%")
+                # Ultra compact header and metrics
+                agents = dashboard_data.get('active_agents', 0)
+                tasks = dashboard_data.get('running_tasks', 0)
+                success = dashboard_data.get('success_rate', 0)
                 
-                # Recent activity
+                content.append(f"🎼 Agents:{agents} Tasks:{tasks}")
+                content.append(f"✅ Success:{success:.0f}%")
+                
+                # Recent activity - ultra compact, single line each
                 recent_activity = dashboard_data.get('recent_activity', [])
                 if recent_activity:
-                    content.append("📈 Recent Activity:")
-                    for activity in recent_activity[-3:]:  # Last 3 items
-                        content.append(f"  • {activity}")
+                    content.append("📈 Recent:")
+                    for activity in recent_activity[-2:]:
+                        # Truncate long activities for compactness
+                        short_activity = activity[:25] + "..." if len(activity) > 25 else activity
+                        content.append(f"• {short_activity}")
                 
                 return "\n".join(content)
             else:
-                return "🎼 Symphony Dashboard\n📊 Loading metrics...\n🔄 Initializing..."
+                return "🎼 Loading..."  # Ultra compact loading
                 
         except Exception as e:
             logger.warning(f"Error creating dashboard panel: {e}")
-            return f"🎼 Symphony Dashboard\n❌ Error: {str(e)}"
+            return f"🎼 Error: {str(e)[:20]}..."
     
     def _create_chat_panel(self) -> str:
         """Create the chat conversation panel content."""
         if not self.state.conversation_history:
-            return """🚀 Revolutionary TUI Interface
-
-Advanced command center with AI Command Composer,
-agent monitoring, Symphony Dashboard, and visual effects.
-
-Type your message below to start!"""
+            return "🚀 Revolutionary TUI\nType below to start"
 
         content = []
         
-        # Show recent conversation
-        for entry in self.state.conversation_history[-10:]:  # Last 10 messages
+        # Show recent conversation - ultra compact format
+        for entry in self.state.conversation_history[-10:]:  # Show more messages due to compactness
             role = entry.get('role', 'unknown')
             message = entry.get('content', '')
             timestamp = entry.get('timestamp', '')
             
+            # Truncate long messages for better density
+            max_msg_len = 60
+            if len(message) > max_msg_len:
+                message = message[:max_msg_len] + "..."
+            
+            # Ultra compact format with shorter timestamps
+            short_time = timestamp.split(':')[-1] if ':' in timestamp else timestamp[-2:]
+            
             if role == 'user':
-                content.append(f"👤 You ({timestamp}):")
-                content.append(f"  {message}")
+                content.append(f"👤{short_time} {message}")
             elif role == 'assistant':
-                content.append(f"🤖 AgentsMCP ({timestamp}):")
-                content.append(f"  {message}")
+                content.append(f"🤖{short_time} {message}")
+            elif role == 'system':
+                content.append(f"⚙️{short_time} {message}")
         
         return "\n".join(content)
     
@@ -443,210 +466,214 @@ Type your message below to start!"""
         """Create the AI command composer input panel content."""
         content = []
         
-        # Current input with cursor indicator
+        # Current input with cursor indicator - ultra compact
         input_display = self.state.current_input or ""
         if self.state.is_processing:
-            input_display += " ⏳"
+            input_display += "⏳"
         else:
-            # Add blinking cursor based on time - creates a nice visual effect
-            cursor_blink_interval = 0.8  # Blink every 0.8 seconds
+            # Simplified cursor logic for compactness
             current_time = time.time()
-            should_show_cursor = int(current_time / cursor_blink_interval) % 2 == 0
+            should_show_cursor = int(current_time / 0.8) % 2 == 0
             
             if should_show_cursor or (current_time - self.state.last_update) < 0.5:
-                # Show cursor for 0.5s after last input, then blink
-                input_display += "█"  # Block cursor to show active input
+                input_display += "█"
             else:
-                input_display += " "  # Space for cursor blink
+                input_display += " "
         
-        content.append(f"💬 Input: {input_display}")
+        content.append(f"💬 {input_display}")
         
-        # Show helpful tips if no input yet and not processing
+        # Ultra compact tips and status on single line where possible
+        status_items = []
+        
         if not self.state.current_input and not self.state.is_processing:
-            content.append("⌨️ Type to chat • ↑/↓ History • Enter Send • Ctrl+C Exit")
+            status_items.append("Type↑↓Hist Enter•C-c")
         
-        # Show history navigation info if user is browsing history
         if self.history_index > -1:
-            content.append(f"📋 History: {self.history_index + 1}/{len(self.input_history)}")
+            status_items.append(f"📋{self.history_index + 1}/{len(self.input_history)}")
         
-        # Suggestions from AI Composer
+        # Combine status items into single line
+        if status_items:
+            content.append(" • ".join(status_items))
+        
+        # Ultra compact suggestions - single line format
         if self.state.input_suggestions:
-            content.append("✨ AI Suggestions:")
-            for i, suggestion in enumerate(self.state.input_suggestions[:3]):
-                content.append(f"  {i+1}. {suggestion}")
+            suggestions_text = " ".join([f"{i+1}.{suggestion[:20]}..." if len(suggestion) > 20 else f"{i+1}.{suggestion}" 
+                                        for i, suggestion in enumerate(self.state.input_suggestions[:2])])
+            content.append(f"✨ {suggestions_text}")
         
         return "\n".join(content)
     
     def _create_footer_panel(self) -> str:
         """Create the footer panel with help and shortcuts."""
+        # Ultra compact help items
         help_items = [
-            "Enter: Send message",
-            "Ctrl+C: Exit",
-            "↑/↓: History",
-            "Tab: Complete",
-            "/help: Commands"
+            "↵Send",
+            "^C Exit", 
+            "↑↓Hist",
+            "/help"
         ]
         
-        # Add performance info
-        fps_info = f"FPS: {self.frame_count % 61}"  # Simple FPS display
+        # Compact performance info
+        fps_info = f"F{self.frame_count % 61}"
         
         return " • ".join(help_items) + f" • {fps_info}"
     
     async def run(self) -> int:
         """Run the Revolutionary TUI Interface."""
-        debug_mode = getattr(self.cli_config, 'debug_mode', False)
+        debug_mode = self._debug_mode or getattr(self.cli_config, 'debug_mode', False)
         
+        # THREAT: Debug output floods scrollback buffer
+        # MITIGATION: Use logging instead of print statements
         if debug_mode:
-            print("🔧 Debug: Revolutionary TUI Interface run() method called")
-            print(f"🔧 Debug: RICH_AVAILABLE: {RICH_AVAILABLE}")
-            print(f"🔧 Debug: CLI config: {self.cli_config}")
+            logger.debug("Revolutionary TUI Interface run() method called")
+            logger.debug(f"RICH_AVAILABLE: {RICH_AVAILABLE}")
+            logger.debug(f"CLI config: {self.cli_config}")
         
         try:
             # Initialize components
             if debug_mode:
-                print("🔧 Debug: Calling initialize()...")
+                logger.debug("Calling initialize()")
             
             if not await self.initialize():
                 logger.error("Failed to initialize Revolutionary TUI Interface")
                 if debug_mode:
-                    print("🔧 Debug: Revolutionary TUI Interface initialization failed")
+                    logger.debug("Revolutionary TUI Interface initialization failed")
                 return 1
             
             if debug_mode:
-                print("🔧 Debug: Revolutionary TUI Interface initialized successfully")
+                logger.debug("Revolutionary TUI Interface initialized successfully")
             
             # Setup signal handlers
             def signal_handler(signum, frame):
                 if debug_mode:
-                    print(f"🔧 Debug: Signal {signum} received, setting running=False")
+                    logger.debug(f"Signal {signum} received, setting running=False")
                 self.running = False
             
             signal.signal(signal.SIGINT, signal_handler)
             signal.signal(signal.SIGTERM, signal_handler)
             
             if debug_mode:
-                print("🔧 Debug: Signal handlers set up")
+                logger.debug("Signal handlers set up")
             
             self.running = True
             logger.info("🎯 Revolutionary TUI Interface marked as running")
             
             if debug_mode:
-                print(f"🔧 Debug: Running state set to: {self.running}")
+                logger.debug(f"Running state set to: {self.running}")
             
             if RICH_AVAILABLE:
                 logger.info("🎨 Using Rich Live display for TUI")
                 if debug_mode:
-                    print("🔧 Debug: Rich is available, using Live display")
-                    print(f"🔧 Debug: Layout object: {self.layout}")
+                    logger.debug("Rich is available, using Live display")
+                    logger.debug(f"Layout object: {self.layout}")
                 
                 # Use Rich Live display for smooth updates
                 try:
                     logger.info("📺 Attempting to create Rich Live display...")
                     if debug_mode:
-                        print("🔧 Debug: Creating Rich Live display context...")
-                        print(f"🔧 Debug: Layout valid: {self.layout is not None}")
-                        print(f"🔧 Debug: Layout type: {type(self.layout)}")
-                        print(f"🔧 Debug: Terminal size: {os.get_terminal_size() if hasattr(os, 'get_terminal_size') else 'unknown'}")
-                        print(f"🔧 Debug: Is TTY: {sys.stdin.isatty()}")
-                        print(f"🔧 Debug: TERM env: {os.environ.get('TERM', 'not set')}")
+                        logger.debug("Creating Rich Live display context")
+                        logger.debug(f"Layout valid: {self.layout is not None}")
+                        logger.debug(f"Layout type: {type(self.layout)}")
+                        logger.debug(f"Terminal size: {os.get_terminal_size() if hasattr(os, 'get_terminal_size') else 'unknown'}")
+                        logger.debug(f"Is TTY: {sys.stdin.isatty()}")
+                        logger.debug(f"TERM env: {os.environ.get('TERM', 'not set')}")
                     
-                    # Try with screen=True for proper terminal control (prevents scrollback flooding)
+                    # Try with screen=True for proper terminal control - THREAT: Screen buffer fallbacks pollute scrollback
+                    # MITIGATION: Always use alternate screen to prevent scrollback pollution
                     try:
                         if debug_mode:
-                            print("🔧 Debug: Attempting Live context with screen=True (alternate screen)...")
+                            logger.debug("Attempting Live context with screen=True (alternate screen)")
                         
-                        with Live(self.layout, refresh_per_second=0.5, screen=True) as live:
+                        with Live(self.layout, refresh_per_second=self.target_fps, screen=True) as live:
                             logger.info("📺 Rich Live display context entered successfully (alternate screen)")
                             if debug_mode:
-                                print("🔧 Debug: Rich Live display context active (alternate screen)")
+                                logger.debug("Rich Live display context active (alternate screen)")
                             
                             self.live_display = live
                             logger.info("🚀 Starting main loop...")
                             
                             if debug_mode:
-                                print("🔧 Debug: About to call _run_main_loop()...")
+                                logger.debug("About to call _run_main_loop()")
                             
                             await self._run_main_loop()
                             
                             if debug_mode:
-                                print("🔧 Debug: _run_main_loop() completed")
+                                logger.debug("_run_main_loop() completed")
                             
                             logger.info("✅ Main loop completed")
                     
                     except Exception as live_e:
                         if debug_mode:
-                            print(f"🔧 Debug: Live context (alternate screen) failed: {type(live_e).__name__}: {live_e}")
-                            print("🔧 Debug: Retrying with alternate screen buffer...")
+                            logger.debug(f"Live context (alternate screen) failed: {type(live_e).__name__}: {live_e}")
+                            logger.debug("Retrying with alternate screen buffer")
                         
-                        # Retry with alternate screen - avoid screen=False to prevent scrollback pollution
+                        # Retry with alternate screen - Optimized for smooth display
+                        # Balanced refresh rate for smooth visual experience
                         try:
                             import time
                             time.sleep(0.1)  # Brief pause before retry
-                            with Live(self.layout, refresh_per_second=0.25, screen=True) as live:
+                            with Live(self.layout, refresh_per_second=10.0, screen=True) as live:
                                 logger.info("📺 Rich Live display context entered successfully (retry)")
                                 if debug_mode:
-                                    print("🔧 Debug: Rich Live display context active (retry)")
+                                    logger.debug("Rich Live display context active (retry)")
                                 
                                 self.live_display = live
                                 logger.info("🚀 Starting main loop...")
                                 
                                 if debug_mode:
-                                    print("🔧 Debug: About to call _run_main_loop()...")
+                                    logger.debug("About to call _run_main_loop()")
                                 
                                 await self._run_main_loop()
                                 
                                 if debug_mode:
-                                    print("🔧 Debug: _run_main_loop() completed")
+                                    logger.debug("_run_main_loop() completed")
                                 
                                 logger.info("✅ Main loop completed")
                         except Exception as retry_e:
                             if debug_mode:
-                                print(f"🔧 Debug: Retry also failed: {retry_e}")
+                                logger.debug(f"Retry also failed: {retry_e}")
                             logger.error(f"❌ Both Rich Live attempts failed: {retry_e}")
-                            # Use fallback mode instead of screen=False
+                            # Use fallback mode instead of screen=False - THREAT: Direct terminal output floods scrollback
+                            # MITIGATION: Controlled fallback prevents scrollback pollution
                             await self._run_fallback_loop()
                             return 0
                 
                 except Exception as e:
                     logger.error(f"❌ Rich Live display failed: {e}")
                     if debug_mode:
-                        print(f"🔧 Debug: Rich Live display failed: {type(e).__name__}: {e}")
-                        print("🔧 Debug: Full exception traceback:")
-                        import traceback
-                        traceback.print_exc()
+                        logger.debug(f"Rich Live display failed: {type(e).__name__}: {e}")
+                        logger.debug("Full exception traceback:", exc_info=True)
                     logger.info("🔄 Falling back to basic display")
                     await self._run_fallback_loop()
             else:
                 logger.info("📟 Using basic display (Rich not available)")
                 if debug_mode:
-                    print("🔧 Debug: Rich not available, using fallback loop")
+                    logger.debug("Rich not available, using fallback loop")
                 # Fallback to basic display
                 await self._run_fallback_loop()
             
             logger.info("🏁 Revolutionary TUI Interface execution completed")
             if debug_mode:
-                print("🔧 Debug: Revolutionary TUI Interface execution completed normally")
+                logger.debug("Revolutionary TUI Interface execution completed normally")
             return 0
             
         except KeyboardInterrupt:
             logger.info("Revolutionary TUI interrupted by user")
             if debug_mode:
-                print("🔧 Debug: Revolutionary TUI interrupted by KeyboardInterrupt")
+                logger.debug("Revolutionary TUI interrupted by KeyboardInterrupt")
             return 0
         except Exception as e:
             logger.error(f"Revolutionary TUI Interface error: {e}")
             if debug_mode:
-                print(f"🔧 Debug: Revolutionary TUI Interface exception: {type(e).__name__}: {e}")
-                print("🔧 Debug: Full exception traceback:")
-                import traceback
-                traceback.print_exc()
+                logger.debug(f"Revolutionary TUI Interface exception: {type(e).__name__}: {e}")
+                logger.debug("Full exception traceback:", exc_info=True)
             return 1
         finally:
             if debug_mode:
-                print("🔧 Debug: Revolutionary TUI Interface cleanup starting...")
+                logger.debug("Revolutionary TUI Interface cleanup starting")
             await self._cleanup()
             if debug_mode:
-                print("🔧 Debug: Revolutionary TUI Interface cleanup completed")
+                logger.debug("Revolutionary TUI Interface cleanup completed")
     
     async def _run_main_loop(self):
         """Main loop with Rich interface."""
@@ -654,27 +681,27 @@ Type your message below to start!"""
         
         logger.info("🚀 Revolutionary TUI Interface started with Rich display")
         if debug_mode:
-            print("🔧 Debug: _run_main_loop() started")
-            print(f"🔧 Debug: self.running = {self.running}")
+            logger.debug("_run_main_loop() started")
+            logger.debug(f"self.running = {self.running}")
         
         # Start background tasks (render task disabled - Rich Live handles its own rendering)
         logger.info("⚙️ Creating background tasks...")
         
         if debug_mode:
-            print("🔧 Debug: Creating input task...")
+            logger.debug("Creating input task...")
         
         input_task = asyncio.create_task(self._input_loop())
         logger.debug("✅ Input task created")
         
         if debug_mode:
-            print("🔧 Debug: Creating update task...")
+            logger.debug("Creating update task...")
         
         update_task = asyncio.create_task(self._update_loop())
         logger.debug("✅ Update task created")
         logger.info("🎯 Background tasks created, waiting for completion...")
         
         if debug_mode:
-            print("🔧 Debug: Tasks created, waiting for first completion...")
+            logger.debug("Tasks created, waiting for first completion...")
         
         try:
             # Wait for any task to complete (usually from user interruption)
@@ -684,7 +711,7 @@ Type your message below to start!"""
             )
             
             if debug_mode:
-                print(f"🔧 Debug: Wait completed - {len(done)} tasks done, {len(pending)} pending")
+                logger.debug(f"Wait completed - {len(done)} tasks done, {len(pending)} pending")
             
             # Log which task completed first
             for task in done:
@@ -695,11 +722,11 @@ Type your message below to start!"""
                     task_name = "update_task"
                 
                 if debug_mode:
-                    print(f"🔧 Debug: Task completed: {task_name}")
+                    logger.debug(f"Task completed: {task_name}")
                     if task.exception():
-                        print(f"🔧 Debug: Task {task_name} exception: {task.exception()}")
+                        logger.debug(f"Task {task_name} exception: {task.exception()}")
                     else:
-                        print(f"🔧 Debug: Task {task_name} result: {task.result()}")
+                        logger.debug(f"Task {task_name} result: {task.result()}")
                 
                 logger.info(f"Task completed first: {task_name}")
                 try:
@@ -723,13 +750,8 @@ Type your message below to start!"""
         """Fallback loop without Rich (basic terminal output)."""
         logger.info("🚀 Revolutionary TUI Interface started in fallback mode")
         
-        # Show initial interface
-        print("=" * 60)
-        print("🚀 AgentsMCP Revolutionary Interface (Fallback Mode)")
-        print("=" * 60)
-        print("Welcome to the advanced command center!")
-        print("Rich terminal features unavailable - using basic mode.")
-        print("=" * 60)
+        # Log initial interface activation
+        logger.info("AgentsMCP Revolutionary Interface (Fallback Mode) - Rich terminal features unavailable")
         
         # Check if we can use the enhanced fallback input method
         import sys
@@ -757,9 +779,9 @@ Type your message below to start!"""
             try:
                 start_time = time.time()
                 
-                # Update layout panels less frequently to prevent flooding
+                # Update layout panels at smooth intervals for responsive display
                 current_time = time.time()
-                if not hasattr(self, '_last_panel_update') or current_time - self._last_panel_update > 10.0:
+                if not hasattr(self, '_last_panel_update') or current_time - self._last_panel_update > 1.0:
                     await self._update_layout_panels()
                     self._last_panel_update = current_time
                 
@@ -787,7 +809,7 @@ Type your message below to start!"""
         debug_mode = getattr(self.cli_config, 'debug_mode', False)
         
         if debug_mode:
-            print("🔧 Debug: _input_loop() started")
+            logger.debug("_input_loop() started")
         
         import sys
         import os
@@ -804,65 +826,65 @@ Type your message below to start!"""
             is_tty = sys.stdin.isatty()
             logger.debug(f"TTY detection: sys.stdin.isatty() = {is_tty}")
             if debug_mode:
-                print(f"🔧 Debug: sys.stdin.isatty() = {is_tty}")
+                logger.debug(f"sys.stdin.isatty() = {is_tty}")
             
             if is_tty:
                 # Try to access stdin as TTY first
                 try:
                     stdin_fd = sys.stdin.fileno()
                     if debug_mode:
-                        print(f"🔧 Debug: stdin fileno = {stdin_fd}")
+                        logger.debug(f"stdin fileno = {stdin_fd}")
                     
                     attrs = termios.tcgetattr(stdin_fd)
                     tty_available = True
                     logger.debug("TTY detection: stdin TTY access successful")
                     if debug_mode:
-                        print("🔧 Debug: stdin TTY access successful")
-                        print(f"🔧 Debug: Terminal attrs available: {len(attrs) if attrs else 0} entries")
+                        logger.debug("stdin TTY access successful")
+                        logger.debug(f"Terminal attrs available: {len(attrs) if attrs else 0} entries")
                         
                 except (termios.error, OSError) as e:
                     logger.debug(f"TTY detection: stdin failed ({e}), trying /dev/tty")
                     if debug_mode:
-                        print(f"🔧 Debug: stdin TTY failed: {type(e).__name__}: {e}")
-                        print("🔧 Debug: Trying /dev/tty fallback...")
+                        logger.debug(f"stdin TTY failed: {type(e).__name__}: {e}")
+                        logger.debug("Trying /dev/tty fallback...")
                     
                     # Fall back to /dev/tty if stdin doesn't work
                     try:
                         test_fd = os.open('/dev/tty', os.O_RDONLY)
                         if debug_mode:
-                            print(f"🔧 Debug: /dev/tty opened, fd = {test_fd}")
+                            logger.debug(f"/dev/tty opened, fd = {test_fd}")
                         
                         attrs = termios.tcgetattr(test_fd)
                         os.close(test_fd)
                         tty_available = True
                         logger.debug("TTY detection: /dev/tty access successful")
                         if debug_mode:
-                            print("🔧 Debug: /dev/tty access successful")
+                            logger.debug("/dev/tty access successful")
                             
                     except (OSError, termios.error) as e2:
                         logger.debug(f"TTY detection: /dev/tty failed ({e2})")
                         if debug_mode:
-                            print(f"🔧 Debug: /dev/tty also failed: {type(e2).__name__}: {e2}")
+                            logger.debug(f"/dev/tty also failed: {type(e2).__name__}: {e2}")
                         tty_available = False
             else:
                 logger.debug("TTY detection: stdin is not a TTY")
                 if debug_mode:
-                    print("🔧 Debug: stdin is not a TTY")
+                    logger.debug("stdin is not a TTY")
                 
         except ImportError as e:
             logger.debug(f"TTY detection: Import failed ({e})")
             if debug_mode:
-                print(f"🔧 Debug: TTY import failed: {e}")
+                logger.debug(f"TTY import failed: {e}")
             tty_available = False
         
         logger.info(f"TTY detection result: tty_available = {tty_available}")
         if debug_mode:
-            print(f"🔧 Debug: Final TTY detection result: {tty_available}")
+            logger.debug(f"Final TTY detection result: {tty_available}")
         
         if not tty_available:
             logger.warning("TTY not available, using fallback input method")
             if debug_mode:
-                print("🔧 Debug: TTY not available, calling fallback input loop")
+                logger.debug("TTY not available, calling fallback input loop")
             return await self._fallback_input_loop()
         
         # Setup terminal for raw input
@@ -873,35 +895,35 @@ Type your message below to start!"""
         # Get the current event loop to pass to the reader thread
         current_loop = asyncio.get_running_loop()
         if debug_mode:
-            print(f"🔧 Debug: _input_loop got main event loop: {current_loop}")
+            logger.debug(f"_input_loop got main event loop: {current_loop}")
         
         def reader_thread(loop):
             nonlocal fd, original_settings
             if debug_mode:
-                print("🔧 Debug: reader_thread() started")
-                print(f"🔧 Debug: reader_thread received event loop: {loop}")
+                logger.debug("reader_thread() started")
+                logger.debug(f"reader_thread received event loop: {loop}")
             try:
                 # Try stdin first, then fall back to /dev/tty
                 try:
                     fd = sys.stdin.fileno()
                     if debug_mode:
-                        print(f"🔧 Debug: reader_thread using stdin fd: {fd}")
+                        logger.debug(f"reader_thread using stdin fd: {fd}")
                     original_settings = termios.tcgetattr(fd)
                     tty.setraw(fd)
                     if debug_mode:
-                        print("🔧 Debug: reader_thread stdin set to raw mode")
+                        logger.debug("reader_thread stdin set to raw mode")
                 except (termios.error, OSError) as e:
                     if debug_mode:
-                        print(f"🔧 Debug: reader_thread stdin failed: {e}, trying /dev/tty")
+                        logger.debug(f"reader_thread stdin failed: {e}, trying /dev/tty")
                     # Fallback to /dev/tty
                     fd = os.open('/dev/tty', os.O_RDONLY)
                     original_settings = termios.tcgetattr(fd)
                     tty.setraw(fd)
                     if debug_mode:
-                        print(f"🔧 Debug: reader_thread using /dev/tty fd: {fd}")
+                        logger.debug(f"reader_thread using /dev/tty fd: {fd}")
                 
                 if debug_mode:
-                    print("🔧 Debug: reader_thread ready to process input")
+                    logger.debug("reader_thread ready to process input")
                 
                 while not stop_flag["stop"] and self.running:
                     try:
@@ -1030,11 +1052,9 @@ Type your message below to start!"""
             except Exception as e:
                 logger.error(f"Failed to setup raw terminal input: {e}")
                 if debug_mode:
-                    print(f"🔧 Debug: reader_thread setup exception: {type(e).__name__}: {e}")
-                    print("🔧 Debug: reader_thread setting use_fallback flag")
-                    import traceback
-                    print("🔧 Debug: reader_thread exception traceback:")
-                    traceback.print_exc()
+                    logger.debug(f"reader_thread setup exception: {type(e).__name__}: {e}")
+                    logger.debug("reader_thread setting use_fallback flag")
+                    logger.debug("reader_thread exception traceback:", exc_info=True)
                 # Set flag to indicate fallback is needed - main thread will handle it
                 stop_flag["use_fallback"] = True
             
@@ -1055,27 +1075,27 @@ Type your message below to start!"""
         # Start the reader thread, passing the event loop
         thread = threading.Thread(target=reader_thread, args=(current_loop,), daemon=True)
         if debug_mode:
-            print("🔧 Debug: Starting reader thread with event loop parameter")
+            logger.debug("Starting reader thread with event loop parameter")
         thread.start()
         
         # Keep the async function alive while input thread runs
         if debug_mode:
-            print(f"🔧 Debug: _input_loop starting main monitoring loop, thread alive: {thread.is_alive()}")
+            logger.debug(f"_input_loop starting main monitoring loop, thread alive: {thread.is_alive()}")
         
         try:
             loop_iterations = 0
             while self.running and thread.is_alive():
                 loop_iterations += 1
                 if debug_mode and loop_iterations == 1:
-                    print("🔧 Debug: _input_loop main monitoring loop started")
+                    logger.debug("_input_loop main monitoring loop started")
                 elif debug_mode and loop_iterations % 50 == 0:  # Log every 5 seconds
-                    print(f"🔧 Debug: _input_loop monitoring loop iteration {loop_iterations}, thread alive: {thread.is_alive()}")
+                    logger.debug(f"_input_loop monitoring loop iteration {loop_iterations}, thread alive: {thread.is_alive()}")
                 
                 # Check if thread requested fallback
                 if stop_flag.get("use_fallback", False):
                     logger.info("Reader thread requested fallback, switching to fallback input method")
                     if debug_mode:
-                        print("🔧 Debug: _input_loop use_fallback flag detected, switching to fallback")
+                        logger.debug("_input_loop use_fallback flag detected, switching to fallback")
                     stop_flag["stop"] = True
                     if thread.is_alive():
                         thread.join(timeout=1.0)
@@ -1093,15 +1113,15 @@ Type your message below to start!"""
                         
         finally:
             if debug_mode:
-                print(f"🔧 Debug: _input_loop main loop exited, thread alive: {thread.is_alive()}")
-                print(f"🔧 Debug: _input_loop self.running: {self.running}")
-                print(f"🔧 Debug: _input_loop stop_flag: {stop_flag}")
+                logger.debug(f"_input_loop main loop exited, thread alive: {thread.is_alive()}")
+                logger.debug(f"_input_loop self.running: {self.running}")
+                logger.debug(f"_input_loop stop_flag: {stop_flag}")
             # Signal thread to stop
             stop_flag["stop"] = True
             if thread.is_alive():
                 thread.join(timeout=1.0)
             if debug_mode:
-                print("🔧 Debug: _input_loop completed, returning None")
+                logger.debug("_input_loop completed, returning None")
     
     async def _fallback_input_loop(self):
         """Fallback input loop for when raw terminal setup fails."""
@@ -1113,7 +1133,6 @@ Type your message below to start!"""
         # Check if stdin is actually available
         if not sys.stdin or sys.stdin.closed:
             logger.error("No stdin available - cannot use fallback input method")
-            print("❌ No stdin available for input. TUI cannot function in this environment.")
             self.running = False
             return
         
@@ -1131,13 +1150,9 @@ Type your message below to start!"""
                 if sys.stdin.isatty():
                     # In TTY mode, use normal input - show header only once
                     if not header_shown:
-                        print("\n🎨 Revolutionary TUI (TTY Fallback Mode)")
-                        print("=" * 50)
-                        print("💡 Enter commands below. Type 'quit' to exit.")
-                        print("🔑 Available commands: help, quit, status")
-                        print("-" * 50)
+                        logger.debug("Revolutionary TUI (TTY Mode) - Commands: help, quit, status")
                         header_shown = True
-                    return input("💬 Enter command: ")
+                    return input("💬 > ")
                 else:
                     # In non-TTY mode, try to read from stdin if available, otherwise simulate
                     try:
@@ -1153,11 +1168,6 @@ Type your message below to start!"""
                     # No stdin input available - run simulation mode
                     if not header_shown:
                         logger.info("Non-TTY environment detected - using simulated input mode")
-                        print("\n🎨 Revolutionary TUI (Non-Interactive Mode)")
-                        print("=" * 50)
-                        print("💡 Running in non-interactive environment")
-                        print("🔑 Simulating user commands for demonstration")
-                        print("-" * 50)
                         header_shown = True
                     
                     # Simulate some sample commands for demo purposes
@@ -1177,10 +1187,9 @@ Type your message below to start!"""
                     
                     if get_input.command_index < len(sample_commands):
                         cmd = sample_commands[get_input.command_index]
-                        time.sleep(4)  # Wait 4 seconds between commands to reduce output rate
-                        # Only print every other command to reduce flooding
-                        if get_input.command_index % 2 == 0:
-                            print(f"💬 Command: {cmd}")
+                        time.sleep(8)  # Wait 8 seconds between commands to reduce output rate
+                        # Only log commands for debug purposes
+                        logger.debug(f"Demo command: {cmd}")
                         get_input.command_index += 1
                         return cmd
                     
@@ -1195,12 +1204,8 @@ Type your message below to start!"""
                 return None
         
         try:
-            # Show welcome message for fallback mode with clear separation
-            print("\n" + "="*60)
-            print("🚀 REVOLUTIONARY TUI INTERFACE - DEMO MODE")
-            print("   Running without raw terminal access")
-            print("   Watch as we demonstrate TUI capabilities...")
-            print("="*60)
+            # Log welcome message for fallback mode
+            logger.info("Revolutionary TUI Interface - Fallback Mode - Running without raw terminal access")
             
             while self.running:
                 try:
@@ -1220,7 +1225,7 @@ Type your message below to start!"""
                         # EOF or interrupt - check if we're in a proper terminal
                         logger.info("Input returned None - checking if stdin is available")
                         if sys.stdin and not sys.stdin.closed:
-                            print("\n⚠️  Input interrupted. Type 'quit' to exit cleanly.")
+                            logger.debug("Input interrupted. Type 'quit' to exit cleanly.")
                             continue
                         else:
                             logger.info("stdin closed or unavailable - exiting")
@@ -1228,7 +1233,7 @@ Type your message below to start!"""
                     
                     user_input = user_input.strip()
                     if user_input.lower() in ['quit', 'exit']:
-                        print("👋 Exiting Revolutionary TUI...")
+                        logger.info("Exiting Revolutionary TUI...")
                         self.running = False
                         break
                     
@@ -1238,8 +1243,7 @@ Type your message below to start!"""
                     if user_input:
                         # Handle demo messages
                         if user_input.startswith("Demo:"):
-                            print(f"🎭 {user_input}")
-                            print("   Simulating revolutionary TUI capabilities...")
+                            logger.debug(f"Demo: {user_input} - Simulating revolutionary TUI capabilities")
                             continue
                         
                         # Process the input
@@ -1248,29 +1252,24 @@ Type your message below to start!"""
                         await self._process_user_input(user_input)
                         self.state.current_input = ""
                         
-                        # Print any new responses that were added to conversation history
+                        # Log any new responses that were added to conversation history
                         new_conversation_length = len(self.state.conversation_history)
                         if new_conversation_length > old_conversation_length:
-                            # Print the assistant's response(s)
+                            # Log the assistant's response(s) for debugging
                             for msg in self.state.conversation_history[old_conversation_length:]:
                                 if msg["role"] == "assistant":
-                                    print(f"\n{msg['content']}\n")
+                                    logger.debug(f"Assistant response: {msg['content'][:100]}...")
                     
                 except Exception as e:
                     logger.error(f"Error in fallback input loop: {e}")
-                    print(f"❌ Input error: {e}")
                     await asyncio.sleep(1.0)
         
         finally:
             executor.shutdown(wait=False)
             logger.info("Fallback input loop ended")
             
-            # Show completion message
-            print("\n" + "="*60)
-            print("✅ REVOLUTIONARY TUI DEMO COMPLETED SUCCESSFULLY")
-            print("   All TUI capabilities demonstrated")
-            print("   For interactive mode, run from a real terminal")
-            print("="*60)
+            # Log completion message
+            logger.info("Revolutionary TUI demo completed - For interactive mode, run from a real terminal")
     
     async def _update_loop(self):
         """Update loop for system status and metrics."""
@@ -1285,8 +1284,10 @@ Type your message below to start!"""
                 # Update timestamp
                 self.state.last_update = time.time()
                 
-                # Wait before next update
-                await asyncio.sleep(1.0)  # Update every second
+                # Wait before next update - Optimized for smooth real-time updates
+                # Balanced interval for responsive system monitoring
+                update_interval = max(0.5, 1.0 / self.target_fps)  # Minimum 500ms interval for real-time feel
+                await asyncio.sleep(update_interval)
                 
             except Exception as e:
                 logger.error(f"Error in update loop: {e}")
@@ -1349,10 +1350,12 @@ Type your message below to start!"""
         if not self.live_display or not self.layout:
             return
         
-        # Heavy throttle updates to prevent flooding - max 1 update per 5 seconds
+        # Responsive input throttle - Optimized for immediate feedback
+        # Balanced throttling for smooth real-time typing experience
         current_time = time.time()
+        input_throttle_interval = 0.05  # 20 FPS for responsive input display
         if hasattr(self, '_last_display_update'):
-            if current_time - self._last_display_update < 5.0:  # 5 second throttle
+            if current_time - self._last_display_update < input_throttle_interval:
                 return
         self._last_display_update = current_time
             
@@ -1376,8 +1379,9 @@ Type your message below to start!"""
             )
             self._panel_content_hashes['input_immediate'] = input_hash
             
-            # Very rare refresh to prevent flooding
-            if hasattr(self.live_display, 'refresh') and current_time - getattr(self, '_last_refresh', 0) > 10.0:
+            # Smooth refresh for responsive display - Optimized for real-time updates
+            # Balanced refresh rate for smooth visual feedback
+            if hasattr(self.live_display, 'refresh') and current_time - getattr(self, '_last_refresh', 0) > 0.2:
                 try:
                     self.live_display.refresh()
                     self._last_refresh = current_time
@@ -1484,19 +1488,19 @@ Type your message below to start!"""
             
             # Handle quit commands
             if user_input_lower in ['quit', 'exit', '/quit', '/exit']:
-                print("👋 Exiting Revolutionary TUI...")
+                logger.info("Exiting Revolutionary TUI...")
                 self.running = False
                 return
             
             # Handle help command
             if user_input_lower in ['help', '/help']:
-                response_content = """📋 Revolutionary TUI Commands:
-  quit, exit, /quit, /exit - Exit TUI
-  help, /help              - Show this help
-  status, /status          - Show system status
-  clear, /clear            - Clear conversation history
+                response_content = """📋 Commands:
+  quit, exit - Exit TUI
+  help - Show this help  
+  status - Show system status
+  clear - Clear conversation history
   
-  Any other input will be processed by AI agents."""
+  Other input processed by AI agents."""
                 
                 timestamp = datetime.now().strftime("%H:%M:%S")
                 self.state.conversation_history.extend([{
@@ -1512,12 +1516,11 @@ Type your message below to start!"""
                 
             # Handle status command
             if user_input_lower in ['status', '/status']:
-                response_content = f"""📊 Revolutionary TUI Status:
+                response_content = f"""📊 TUI Status:
   Running: {self.running}
   Mode: Revolutionary TUI
-  TTY Available: Yes
-  Input History: {len(self.input_history)} entries
-  Conversation Length: {len(self.state.conversation_history)} messages"""
+  History: {len(self.input_history)} entries
+  Messages: {len(self.state.conversation_history)}"""
                 
                 timestamp = datetime.now().strftime("%H:%M:%S")
                 self.state.conversation_history.extend([{
