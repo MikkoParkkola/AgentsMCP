@@ -170,8 +170,7 @@ class RevolutionaryTUIInterface:
         self.layout = None
         self.live_display = None
         
-        # Input handling
-        self.input_buffer = ""
+        # Input handling - UNIFIED: Use only self.state.current_input (removed duplicate input_buffer)
         self.input_history = deque(maxlen=100)
         self.history_index = -1
         
@@ -785,11 +784,29 @@ class RevolutionaryTUIInterface:
         except Exception:
             max_width = 74
         
+        # CRITICAL FIX: Sync state from input pipeline if available (fix for QA finding)
+        if self.input_pipeline and hasattr(self.input_pipeline, '_current_state'):
+            try:
+                pipeline_text = getattr(self.input_pipeline._current_state, 'text', '')
+                if pipeline_text and pipeline_text != self.state.current_input:
+                    # Sync pipeline state to display state
+                    self.state.current_input = pipeline_text
+                    debug_mode = getattr(self.cli_config, 'debug_mode', False)
+                    if debug_mode:
+                        self._safe_log("debug", f"SYNC: Pipeline->Display '{pipeline_text}' (was '{self.state.current_input}')")
+            except Exception as e:
+                debug_mode = getattr(self.cli_config, 'debug_mode', False)
+                if debug_mode:
+                    self._safe_log("debug", f"SYNC ERROR: {e}")
+        
         # Build content as lines
         content_lines = []
         
         # Current input with cursor indicator - expanded display
         input_display = self.state.current_input or ""
+        debug_mode = getattr(self.cli_config, 'debug_mode', False)
+        if debug_mode:
+            self._safe_log("debug", f"INPUT_PANEL: Displaying '{input_display}' (state: '{self.state.current_input}')")
         if self.state.is_processing:
             input_display += " ⏳"
         else:
@@ -1867,19 +1884,37 @@ class RevolutionaryTUIInterface:
         # Make cursor visible and reset blink timer  
         self.state.last_update = time.time()
         
+        # Debug logging for input visibility
+        debug_mode = getattr(self.cli_config, 'debug_mode', False)
+        if debug_mode:
+            self._safe_log("debug", f"Character input: '{char}' -> '{self.state.current_input}'")
+        
         # Use input rendering pipeline for immediate visibility
+        pipeline_success = False
         if self.input_pipeline:
             try:
                 # Render input immediately for instant feedback
-                self.input_pipeline.render_immediate_feedback(
+                pipeline_success = self.input_pipeline.render_immediate_feedback(
                     char, self.state.current_input, cursor_position=len(self.state.current_input)
                 )
-            except Exception:
+                if debug_mode:
+                    # Log pipeline state after feedback
+                    pipeline_current = getattr(self.input_pipeline._current_state, 'text', 'N/A') if hasattr(self.input_pipeline, '_current_state') else 'N/A'
+                    self._safe_log("debug", f"Pipeline feedback: {pipeline_success}, Pipeline state: '{pipeline_current}'")
+            except Exception as e:
+                if debug_mode:
+                    self._safe_log("debug", f"Pipeline error: {e}")
                 pass  # Continue without pipeline if it fails
         
         # Immediately refresh the Live display to show typed characters
         # Must be synchronous since this runs in input thread, not async context
-        self._sync_refresh_display()
+        try:
+            self._sync_refresh_display()
+            if debug_mode:
+                self._safe_log("debug", "Sync refresh completed")
+        except Exception as e:
+            if debug_mode:
+                self._safe_log("debug", f"Sync refresh error: {e}")
         
         # Emit input changed event for reactive UI updates (async)
         if hasattr(self, '_event_loop') and self._event_loop and not self._event_loop.is_closed():
@@ -1894,6 +1929,10 @@ class RevolutionaryTUIInterface:
             self.state.current_input = self.state.current_input[:-1]
             self.state.last_update = time.time()
             
+            debug_mode = getattr(self.cli_config, 'debug_mode', False)
+            if debug_mode:
+                self._safe_log("debug", f"Backspace: New input '{self.state.current_input}'")
+            
             # Use input rendering pipeline for immediate visibility
             if self.input_pipeline:
                 try:
@@ -1901,6 +1940,10 @@ class RevolutionaryTUIInterface:
                     self.input_pipeline.render_deletion_feedback(
                         self.state.current_input, cursor_position=len(self.state.current_input)
                     )
+                    if debug_mode:
+                        # Log pipeline state after deletion
+                        pipeline_current = getattr(self.input_pipeline._current_state, 'text', 'N/A') if hasattr(self.input_pipeline, '_current_state') else 'N/A'
+                        self._safe_log("debug", f"Pipeline after backspace: '{pipeline_current}'")
                 except Exception:
                     pass  # Continue without pipeline if it fails
             
@@ -2357,6 +2400,23 @@ class RevolutionaryTUIInterface:
     def _sync_refresh_display(self):
         """Synchronously refresh the Live display - for use from input thread."""
         try:
+            # CRITICAL FIX: Ensure state sync before display updates (fix for QA finding)
+            debug_mode = getattr(self.cli_config, 'debug_mode', False)
+            if debug_mode:
+                self._safe_log("debug", f"SYNC_REFRESH: Current state '{self.state.current_input}'")
+                
+            # Sync with pipeline state if available 
+            if self.input_pipeline and hasattr(self.input_pipeline, '_current_state'):
+                try:
+                    pipeline_text = getattr(self.input_pipeline._current_state, 'text', '')
+                    if pipeline_text != self.state.current_input:
+                        if debug_mode:
+                            self._safe_log("debug", f"SYNC_REFRESH: Pipeline sync '{pipeline_text}' (was '{self.state.current_input}')")
+                        self.state.current_input = pipeline_text
+                except Exception as e:
+                    if debug_mode:
+                        self._safe_log("debug", f"SYNC_REFRESH ERROR: {e}")
+            
             if (hasattr(self, 'live_display') and self.live_display and 
                 sys.stdin.isatty() and sys.stdout.isatty()):
                 # Update input panel content first
