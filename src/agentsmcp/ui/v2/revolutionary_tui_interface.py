@@ -181,6 +181,9 @@ class RevolutionaryTUIInterface:
             # Register event handlers
             await self._register_event_handlers()
             
+            # Trigger initial status updates to populate UI
+            await self._trigger_periodic_updates()
+            
             logger.info("Revolutionary TUI Interface fully initialized")
             return True
             
@@ -658,8 +661,8 @@ class RevolutionaryTUIInterface:
             logger.debug("_run_main_loop() started")
             logger.debug(f"self.running = {self.running}")
         
-        # Start background tasks (render task disabled - Rich Live handles its own rendering)
-        logger.info("⚙️ Creating background tasks...")
+        # Start event-driven background tasks - no more polling
+        logger.info("⚙️ Creating event-driven background tasks...")
         
         if debug_mode:
             logger.debug("Creating input task...")
@@ -667,12 +670,15 @@ class RevolutionaryTUIInterface:
         input_task = asyncio.create_task(self._input_loop())
         logger.debug("✅ Input task created")
         
+        # Optional: Create a periodic update trigger task for occasional status checks
+        # This replaces the continuous polling loop with an occasional update trigger
         if debug_mode:
-            logger.debug("Creating update task...")
+            logger.debug("Creating periodic update trigger task...")
         
-        update_task = asyncio.create_task(self._update_loop())
-        logger.debug("✅ Update task created")
-        logger.info("🎯 Background tasks created, waiting for completion...")
+        periodic_update_task = asyncio.create_task(self._periodic_update_trigger())
+        logger.debug("✅ Periodic update trigger task created")
+        
+        logger.info("🎯 Event-driven background tasks created, waiting for completion...")
         
         if debug_mode:
             logger.debug("Tasks created, waiting for first completion...")
@@ -680,7 +686,7 @@ class RevolutionaryTUIInterface:
         try:
             # Wait for any task to complete (usually from user interruption)
             done, pending = await asyncio.wait(
-                [input_task, update_task],
+                [input_task, periodic_update_task],
                 return_when=asyncio.FIRST_COMPLETED
             )
             
@@ -692,8 +698,8 @@ class RevolutionaryTUIInterface:
                 task_name = "unknown"
                 if task is input_task:
                     task_name = "input_task"
-                elif task is update_task:
-                    task_name = "update_task"
+                elif task is periodic_update_task:
+                    task_name = "periodic_update_task"
                 
                 if debug_mode:
                     logger.debug(f"Task completed: {task_name}")
@@ -719,6 +725,21 @@ class RevolutionaryTUIInterface:
                     
         except Exception as e:
             logger.error(f"Error in main loop: {e}")
+    
+    async def _periodic_update_trigger(self):
+        """Periodic update trigger - much less frequent than old polling loop."""
+        while self.running:
+            try:
+                # Trigger periodic updates only occasionally (every 10 seconds)
+                # This replaces continuous polling with infrequent status checks
+                await asyncio.sleep(10.0)  # Much longer interval than old polling
+                
+                # Trigger status and metrics updates which will emit events if changed
+                await self._trigger_periodic_updates()
+                
+            except Exception as e:
+                logger.error(f"Error in periodic update trigger: {e}")
+                await asyncio.sleep(5.0)  # Brief pause on error
     
     async def _run_fallback_loop(self):
         """Fallback loop without Rich (basic terminal output)."""
@@ -1049,13 +1070,8 @@ class RevolutionaryTUIInterface:
                 
                 await asyncio.sleep(0.1)
                 
-                # Update input suggestions if AI composer is available
-                if self.ai_composer and self.state.current_input:
-                    try:
-                        suggestions = await self.ai_composer.get_suggestions(self.state.current_input)
-                        self.state.input_suggestions = [s.get("completion", s) for s in suggestions if isinstance(s, (dict, str))]
-                    except Exception:
-                        pass  # Ignore suggestion errors
+                # Input suggestions now handled via events in _on_input_changed()
+                # No more polling for suggestions
                         
         finally:
             if debug_mode:
@@ -1217,54 +1233,62 @@ class RevolutionaryTUIInterface:
             # Log completion message
             logger.info("Revolutionary TUI demo completed - For interactive mode, run from a real terminal")
     
-    async def _update_loop(self):
-        """Update loop for system status and metrics."""
-        while self.running:
-            try:
-                # Update agent status
-                await self._update_agent_status()
-                
-                # Update system metrics
-                await self._update_system_metrics()
-                
-                # Update timestamp
-                self.state.last_update = time.time()
-                
-                # Wait before next update - Optimized for smooth real-time updates
-                # Balanced interval for responsive system monitoring
-                update_interval = max(0.5, 1.0 / self.target_fps)  # Minimum 500ms interval for real-time feel
-                await asyncio.sleep(update_interval)
-                
-            except Exception as e:
-                logger.error(f"Error in update loop: {e}")
-                await asyncio.sleep(1.0)
+    # Polling-based update loop REMOVED - replaced with event-driven updates
+    # All status and metrics updates now happen via events only
     
     async def _update_agent_status(self):
-        """Update the status of all agents."""
+        """Update the status of all agents and publish event."""
         try:
-            # Mock agent status - in real implementation, query actual agents
-            self.state.agent_status = {
+            # Update agent status
+            new_status = {
                 "orchestrator": "active" if self.orchestrator else "offline",
                 "ai_composer": "active" if self.ai_composer else "offline",
                 "symphony_dashboard": "active" if self.symphony_dashboard else "offline",
                 "tui_enhancements": "active" if self.enhancements else "offline"
             }
+            
+            # Check if status actually changed
+            if new_status != self.state.agent_status:
+                self.state.agent_status = new_status
+                # Publish event for reactive UI update
+                await self._publish_agent_status_changed()
+                
         except Exception as e:
             logger.warning(f"Error updating agent status: {e}")
     
     async def _update_system_metrics(self):
-        """Update system performance metrics."""
+        """Update system performance metrics and publish event."""
         try:
-            # Mock metrics - in real implementation, gather actual performance data
-            self.state.system_metrics = {
+            # Update metrics
+            new_metrics = {
                 "fps": min(60, self.frame_count % 61),
                 "memory_mb": 45.2,  # Mock memory usage
                 "cpu_percent": 12.5,  # Mock CPU usage
                 "active_tasks": len(self.state.conversation_history),
                 "uptime_mins": int((time.time() - self.last_render_time) / 60) if self.last_render_time else 0
             }
+            
+            # Check if metrics actually changed
+            if new_metrics != self.state.system_metrics:
+                self.state.system_metrics = new_metrics
+                # Publish event for reactive UI update
+                await self._publish_metrics_updated()
+                
         except Exception as e:
             logger.warning(f"Error updating system metrics: {e}")
+    
+    async def _trigger_periodic_updates(self):
+        """Trigger periodic updates via events instead of polling."""
+        try:
+            # Update agent status and metrics, which will emit events if changed
+            await self._update_agent_status()
+            await self._update_system_metrics()
+            
+            # Update timestamp
+            self.state.last_update = time.time()
+            
+        except Exception as e:
+            logger.warning(f"Error in periodic updates: {e}")
     
     async def _apply_visual_effects(self):
         """Apply visual effects using the enhancement engine."""
@@ -1281,28 +1305,30 @@ class RevolutionaryTUIInterface:
             logger.warning(f"Error applying visual effects: {e}")
     
     def _handle_character_input(self, char: str):
-        """Handle a single character input and update display immediately."""
+        """Handle a single character input and emit events for reactive updates."""
         # Add character to current input
         self.state.current_input += char
         
         # Make cursor visible and reset blink timer  
         self.state.last_update = time.time()
         
-        # Visual feedback handled automatically by Rich Live
+        # Emit input changed event for reactive UI updates
+        asyncio.create_task(self._publish_input_changed())
     
     # Input display updates removed - Rich Live handles all updates automatically
     # Manual panel updates during Live operation were corrupting the display
     
     def _handle_backspace_input(self):
-        """Handle backspace key input with immediate visual feedback."""
+        """Handle backspace key input and emit events for reactive updates."""
         if self.state.current_input:
             self.state.current_input = self.state.current_input[:-1]
             self.state.last_update = time.time()
             
-            # Visual feedback handled automatically by Rich Live
+            # Emit input changed event for reactive UI updates
+            asyncio.create_task(self._publish_input_changed())
     
     async def _handle_enter_input(self):
-        """Handle Enter key - submit the current input."""
+        """Handle Enter key - submit the current input and emit events."""
         if self.state.current_input.strip():
             # Process the input
             await self._process_user_input(self.state.current_input.strip())
@@ -1311,10 +1337,11 @@ class RevolutionaryTUIInterface:
             self.state.current_input = ""
             self.state.input_suggestions = []
             
-            # Display updates handled automatically by Rich Live
+            # Emit input changed event for clearing input
+            await self._publish_input_changed()
     
     def _handle_up_arrow(self):
-        """Handle up arrow key - navigate to previous input in history."""
+        """Handle up arrow key - navigate to previous input in history and emit events."""
         if self.input_history and self.history_index < len(self.input_history) - 1:
             # Save current input if at end of history
             if self.history_index == -1 and self.state.current_input.strip():
@@ -1326,10 +1353,11 @@ class RevolutionaryTUIInterface:
             self.state.current_input = history_item
             self.state.last_update = time.time()
             
-            # Display updates handled automatically by Rich Live
+            # Emit input changed event for reactive UI updates
+            asyncio.create_task(self._publish_input_changed())
     
     def _handle_down_arrow(self):
-        """Handle down arrow key - navigate to next input in history."""
+        """Handle down arrow key - navigate to next input in history and emit events."""
         if self.history_index > -1:
             self.history_index -= 1
             
@@ -1342,7 +1370,8 @@ class RevolutionaryTUIInterface:
                 
             self.state.last_update = time.time()
             
-            # Display updates handled automatically by Rich Live
+            # Emit input changed event for reactive UI updates
+            asyncio.create_task(self._publish_input_changed())
     
     def _handle_left_arrow(self):
         """Handle left arrow key - move cursor left (future enhancement)."""
@@ -1359,14 +1388,14 @@ class RevolutionaryTUIInterface:
         # Display updates handled automatically by Rich Live
     
     def _handle_escape_key(self):
-        """Handle ESC key - clear current input."""
+        """Handle ESC key - clear current input and emit events."""
         self.state.current_input = ""
         self.state.input_suggestions = []
         self.history_index = -1
         self.state.last_update = time.time()
         
-        # Update display with throttling
-        # Display updates handled automatically by Rich Live
+        # Emit input changed event for reactive UI updates
+        asyncio.create_task(self._publish_input_changed())
     
     async def _handle_exit(self):
         """Handle Ctrl+C/Ctrl+D - graceful exit."""
@@ -1401,15 +1430,21 @@ class RevolutionaryTUIInterface:
   Other input processed by AI agents."""
                 
                 timestamp = datetime.now().strftime("%H:%M:%S")
-                self.state.conversation_history.extend([{
+                user_message = {
                     "role": "user",
                     "content": user_input,
                     "timestamp": timestamp
-                }, {
+                }
+                assistant_message = {
                     "role": "assistant", 
                     "content": response_content,
                     "timestamp": timestamp
-                }])
+                }
+                self.state.conversation_history.extend([user_message, assistant_message])
+                
+                # Emit conversation updated events
+                await self._publish_conversation_updated(user_message)
+                await self._publish_conversation_updated(assistant_message)
                 return
                 
             # Handle status command
@@ -1421,39 +1456,56 @@ class RevolutionaryTUIInterface:
   Messages: {len(self.state.conversation_history)}"""
                 
                 timestamp = datetime.now().strftime("%H:%M:%S")
-                self.state.conversation_history.extend([{
+                user_message = {
                     "role": "user",
                     "content": user_input,
                     "timestamp": timestamp
-                }, {
+                }
+                assistant_message = {
                     "role": "assistant",
                     "content": response_content,
                     "timestamp": timestamp
-                }])
+                }
+                self.state.conversation_history.extend([user_message, assistant_message])
+                
+                # Emit conversation updated events
+                await self._publish_conversation_updated(user_message)
+                await self._publish_conversation_updated(assistant_message)
                 return
                 
             # Handle clear command
             if user_input_lower in ['clear', '/clear']:
                 self.state.conversation_history.clear()
                 timestamp = datetime.now().strftime("%H:%M:%S")
-                self.state.conversation_history.append({
+                clear_message = {
                     "role": "assistant",
                     "content": "🧹 Conversation history cleared.",
                     "timestamp": timestamp
-                })
+                }
+                self.state.conversation_history.append(clear_message)
+                
+                # Emit conversation updated event
+                await self._publish_conversation_updated(clear_message)
                 return
             
             # Add to conversation history for non-builtin commands
             timestamp = datetime.now().strftime("%H:%M:%S")
-            self.state.conversation_history.append({
+            new_user_message = {
                 "role": "user",
                 "content": user_input,
                 "timestamp": timestamp
-            })
+            }
+            self.state.conversation_history.append(new_user_message)
+            
+            # Emit conversation updated event
+            await self._publish_conversation_updated(new_user_message)
             
             # Show processing state
             self.state.is_processing = True
             self.state.processing_message = "Processing with AI agents..."
+            
+            # Emit processing state changed event
+            await self._publish_processing_state_changed()
             
             # Process through orchestrator if available
             if self.orchestrator:
@@ -1467,11 +1519,15 @@ class RevolutionaryTUIInterface:
                 response = await self.orchestrator.process_user_input(user_input, context)
                 
                 # Add response to conversation
-                self.state.conversation_history.append({
+                new_assistant_message = {
                     "role": "assistant",
                     "content": response.content or "No response generated",
                     "timestamp": datetime.now().strftime("%H:%M:%S")
-                })
+                }
+                self.state.conversation_history.append(new_assistant_message)
+                
+                # Emit conversation updated event
+                await self._publish_conversation_updated(new_assistant_message)
                 
                 # Apply typewriter effect to response if enhancements available
                 if self.enhancements:
@@ -1484,35 +1540,59 @@ class RevolutionaryTUIInterface:
             
             else:
                 # Fallback response
-                self.state.conversation_history.append({
+                new_assistant_message = {
                     "role": "assistant", 
                     "content": f"Revolutionary TUI received: {user_input}",
                     "timestamp": datetime.now().strftime("%H:%M:%S")
-                })
+                }
+                self.state.conversation_history.append(new_assistant_message)
+                
+                # Emit conversation updated event
+                await self._publish_conversation_updated(new_assistant_message)
             
             # Clear processing state
             self.state.is_processing = False
             self.state.processing_message = ""
+            
+            # Emit processing state changed event
+            await self._publish_processing_state_changed()
             
         except Exception as e:
             logger.error(f"Error processing user input: {e}")
             self.state.is_processing = False
             self.state.processing_message = ""
             
+            # Emit processing state changed event for error state
+            await self._publish_processing_state_changed()
+            
             # Add error to conversation
-            self.state.conversation_history.append({
+            error_message = {
                 "role": "system",
                 "content": f"Error processing input: {str(e)}",
                 "timestamp": datetime.now().strftime("%H:%M:%S")
-            })
+            }
+            self.state.conversation_history.append(error_message)
+            
+            # Emit conversation updated event for error
+            await self._publish_conversation_updated(error_message)
     
     async def _register_event_handlers(self):
         """Register event handlers for the revolutionary interface."""
         try:
-            # Register handlers for various events
+            # Register handlers for UI update events
+            await self.event_system.subscribe("input_changed", self._on_input_changed)
+            await self.event_system.subscribe("agent_status_changed", self._on_agent_status_changed)
+            await self.event_system.subscribe("metrics_updated", self._on_metrics_updated)
+            await self.event_system.subscribe("conversation_updated", self._on_conversation_updated)
+            await self.event_system.subscribe("processing_state_changed", self._on_processing_state_changed)
+            await self.event_system.subscribe("ui_refresh", self._on_ui_refresh)
+            
+            # Legacy handlers for backward compatibility
             await self.event_system.subscribe("user_input", self._handle_user_input_event)
             await self.event_system.subscribe("agent_status_change", self._handle_agent_status_change)
             await self.event_system.subscribe("performance_update", self._handle_performance_update)
+            
+            logger.debug("All event handlers registered successfully")
             
         except Exception as e:
             logger.warning(f"Error registering event handlers: {e}")
@@ -1534,6 +1614,186 @@ class RevolutionaryTUIInterface:
         """Handle performance update events."""
         metrics = event_data.get("metrics", {})
         self.state.system_metrics.update(metrics)
+    
+    # Event-driven UI update handlers
+    async def _on_input_changed(self, event_data: Dict[str, Any]):
+        """Handle input change events and update input panel."""
+        try:
+            # Update AI suggestions asynchronously
+            if self.ai_composer and event_data.get("input"):
+                try:
+                    suggestions = await self.ai_composer.get_suggestions(event_data["input"])
+                    self.state.input_suggestions = [s.get("completion", s) for s in suggestions if isinstance(s, (dict, str))]
+                except Exception:
+                    pass  # Ignore suggestion errors
+            
+            # Update UI panels through Rich Live (automatic)
+            await self._refresh_panel("input")
+            
+        except Exception as e:
+            logger.debug(f"Error handling input change event: {e}")
+    
+    async def _on_agent_status_changed(self, event_data: Dict[str, Any]):
+        """Handle agent status change events and update status panel."""
+        try:
+            # Update status panel
+            await self._refresh_panel("status")
+        except Exception as e:
+            logger.debug(f"Error handling agent status change event: {e}")
+    
+    async def _on_metrics_updated(self, event_data: Dict[str, Any]):
+        """Handle metrics update events and update status panel."""
+        try:
+            # Update status panel with new metrics
+            await self._refresh_panel("status")
+        except Exception as e:
+            logger.debug(f"Error handling metrics update event: {e}")
+    
+    async def _on_conversation_updated(self, event_data: Dict[str, Any]):
+        """Handle conversation update events and update chat panel."""
+        try:
+            # Update chat panel
+            await self._refresh_panel("chat")
+        except Exception as e:
+            logger.debug(f"Error handling conversation update event: {e}")
+    
+    async def _on_processing_state_changed(self, event_data: Dict[str, Any]):
+        """Handle processing state change events and update header/input panels."""
+        try:
+            # Update header and input panels
+            await self._refresh_panel("header")
+            await self._refresh_panel("input")
+        except Exception as e:
+            logger.debug(f"Error handling processing state change event: {e}")
+    
+    async def _on_ui_refresh(self, event_data: Dict[str, Any]):
+        """Handle UI refresh events for specific panels."""
+        try:
+            panels = event_data.get("panels", [])
+            for panel in panels:
+                await self._refresh_panel(panel)
+        except Exception as e:
+            logger.debug(f"Error handling UI refresh event: {e}")
+    
+    async def _refresh_panel(self, panel_name: str):
+        """Refresh a specific UI panel - Rich Live handles the actual update."""
+        try:
+            if not self.layout or not RICH_AVAILABLE:
+                return
+            
+            # Rich Live automatically updates when layout content changes
+            # We just need to update the layout content
+            if panel_name == "header":
+                header_text = Text("🚀 AgentsMCP Revolutionary Interface", style="bold blue")
+                if self.state.is_processing:
+                    header_text.append(" • ", style="dim")
+                    header_text.append(self.state.processing_message, style="yellow")
+                
+                self.layout["header"].update(
+                    Panel(
+                        Align.center(header_text),
+                        box=box.ROUNDED,
+                        style="bright_blue"
+                    )
+                )
+            
+            elif panel_name == "status":
+                status_content = self._create_status_panel()
+                self.layout["status"].update(
+                    Panel(
+                        status_content,
+                        title="Agent Status",
+                        box=box.ROUNDED,
+                        style="green"
+                    )
+                )
+            
+            elif panel_name == "chat":
+                chat_content = self._create_chat_panel()
+                self.layout["chat"].update(
+                    Panel(
+                        chat_content,
+                        title="Conversation",
+                        box=box.ROUNDED,
+                        style="white"
+                    )
+                )
+            
+            elif panel_name == "input":
+                input_content = self._create_input_panel()
+                self.layout["input"].update(
+                    Panel(
+                        input_content,
+                        title="AI Command Composer",
+                        box=box.ROUNDED,
+                        style="cyan"
+                    )
+                )
+            
+            elif panel_name == "dashboard":
+                dashboard_content = await self._create_dashboard_panel()
+                self.layout["dashboard"].update(
+                    Panel(
+                        dashboard_content,
+                        title="Symphony Dashboard",
+                        box=box.ROUNDED,
+                        style="magenta"
+                    )
+                )
+                
+        except Exception as e:
+            logger.debug(f"Error refreshing {panel_name} panel: {e}")
+    
+    # Event publishing methods
+    async def _publish_input_changed(self, current_input: str = None, suggestions: List[str] = None):
+        """Publish input changed event."""
+        try:
+            await self.event_system.emit("input_changed", {
+                "input": current_input or self.state.current_input,
+                "suggestions": suggestions or self.state.input_suggestions
+            })
+        except Exception as e:
+            logger.debug(f"Error publishing input changed event: {e}")
+    
+    async def _publish_agent_status_changed(self, agent: str = None, status: str = None):
+        """Publish agent status changed event."""
+        try:
+            await self.event_system.emit("agent_status_changed", {
+                "agent": agent,
+                "status": status,
+                "all_status": self.state.agent_status.copy()
+            })
+        except Exception as e:
+            logger.debug(f"Error publishing agent status changed event: {e}")
+    
+    async def _publish_metrics_updated(self, metrics: Dict[str, Any] = None):
+        """Publish metrics updated event."""
+        try:
+            await self.event_system.emit("metrics_updated", {
+                "metrics": metrics or self.state.system_metrics.copy()
+            })
+        except Exception as e:
+            logger.debug(f"Error publishing metrics updated event: {e}")
+    
+    async def _publish_conversation_updated(self, new_message: Dict[str, str] = None):
+        """Publish conversation updated event."""
+        try:
+            await self.event_system.emit("conversation_updated", {
+                "history": self.state.conversation_history.copy(),
+                "new_message": new_message
+            })
+        except Exception as e:
+            logger.debug(f"Error publishing conversation updated event: {e}")
+    
+    async def _publish_processing_state_changed(self, is_processing: bool = None, message: str = None):
+        """Publish processing state changed event."""
+        try:
+            await self.event_system.emit("processing_state_changed", {
+                "is_processing": is_processing if is_processing is not None else self.state.is_processing,
+                "message": message or self.state.processing_message
+            })
+        except Exception as e:
+            logger.debug(f"Error publishing processing state changed event: {e}")
     
     async def _cleanup(self):
         """Cleanup resources."""
