@@ -121,6 +121,7 @@ class RevolutionaryTUIInterface:
         self.event_system = AsyncEventSystem()
         self.state = TUIState()
         self.running = False
+        self._event_loop = None  # Store event loop for cross-thread communication
         
         # Logging (using unified architecture to prevent console pollution)
         self._isolated_logging = True  # Enable isolated logging by default
@@ -876,6 +877,9 @@ class RevolutionaryTUIInterface:
     
     async def run(self) -> int:
         """Run the Revolutionary TUI Interface."""
+        # Store event loop for cross-thread communication
+        self._event_loop = asyncio.get_running_loop()
+        
         debug_mode = self._debug_mode or getattr(self.cli_config, 'debug_mode', False)
         
         # Use unified logging architecture to prevent console pollution
@@ -1873,11 +1877,13 @@ class RevolutionaryTUIInterface:
             except Exception:
                 pass  # Continue without pipeline if it fails
         
-        # Emit input changed event for reactive UI updates with immediate refresh
-        asyncio.create_task(self._publish_input_changed())
+        # Immediately refresh the Live display to show typed characters
+        # Must be synchronous since this runs in input thread, not async context
+        self._sync_refresh_display()
         
-        # Trigger immediate input panel refresh for typing visibility
-        asyncio.create_task(self._refresh_panel("input"))
+        # Emit input changed event for reactive UI updates (async)
+        if hasattr(self, '_event_loop') and self._event_loop and not self._event_loop.is_closed():
+            self._event_loop.call_soon_threadsafe(lambda: asyncio.create_task(self._publish_input_changed()))
     
     # Input display updates removed - Rich Live handles all updates automatically
     # Manual panel updates during Live operation were corrupting the display
@@ -1898,11 +1904,13 @@ class RevolutionaryTUIInterface:
                 except Exception:
                     pass  # Continue without pipeline if it fails
             
-            # Emit input changed event for reactive UI updates
-            asyncio.create_task(self._publish_input_changed())
+            # Immediately refresh the Live display to show backspace effect
+            # Must be synchronous since this runs in input thread, not async context
+            self._sync_refresh_display()
             
-            # Trigger immediate input panel refresh for typing visibility
-            asyncio.create_task(self._refresh_panel("input"))
+            # Emit input changed event for reactive UI updates (async)
+            if hasattr(self, '_event_loop') and self._event_loop and not self._event_loop.is_closed():
+                self._event_loop.call_soon_threadsafe(lambda: asyncio.create_task(self._publish_input_changed()))
     
     async def _handle_enter_input(self):
         """Handle Enter key - submit the current input and emit events."""
@@ -1930,8 +1938,12 @@ class RevolutionaryTUIInterface:
             self.state.current_input = history_item
             self.state.last_update = time.time()
             
-            # Emit input changed event for reactive UI updates
-            asyncio.create_task(self._publish_input_changed())
+            # Immediately refresh display to show history navigation
+            self._sync_refresh_display()
+            
+            # Emit input changed event for reactive UI updates (async)
+            if hasattr(self, '_event_loop') and self._event_loop and not self._event_loop.is_closed():
+                self._event_loop.call_soon_threadsafe(lambda: asyncio.create_task(self._publish_input_changed()))
     
     def _handle_down_arrow(self):
         """Handle down arrow key - navigate to next input in history and emit events."""
@@ -1947,8 +1959,12 @@ class RevolutionaryTUIInterface:
                 
             self.state.last_update = time.time()
             
-            # Emit input changed event for reactive UI updates
-            asyncio.create_task(self._publish_input_changed())
+            # Immediately refresh display to show history navigation
+            self._sync_refresh_display()
+            
+            # Emit input changed event for reactive UI updates (async)
+            if hasattr(self, '_event_loop') and self._event_loop and not self._event_loop.is_closed():
+                self._event_loop.call_soon_threadsafe(lambda: asyncio.create_task(self._publish_input_changed()))
     
     def _handle_left_arrow(self):
         """Handle left arrow key - move cursor left (future enhancement)."""
@@ -1971,8 +1987,12 @@ class RevolutionaryTUIInterface:
         self.history_index = -1
         self.state.last_update = time.time()
         
-        # Emit input changed event for reactive UI updates
-        asyncio.create_task(self._publish_input_changed())
+        # Immediately refresh display to show cleared input
+        self._sync_refresh_display()
+        
+        # Emit input changed event for reactive UI updates (async)
+        if hasattr(self, '_event_loop') and self._event_loop and not self._event_loop.is_closed():
+            self._event_loop.call_soon_threadsafe(lambda: asyncio.create_task(self._publish_input_changed()))
     
     async def _handle_exit(self):
         """Handle Ctrl+C/Ctrl+D - graceful exit."""
@@ -2333,6 +2353,28 @@ class RevolutionaryTUIInterface:
                 
         except Exception as e:
             pass  # Silently ignore panel refresh errors
+    
+    def _sync_refresh_display(self):
+        """Synchronously refresh the Live display - for use from input thread."""
+        try:
+            if (hasattr(self, 'live_display') and self.live_display and 
+                sys.stdin.isatty() and sys.stdout.isatty()):
+                # Update input panel content first
+                if self.layout and "input" in self.layout:
+                    input_content = self._create_input_panel()
+                    self.layout["input"].update(
+                        Panel(
+                            input_content,
+                            title="AI Command Composer",
+                            box=box.ROUNDED,
+                            style="cyan"
+                        )
+                    )
+                
+                # Manual refresh needed since auto-refresh is disabled for anti-scrollback
+                self.live_display.refresh()
+        except Exception:
+            pass  # Ignore refresh errors - input should still work even if display fails
     
     # Event publishing methods
     async def _publish_input_changed(self, current_input: str = None, suggestions: List[str] = None):
