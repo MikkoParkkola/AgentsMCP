@@ -883,7 +883,7 @@ class MainTUIApp:
                 for idx, l in enumerate(to_show):
                     # First displayed line gets prompt, others continuation
                     is_first = (idx == max(0, len(to_show) - input_lines))
-                    line_text = f"{prefix_spinner}{prompt}{l}" if is_first else f"{prefix_spinner}... {l}"
+                    line_text = f"{prefix_spinner}{prompt}{l}" if is_first else f"{prefix_spinner}  {l}"
                     if len(line_text) < width:
                         line_text = line_text + (" " * (width - len(line_text)))
                     visual.append(line_text[:width])
@@ -1485,7 +1485,7 @@ class MainTUIApp:
                                     visual = []
                                     for idx, l in enumerate(to_show):
                                         is_first = (idx == max(0, len(to_show) - input_lines))
-                                        line_text = f"{prompt}{l}" if is_first else f"... {l}"
+                                        line_text = f"{prompt}{l}" if is_first else f"  {l}"
                                         if len(line_text) < width:
                                             line_text = line_text + (" " * (width - len(line_text)))
                                         visual.append(line_text[:width])

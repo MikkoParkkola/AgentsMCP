@@ -213,7 +213,7 @@ class ChatHistoryDisplay:
         text = Text()
         text.append(f"[{message.message_type.upper()}] ", style="dim")
         text.append(message.content, style=style)
-        text.overflow = "fold"
+        # text.overflow = "fold"  # Removed: causes empty lines in text rendering
         
         return text
     

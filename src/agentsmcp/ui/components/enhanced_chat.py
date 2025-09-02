@@ -108,7 +108,7 @@ class EnhancedChatInput:
         # Regular text with proper styling
         text = Text()
         text.append(message, style=style)
-        text.overflow = "fold"  # Wrap long lines nicely
+        # text.overflow = "fold"  # Removed: causes empty lines in text rendering
         
         return text
     

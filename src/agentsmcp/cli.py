@@ -116,7 +116,7 @@ class EnhancedAgentsMCPCLI(click.Group):
                 f"💥  {click.style('Unexpected error:', fg='red', bold=True)} {exc}\n"
                 f"💡 If this keeps happening, please:\n"
                 f"   • Re-run with {click.style('--debug', fg='cyan')} to see the full traceback\n"
-                f"   • Report the issue at {click.style('https://github.com/yourorg/agentsmcp/issues', fg='cyan')}",
+                f"   • Report the issue at {click.style('https://github.com/MikkoParkkola/AgentsMCP/issues', fg='cyan')}",
                 err=True,
             )
             ctx.exit(1)
