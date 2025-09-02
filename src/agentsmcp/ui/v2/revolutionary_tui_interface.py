@@ -106,20 +106,25 @@ class RevolutionaryTUIInterface:
         self.ai_composer: Optional[AICommandComposer] = None
         self.symphony_dashboard: Optional[SymphonyDashboard] = None
         
-        # Rich terminal setup with proper width detection and constraints
+        # Rich terminal setup with full terminal width utilization
         if RICH_AVAILABLE:
-            # Get terminal width with fallbacks and reasonable limits
+            # Get terminal dimensions for full space utilization
             try:
-                term_width = shutil.get_terminal_size().columns
+                term_size = shutil.get_terminal_size()
+                term_width = term_size.columns
+                term_height = term_size.lines
             except:
                 term_width = 80
-                
-            # Constrain to reasonable limits to prevent overflow
-            max_width = min(120, max(80, term_width - 2))  # Leave margin for borders
+                term_height = 24
             
-            # Initialize console with width constraints and explicit alternate screen support
+            # Use full terminal width (no artificial constraints)
+            # Only leave minimal margin to prevent edge overflow
+            full_width = max(80, term_width - 1)  # Just 1 char margin for safety
+            
+            # Initialize console to use full terminal dimensions
             self.console = Console(
-                width=max_width,
+                width=full_width,
+                height=term_height,
                 force_terminal=True,
                 legacy_windows=False,
                 # Force proper terminal control for alternate screen
@@ -130,10 +135,13 @@ class RevolutionaryTUIInterface:
                 # Enable proper alternate screen buffer handling
                 soft_wrap=False
             )
-            self.max_panel_width = max_width - 4  # Account for panel borders
+            # Store terminal dimensions for dynamic panel sizing
+            self.terminal_width = full_width
+            self.terminal_height = term_height
         else:
             self.console = None
-            self.max_panel_width = 76
+            self.terminal_width = 80
+            self.terminal_height = 24
         self.layout = None
         self.live_display = None
         
@@ -142,12 +150,11 @@ class RevolutionaryTUIInterface:
         self.input_history = deque(maxlen=100)
         self.history_index = -1
         
-        # Performance and animation - CRITICAL: Reduced to prevent terminal flooding
-        # EMERGENCY: Lower refresh rates to prevent scrollback pollution
+        # Performance and animation - Balanced for smooth TUI experience  
         self.last_render_time = 0.0
         self.frame_count = 0
-        self.target_fps = 5.0   # EMERGENCY: Reduced from 15 to 5 FPS to prevent flooding
-        self.max_fps = 10.0     # EMERGENCY: Reduced from 30 to 10 FPS maximum
+        self.target_fps = 4.0   # Smooth update rate for TUI responsiveness
+        self.max_fps = 10.0     # Maximum refresh rate for active usage
         
         # Terminal control flags
         self._alternate_screen_active = False
@@ -231,55 +238,80 @@ class RevolutionaryTUIInterface:
                 max_agent_wait_time_ms=120000,
                 synthesis_timeout_ms=5000
             )
-            self.orchestrator = Orchestrator(config=config)
+            
+            # CRITICAL FIX: Temporarily suppress all logging during orchestrator initialization
+            # This prevents LLM client debug logs from flooding the terminal during TUI startup
+            original_root_level = logging.getLogger().level
+            original_llm_level = logging.getLogger('agentsmcp.conversation.llm_client').level
+            
+            try:
+                # Set to CRITICAL to suppress ALL logging during initialization
+                logging.getLogger().setLevel(logging.CRITICAL)
+                logging.getLogger('agentsmcp.conversation.llm_client').setLevel(logging.CRITICAL)
+                logging.getLogger('agentsmcp.orchestration').setLevel(logging.CRITICAL)
+                logging.getLogger('agentsmcp.agents').setLevel(logging.CRITICAL)
+                
+                # Initialize orchestrator (this may trigger LLM client initialization)
+                self.orchestrator = Orchestrator(config=config)
+                
+            finally:
+                # Restore original logging levels
+                logging.getLogger().setLevel(original_root_level)
+                logging.getLogger('agentsmcp.conversation.llm_client').setLevel(original_llm_level)
+                
             logger.debug("Orchestrator initialized for Revolutionary TUI")
         except Exception as e:
             logger.warning(f"Failed to initialize orchestrator: {e}")
             self.orchestrator = None
     
     async def _setup_rich_layout(self):
-        """Setup the Rich terminal layout for the revolutionary interface."""
+        """Setup the Rich terminal layout for the revolutionary interface to fill full terminal."""
         if not RICH_AVAILABLE:
             return
             
-        # Create main layout with multiple panels
+        # Create main layout that uses full terminal dimensions
         self.layout = Layout()
         
-        # Split into header, main, and footer
+        # Configure layout to use full terminal space
+        self.layout.size = None  # Allow layout to expand to full terminal
+        
+        # Split into header, main, and footer with dynamic sizing
         self.layout.split_column(
-            Layout(name="header", size=3),
-            Layout(name="main"),
-            Layout(name="footer", size=5)
+            Layout(name="header", size=3),  # Fixed header height
+            Layout(name="main", ratio=1),   # Main area takes remaining space
+            Layout(name="footer", size=3)   # Reduced footer height for more space
         )
         
-        # Split main area into sidebar and content
+        # Split main area into sidebar and content with responsive sizing
+        # Sidebar gets fixed width, content expands to fill remaining space
+        sidebar_width = max(20, min(30, self.terminal_width // 4))  # Responsive sidebar
         self.layout["main"].split_row(
-            Layout(name="sidebar", size=25),
-            Layout(name="content")
+            Layout(name="sidebar", size=sidebar_width),
+            Layout(name="content", ratio=1)  # Content expands to fill remaining width
         )
         
-        # Split content into chat and input
+        # Split content into chat and input - chat gets most space
         self.layout["content"].split_column(
-            Layout(name="chat", ratio=4),
-            Layout(name="input", size=3)
+            Layout(name="chat", ratio=5),    # Chat gets 5/6 of content height
+            Layout(name="input", ratio=1)    # Input gets 1/6 of content height
         )
         
         # Split sidebar into status and dashboard
         self.layout["sidebar"].split_column(
-            Layout(name="status", size=8),
-            Layout(name="dashboard")
+            Layout(name="status", ratio=1),     # Status gets half of sidebar height
+            Layout(name="dashboard", ratio=1)   # Dashboard gets half of sidebar height
         )
         
-        # Initialize panels
+        # Initialize panels with full-width support
         await self._initialize_layout_panels()
     
     async def _initialize_layout_panels(self):
-        """Initialize layout panels with current content once during setup."""
+        """Initialize layout panels with full terminal space utilization."""
         if not RICH_AVAILABLE or not self.layout:
             return
         
         try:
-            # Header panel - Main title and system status
+            # Header panel - Expands to full terminal width
             header_text = Text("🚀 AgentsMCP Revolutionary Interface", style="bold blue")
             if self.state.is_processing:
                 header_text.append(" • ", style="dim")
@@ -290,12 +322,11 @@ class RevolutionaryTUIInterface:
                     Align.center(header_text),
                     box=box.ROUNDED,
                     style="bright_blue",
-                    width=self.max_panel_width,
-                    expand=False
+                    expand=True  # Fill available width
                 )
             )
             
-            # Status panel - Agent status and metrics
+            # Status panel - Expands to fill sidebar width
             status_content = self._create_status_panel()
             self.layout["status"].update(
                 Panel(
@@ -303,12 +334,11 @@ class RevolutionaryTUIInterface:
                     title="Agent Status",
                     box=box.ROUNDED,
                     style="green",
-                    width=self.max_panel_width // 4,  # Sidebar panel
-                    expand=False
+                    expand=True  # Fill available sidebar width
                 )
             )
             
-            # Dashboard panel - Symphony dashboard
+            # Dashboard panel - Expands to fill sidebar width
             dashboard_content = await self._create_dashboard_panel()
             self.layout["dashboard"].update(
                 Panel(
@@ -316,12 +346,11 @@ class RevolutionaryTUIInterface:
                     title="Symphony Dashboard",
                     box=box.ROUNDED,
                     style="magenta",
-                    width=self.max_panel_width // 4,  # Sidebar panel
-                    expand=False
+                    expand=True  # Fill available sidebar width
                 )
             )
             
-            # Chat panel - Conversation history
+            # Chat panel - Expands to fill content area width
             chat_content = self._create_chat_panel()
             self.layout["chat"].update(
                 Panel(
@@ -329,12 +358,11 @@ class RevolutionaryTUIInterface:
                     title="Conversation",
                     box=box.ROUNDED,
                     style="white",
-                    width=self.max_panel_width * 3 // 4,  # Main content panel
-                    expand=False
+                    expand=True  # Fill available content width
                 )
             )
             
-            # Input panel - Smart input with suggestions
+            # Input panel - Expands to fill content area width
             input_content = self._create_input_panel()
             self.layout["input"].update(
                 Panel(
@@ -342,20 +370,18 @@ class RevolutionaryTUIInterface:
                     title="AI Command Composer",
                     box=box.ROUNDED,
                     style="cyan",
-                    width=self.max_panel_width * 3 // 4,  # Main content panel
-                    expand=False
+                    expand=True  # Fill available content width
                 )
             )
             
-            # Footer - Help and shortcuts
+            # Footer - Expands to full terminal width
             footer_content = self._create_footer_panel()
             self.layout["footer"].update(
                 Panel(
                     footer_content,
                     box=box.ROUNDED,
                     style="dim",
-                    width=self.max_panel_width,
-                    expand=False
+                    expand=True  # Fill available width
                 )
             )
             
@@ -363,39 +389,42 @@ class RevolutionaryTUIInterface:
             logger.warning(f"Error initializing layout panels: {e}")
     
     def _create_status_panel(self) -> Text:
-        """Create the agent status panel content."""
+        """Create the agent status panel content with full-width support."""
         if not self.state.agent_status:
-            return Text("🔄 Init • 📊 Loading", overflow="ellipsis")
+            return Text("🔄 Initializing • 📊 Loading metrics...", overflow="fold")
         
-        # Create Rich Text with wrapping enabled
-        text = Text(overflow="ellipsis")
+        # Create Rich Text with wrapping enabled for wider panels
+        text = Text(overflow="fold")
         
-        # Agent status - ultra compact display
+        # Agent status - expanded display for wider sidebar
         for agent_name, status in self.state.agent_status.items():
             status_icon = "🟢" if status == "active" else "🔴" if status == "error" else "🟡"
-            # Shorten agent names for compact display
-            short_name = agent_name.replace("_", "").replace("orchestrator", "orch").replace("symphony_dashboard", "dash").replace("tui_enhancements", "ui").replace("ai_composer", "ai")
-            # Limit line length to prevent overflow
-            line = f"{status_icon} {short_name}: {status}"[:18] + ("..." if len(f"{status_icon} {short_name}: {status}") > 18 else "")
-            text.append(line + "\n")
+            # Use full agent names in wider sidebar
+            display_name = agent_name.replace("_", " ").title()
+            line = f"{status_icon} {display_name}: {status.upper()}"
+            text.append(line + "\n", style="bold" if status == "active" else "dim")
         
-        # System metrics - ultra compact display on fewer lines
+        # System metrics - expanded display with more information
         if self.state.system_metrics:
-            # Combine metrics on single lines where possible
+            text.append("\n📊 System Metrics:\n", style="cyan bold")
+            
             fps = self.state.system_metrics.get('fps', 0)
             memory = self.state.system_metrics.get('memory_mb', 0)
             cpu = self.state.system_metrics.get('cpu_percent', 0)
             tasks = self.state.system_metrics.get('active_tasks', 0)
+            uptime = self.state.system_metrics.get('uptime_mins', 0)
             
-            # Limit line length to prevent overflow
-            metrics_line1 = f"📊 FPS:{fps} • RAM:{memory:.0f}MB"[:18]
-            metrics_line2 = f"⚡ CPU:{cpu:.0f}% • Tasks:{tasks}"[:18]
-            text.append(metrics_line1 + "\n" + metrics_line2)
+            # Full metrics display for wider sidebar
+            text.append(f"⚡ FPS: {fps}\n", style="green")
+            text.append(f"💾 RAM: {memory:.1f} MB\n", style="yellow")
+            text.append(f"🔄 CPU: {cpu:.1f}%\n", style="magenta")
+            text.append(f"📋 Tasks: {tasks}\n", style="blue")
+            text.append(f"⏱️ Uptime: {uptime}m", style="white")
         
         return text
     
     async def _create_dashboard_panel(self) -> Text:
-        """Create the Symphony dashboard panel content."""
+        """Create the Symphony dashboard panel content with full-width support."""
         try:
             if self.symphony_dashboard:
                 # Get dashboard data
@@ -411,85 +440,89 @@ class RevolutionaryTUIInterface:
                         'active_agents': 3,
                         'running_tasks': 1,
                         'success_rate': 95.2,
-                        'recent_activity': ['Task completed', 'New agent spawned', 'System optimized']
+                        'recent_activity': ['Task completed successfully', 'New agent spawned and initialized', 'System performance optimized']
                     }
                 
-                # Create Rich Text with wrapping enabled
-                text = Text(overflow="ellipsis")
+                # Create Rich Text with wrapping enabled for wider panels
+                text = Text(overflow="fold")
                 
-                # Ultra compact header and metrics
+                # Expanded metrics display for wider sidebar
                 agents = dashboard_data.get('active_agents', 0)
                 tasks = dashboard_data.get('running_tasks', 0)
                 success = dashboard_data.get('success_rate', 0)
                 
-                # Limit line length to prevent overflow
-                line1 = f"🎼 Agents:{agents} Tasks:{tasks}"[:18]
-                line2 = f"✅ Success:{success:.0f}%"[:18]
-                text.append(line1 + "\n" + line2 + "\n")
+                text.append("🎼 Symphony Overview:\n", style="magenta bold")
+                text.append(f"👥 Active Agents: {agents}\n", style="cyan")
+                text.append(f"⚙️ Running Tasks: {tasks}\n", style="blue")
+                text.append(f"✅ Success Rate: {success:.1f}%\n", style="green")
                 
-                # Recent activity - ultra compact, single line each
+                # Recent activity - expanded display with full descriptions
                 recent_activity = dashboard_data.get('recent_activity', [])
                 if recent_activity:
-                    text.append("📈 Recent:\n")
-                    for activity in recent_activity[-2:]:
-                        # Truncate activities to prevent overflow
-                        short_activity = activity[:15] + "..." if len(activity) > 15 else activity
-                        text.append(f"• {short_activity}\n")
+                    text.append("\n📈 Recent Activity:\n", style="yellow bold")
+                    for activity in recent_activity[-3:]:  # Show more activities in wider panel
+                        # Use full activity descriptions in wider sidebar
+                        text.append(f"• {activity}\n", style="white")
                 
                 return text
             else:
-                return Text("🎼 Loading...", overflow="ellipsis")  # Ultra compact loading
+                return Text("🎼 Symphony Dashboard Loading...\nInitializing components...", overflow="fold")
                 
         except Exception as e:
             logger.warning(f"Error creating dashboard panel: {e}")
-            return Text(f"🎼 Error: {str(e)[:15]}...", overflow="ellipsis")
+            return Text(f"🎼 Dashboard Error:\n{str(e)}", overflow="fold")
     
     def _create_chat_panel(self) -> Text:
-        """Create the chat conversation panel content."""
+        """Create the chat conversation panel content with full-width support."""
         if not self.state.conversation_history:
-            return Text("🚀 Revolutionary TUI\nType below to start", overflow="fold")
+            return Text("🚀 Revolutionary TUI Interface\n\nWelcome to the enhanced chat experience!\nType your messages below to begin conversation.", overflow="fold")
         
-        # Create Rich Text with wrapping enabled
+        # Create Rich Text with wrapping enabled for wider chat panel
         text = Text(overflow="fold")
         
-        # Show recent conversation - ultra compact format
-        for entry in self.state.conversation_history[-10:]:  # Show more messages due to compactness
+        # Show recent conversation with expanded format for wider content area
+        recent_messages = self.state.conversation_history[-15:]  # Show more messages in expanded view
+        
+        for entry in recent_messages:
             role = entry.get('role', 'unknown')
             message = entry.get('content', '')
             timestamp = entry.get('timestamp', '')
             
-            # Skip empty messages that could cause rendering issues
+            # Skip empty messages
             if not message.strip():
                 continue
             
-            # Truncate long messages for better density (adjust for chat panel width)
-            max_msg_len = 45  # Reduced to fit in content panel
-            if len(message) > max_msg_len:
-                message = message[:max_msg_len] + "..."
+            # Use more generous message length for wider chat panel
+            # Let Rich handle text wrapping instead of truncating
+            display_message = message.strip()
             
-            # Ultra compact format with shorter timestamps
-            short_time = timestamp.split(':')[-1] if ':' in timestamp else timestamp[-2:]
+            # Expanded format with full timestamps
+            time_display = f"[{timestamp}]" if timestamp else ""
             
+            # Role-specific formatting with expanded styling
             if role == 'user':
-                text.append(f"👤{short_time} {message.strip()}\n")
+                text.append(f"👤 User {time_display}:\n", style="bold cyan")
+                text.append(f"{display_message}\n\n", style="white")
             elif role == 'assistant':
-                text.append(f"🤖{short_time} {message.strip()}\n")
+                text.append(f"🤖 Assistant {time_display}:\n", style="bold green")
+                text.append(f"{display_message}\n\n", style="white")
             elif role == 'system':
-                text.append(f"⚙️{short_time} {message.strip()}\n")
+                text.append(f"⚙️ System {time_display}:\n", style="bold yellow")
+                text.append(f"{display_message}\n\n", style="dim white")
         
         return text
     
     def _create_input_panel(self) -> Text:
-        """Create the AI command composer input panel content."""
-        # Create Rich Text with wrapping enabled
+        """Create the AI command composer input panel content with full-width support."""
+        # Create Rich Text with wrapping enabled for wider content panel
         text = Text(overflow="fold")
         
-        # Current input with cursor indicator - ultra compact
+        # Current input with cursor indicator - expanded display
         input_display = self.state.current_input or ""
         if self.state.is_processing:
-            input_display += "⏳"
+            input_display += " ⏳"
         else:
-            # Simplified cursor logic for compactness
+            # Enhanced cursor animation for better visibility
             current_time = time.time()
             should_show_cursor = int(current_time / 0.8) % 2 == 0
             
@@ -498,78 +531,115 @@ class RevolutionaryTUIInterface:
             else:
                 input_display += " "
         
-        # Truncate input display to prevent panel overflow
-        max_input_len = 40  # Reduced to fit in content panel
-        if len(input_display) > max_input_len:
-            input_display = input_display[:max_input_len] + "..."
+        # Display full input without truncation in wider content panel
+        text.append(f"💬 Input: ", style="bold cyan")
+        text.append(f"{input_display}\n", style="white")
         
-        text.append(f"💬 {input_display}\n")
-        
-        # Ultra compact tips and status on single line where possible
-        status_items = []
-        
+        # Expanded status and help information
         if not self.state.current_input and not self.state.is_processing:
-            status_items.append("Type↑↓Hist Enter•C-c")
+            text.append("💡 Tips: Type your message • ↑↓ for history • Enter to send • Ctrl+C to exit\n", style="dim")
         
+        # History navigation indicator
         if self.history_index > -1:
-            status_items.append(f"📋{self.history_index + 1}/{len(self.input_history)}")
+            text.append(f"📋 History: {self.history_index + 1}/{len(self.input_history)}\n", style="yellow")
         
-        # Combine status items into single line, truncated to prevent overflow
-        if status_items:
-            status_line = " • ".join(status_items)[:35] + ("..." if len(" • ".join(status_items)) > 35 else "")
-            if status_line.strip():
-                text.append(status_line + "\n")
-        
-        # Ultra compact suggestions - single line format, truncated
+        # AI suggestions with expanded display
         if self.state.input_suggestions:
-            suggestions_text = " ".join([f"{i+1}.{suggestion[:15]}..." if len(suggestion) > 15 else f"{i+1}.{suggestion}" 
-                                        for i, suggestion in enumerate(self.state.input_suggestions[:2])])
-            if suggestions_text.strip():
-                # Truncate suggestions to prevent overflow
-                suggestions_text = suggestions_text[:35] + ("..." if len(suggestions_text) > 35 else "")
-                text.append(f"✨ {suggestions_text}")
+            text.append("✨ AI Suggestions:\n", style="magenta bold")
+            for i, suggestion in enumerate(self.state.input_suggestions[:3]):  # Show more suggestions
+                # Display full suggestions in wider panel
+                text.append(f"  {i+1}. {suggestion}\n", style="blue")
         
         return text
     
     def _create_footer_panel(self) -> Text:
-        """Create the footer panel with help and shortcuts."""
-        # Create Rich Text with wrapping enabled
-        text = Text(overflow="ellipsis")
+        """Create the footer panel with help and shortcuts for full terminal width."""
+        # Create Rich Text with wrapping enabled for full terminal width
+        text = Text(overflow="fold")
         
-        # Ultra compact help items
+        # Expanded help items for wider footer
         help_items = [
-            "↵Send",
-            "^C Exit", 
-            "↑↓Hist",
-            "/help"
+            "Enter: Send Message",
+            "Ctrl+C: Exit TUI",
+            "↑↓: History Navigation", 
+            "/help: Show Commands",
+            "/status: System Status",
+            "/clear: Clear Chat"
         ]
         
-        # Compact performance info
-        fps_info = f"F{self.frame_count % 61}"
+        # Enhanced performance info
+        fps_info = f"FPS: {self.frame_count % 61}"
         
-        # Filter empty items and combine into single line, truncated to prevent overflow
-        help_items = [item.strip() for item in help_items if item.strip()]
-        footer_content = " • ".join(help_items) + f" • {fps_info}"
+        # Create expanded footer with more information in full width
+        left_section = " • ".join(help_items[:3])
+        right_section = " • ".join(help_items[3:] + [fps_info])
         
-        # Truncate to fit panel width
-        if len(footer_content) > 70:  # Conservative limit for full width
-            footer_content = footer_content[:67] + "..."
+        # Use full width footer with centered layout
+        text.append(f"{left_section}", style="cyan")
+        text.append(f" | ", style="dim")
+        text.append(f"{right_section}", style="yellow")
         
-        text.append(footer_content)
         return text
     
     async def run(self) -> int:
         """Run the Revolutionary TUI Interface."""
         debug_mode = self._debug_mode or getattr(self.cli_config, 'debug_mode', False)
         
-        # THREAT: Debug output floods scrollback buffer
-        # MITIGATION: Use logging instead of print statements
-        if debug_mode:
-            logger.debug("Revolutionary TUI Interface run() method called")
-            logger.debug(f"RICH_AVAILABLE: {RICH_AVAILABLE}")
-            logger.debug(f"CLI config: {self.cli_config}")
+        # CRITICAL FIX: Suppress logging during TUI operation to prevent terminal pollution
+        # Store original log level and set to ERROR to prevent debug/info logs from flooding terminal
+        original_log_level = logging.getLogger().level
+        original_llm_client_level = logging.getLogger('agentsmcp.conversation.llm_client').level
+        original_orchestrator_level = logging.getLogger('agentsmcp.orchestration').level
         
         try:
+            # CRITICAL FIX: Complete logging suppression during TUI operation
+            # Create a null handler to completely prevent any log output to terminal
+            null_handler = logging.NullHandler()
+            original_handlers = {}
+            
+            # Store original handlers and replace with null handler
+            root_logger = logging.getLogger()
+            original_handlers['root'] = root_logger.handlers.copy()
+            root_logger.handlers = [null_handler]
+            root_logger.setLevel(logging.CRITICAL)
+            
+            # Set logging to ERROR level to prevent debug/info output during TUI operation
+            logging.getLogger('agentsmcp.conversation.llm_client').setLevel(logging.CRITICAL)
+            logging.getLogger('agentsmcp.orchestration').setLevel(logging.CRITICAL)
+            logging.getLogger('agentsmcp.ui.v2').setLevel(logging.CRITICAL)
+            
+            # Also suppress specific noisy loggers that flood terminal
+            noisy_loggers = [
+                'agentsmcp.conversation.llm_client',
+                'agentsmcp.orchestration.orchestrator',
+                'agentsmcp.agents',
+                'agentsmcp.ui.v2.revolutionary_tui_interface',
+                'agentsmcp.ui.v2.revolutionary_launcher'
+            ]
+            
+            for logger_name in noisy_loggers:
+                logger_instance = logging.getLogger(logger_name)
+                original_handlers[logger_name] = logger_instance.handlers.copy()
+                logger_instance.handlers = [null_handler]
+                logger_instance.setLevel(logging.CRITICAL)
+            
+            # Check for CI/automated environments that should not use Rich
+            # But allow TTY environments to proceed to Rich display
+            is_tty = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
+            is_ci = any(var in os.environ for var in ['CI', 'GITHUB_ACTIONS', 'TRAVIS', 'JENKINS', 'BUILD'])
+            
+            if is_ci:
+                logger.error("CI environment detected - using minimal fallback to prevent output pollution")
+                # Return immediately with exit code 0 to prevent any Rich output cycling
+                return 0
+            
+            # THREAT: Debug output floods scrollback buffer
+            # MITIGATION: Use logging instead of print statements
+            if debug_mode:
+                logger.debug("Revolutionary TUI Interface run() method called")
+                logger.debug(f"RICH_AVAILABLE: {RICH_AVAILABLE}")
+                logger.debug(f"CLI config: {self.cli_config}")
+            
             # Initialize components
             if debug_mode:
                 logger.debug("Calling initialize()")
@@ -601,11 +671,17 @@ class RevolutionaryTUIInterface:
             if debug_mode:
                 logger.debug(f"Running state set to: {self.running}")
             
-            if RICH_AVAILABLE:
-                logger.info("🎨 Using Rich Live display for TUI")
+            # CRITICAL: Triple-check TTY status before Rich Live to prevent output cycling
+            stdout_tty = sys.stdout.isatty() if hasattr(sys.stdout, 'isatty') else False
+            stdin_tty = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
+            stderr_tty = sys.stderr.isatty() if hasattr(sys.stderr, 'isatty') else False
+            
+            if RICH_AVAILABLE and is_tty:
+                logger.info("🎨 Using Rich Live display for TUI (TTY confirmed)")
                 if debug_mode:
-                    logger.debug("Rich is available, using Live display")
+                    logger.debug("Rich is available and TTY confirmed, using Live display")
                     logger.debug(f"Layout object: {self.layout}")
+                    logger.debug(f"TTY Status - stdin: {stdin_tty}, stdout: {stdout_tty}, stderr: {stderr_tty}")
                 
                 # Use Rich Live display for smooth updates
                 try:
@@ -638,13 +714,13 @@ class RevolutionaryTUIInterface:
                         except Exception as screen_e:
                             logger.warning(f"Could not explicitly enter alternate screen: {screen_e}")
                         
-                        # Create Live with strict alternate screen enforcement
+                        # Create Live with alternate screen and smooth refresh rate
                         live_config = {
                             "renderable": self.layout,
                             "console": self.console,
-                            "screen": True,  # CRITICAL: Must use alternate screen
-                            "refresh_per_second": self.target_fps,  # Already reduced to 5 FPS
-                            "auto_refresh": True,
+                            "screen": True,  # Use alternate screen for clean TUI experience
+                            "refresh_per_second": self.target_fps,  # Smooth refresh rate for TUI
+                            "auto_refresh": True,  # Enable auto-refresh for smooth updates
                             "vertical_overflow": "crop",  # Prevent overflow to main screen
                             "transient": False  # Ensure proper screen buffer usage
                         }
@@ -655,10 +731,12 @@ class RevolutionaryTUIInterface:
                                 logger.debug("Rich Live display context active (alternate screen)")
                             
                             self.live_display = live
-                            logger.info("🚀 Starting main loop...")
+                            
+                            # Don't stop the Live display - let it run so TUI is visible
+                            logger.info("🚀 Starting main loop with Rich Live display active...")
                             
                             if debug_mode:
-                                logger.debug("About to call _run_main_loop()")
+                                logger.debug("About to call _run_main_loop() with Rich Live active")
                             
                             await self._run_main_loop()
                             
@@ -695,9 +773,9 @@ class RevolutionaryTUIInterface:
                             emergency_live_config = {
                                 "renderable": self.layout,
                                 "console": self.console,
-                                "screen": True,  # EMERGENCY: Force alternate screen
-                                "refresh_per_second": 2.0,  # EMERGENCY: Ultra-low rate to prevent flooding
-                                "auto_refresh": True,
+                                "screen": True,  # Force alternate screen
+                                "refresh_per_second": max(1.0, self.target_fps / 2),  # Reduced but still usable rate
+                                "auto_refresh": True,  # Keep auto-refresh for TUI functionality
                                 "vertical_overflow": "crop",
                                 "transient": False
                             }
@@ -708,10 +786,12 @@ class RevolutionaryTUIInterface:
                                     logger.debug("Rich Live display context active (retry)")
                                 
                                 self.live_display = live
-                                logger.info("🚀 Starting main loop...")
+                                
+                                # Don't stop the Live display - let it run so TUI is visible
+                                logger.info("🚀 Starting main loop with Rich Live display active (retry)...")
                                 
                                 if debug_mode:
-                                    logger.debug("About to call _run_main_loop()")
+                                    logger.debug("About to call _run_main_loop() with emergency Rich Live active")
                                 
                                 await self._run_main_loop()
                                 
@@ -751,10 +831,11 @@ class RevolutionaryTUIInterface:
                     logger.info("🔄 Falling back to basic display")
                     await self._run_fallback_loop()
             else:
-                logger.info("📟 Using basic display (Rich not available)")
+                logger.info("📟 Using basic display (Rich not available or TTY not detected)")
                 if debug_mode:
-                    logger.debug("Rich not available, using fallback loop")
-                # Fallback to basic display
+                    logger.debug(f"Rich available: {RICH_AVAILABLE}, TTY status: is_tty={is_tty}")
+                    logger.debug("Using fallback display mode")
+                # Use fallback mode instead of returning immediately
                 await self._run_fallback_loop()
             
             logger.info("🏁 Revolutionary TUI Interface execution completed")
@@ -774,6 +855,22 @@ class RevolutionaryTUIInterface:
                 logger.debug("Full exception traceback:", exc_info=True)
             return 1
         finally:
+            # CRITICAL: Restore original logging levels and handlers to prevent side effects
+            try:
+                logging.getLogger().setLevel(original_log_level)
+                logging.getLogger('agentsmcp.conversation.llm_client').setLevel(original_llm_client_level)
+                logging.getLogger('agentsmcp.orchestration').setLevel(original_orchestrator_level)
+                
+                # Restore original handlers
+                if 'original_handlers' in locals():
+                    for logger_name, handlers in original_handlers.items():
+                        if logger_name == 'root':
+                            logging.getLogger().handlers = handlers
+                        else:
+                            logging.getLogger(logger_name).handlers = handlers
+            except Exception:
+                pass  # Ignore errors during logging restoration
+            
             if debug_mode:
                 logger.debug("Revolutionary TUI Interface cleanup starting")
             
@@ -855,12 +952,11 @@ class RevolutionaryTUIInterface:
             logger.error(f"Error in main loop: {e}")
     
     async def _periodic_update_trigger(self):
-        """Periodic update trigger - EMERGENCY: Much less frequent to prevent flooding."""
+        """Periodic update trigger for status refreshes."""
         while self.running:
             try:
-                # EMERGENCY: Trigger periodic updates very infrequently (every 30 seconds)
-                # This prevents terminal flooding from frequent updates
-                await asyncio.sleep(30.0)  # EMERGENCY: Extended from 10s to 30s to prevent flooding
+                # Trigger periodic updates every 10 seconds for reasonable responsiveness
+                await asyncio.sleep(10.0)
                 
                 # Only trigger updates if we haven't detected terminal pollution
                 if not self._terminal_pollution_detected:
@@ -868,7 +964,7 @@ class RevolutionaryTUIInterface:
                 
             except Exception as e:
                 logger.error(f"Error in periodic update trigger: {e}")
-                await asyncio.sleep(10.0)  # Longer pause on error to prevent spam
+                await asyncio.sleep(5.0)  # Brief pause on error
     
     async def _run_fallback_loop(self):
         """Fallback loop without Rich (basic terminal output)."""
@@ -1709,6 +1805,7 @@ class RevolutionaryTUIInterface:
             await self._refresh_panel("input")
             
         except Exception as e:
+            debug_mode = getattr(self.cli_config, 'debug_mode', False)
             if debug_mode:
                 logger.debug(f"Error handling input change event: {e}")
     
@@ -1757,11 +1854,20 @@ class RevolutionaryTUIInterface:
     async def _refresh_panel(self, panel_name: str):
         """Refresh a specific UI panel - Rich Live handles the actual update."""
         try:
-            if not self.layout or not RICH_AVAILABLE:
-                return
+            if not self.layout or not RICH_AVAILABLE or not sys.stdin.isatty():
+                return  # Skip all Rich operations in non-TTY environments
+            
+            # Manual refresh for immediate updates when needed
+            if (hasattr(self, 'live_display') and self.live_display and 
+                sys.stdin.isatty() and sys.stdout.isatty()):
+                try:
+                    # Allow immediate refresh for responsive UI
+                    self.live_display.refresh()
+                except Exception:
+                    pass  # Ignore refresh errors
             
             # Rich Live automatically updates when layout content changes
-            # We just need to update the layout content
+            # We just need to update the layout content with full-width panels
             if panel_name == "header":
                 header_text = Text("🚀 AgentsMCP Revolutionary Interface", style="bold blue")
                 if self.state.is_processing:
@@ -1773,8 +1879,7 @@ class RevolutionaryTUIInterface:
                         Align.center(header_text),
                         box=box.ROUNDED,
                         style="bright_blue",
-                        width=self.max_panel_width,
-                        expand=False
+                        expand=True  # Fill full terminal width
                     )
                 )
             
@@ -1786,8 +1891,7 @@ class RevolutionaryTUIInterface:
                         title="Agent Status",
                         box=box.ROUNDED,
                         style="green",
-                        width=self.max_panel_width // 4,
-                        expand=False
+                        expand=True  # Fill sidebar width
                     )
                 )
             
@@ -1799,8 +1903,7 @@ class RevolutionaryTUIInterface:
                         title="Conversation",
                         box=box.ROUNDED,
                         style="white",
-                        width=self.max_panel_width * 3 // 4,
-                        expand=False
+                        expand=True  # Fill content area width
                     )
                 )
             
@@ -1812,8 +1915,7 @@ class RevolutionaryTUIInterface:
                         title="AI Command Composer",
                         box=box.ROUNDED,
                         style="cyan",
-                        width=self.max_panel_width * 3 // 4,
-                        expand=False
+                        expand=True  # Fill content area width
                     )
                 )
             
@@ -1825,8 +1927,7 @@ class RevolutionaryTUIInterface:
                         title="Symphony Dashboard",
                         box=box.ROUNDED,
                         style="magenta",
-                        width=self.max_panel_width // 4,
-                        expand=False
+                        expand=True  # Fill sidebar width
                     )
                 )
                 
