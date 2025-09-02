@@ -271,93 +271,39 @@ class ReliableTUIInterface:
         def startup_feedback(message: str):
             if self._config.show_startup_feedback:
                 logger.info(f"Startup: {message}")
-                # Could also display to user if UI is available
                 
         try:
-            # Prepare TUI components for orchestrated startup
-            components = await self._prepare_tui_components()
+            # CRITICAL FIX: Simply create the Revolutionary TUI instance 
+            # Don't try to manually orchestrate its internal components
+            # The TUI's run() method will handle its own initialization
             
-            # Use startup orchestrator for guaranteed completion
-            result = await self._startup_orchestrator.coordinate_startup(
-                components=components,
-                feedback_callback=startup_feedback
-            )
-            
-            # Log startup metrics
-            metrics = self._startup_orchestrator.get_startup_metrics()
-            logger.info(f"Startup metrics: {metrics}")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Orchestrated startup failed: {e}")
-            return StartupResult.FAILURE
-            
-    async def _prepare_tui_components(self) -> Dict[str, Any]:
-        """Prepare TUI components for orchestrated startup."""
-        logger.debug("Preparing TUI components for startup")
-        
-        components = {}
-        
-        try:
             # Extract parameters for RevolutionaryTUIInterface constructor
-            # RevolutionaryTUIInterface expects: (cli_config, orchestrator_integration, revolutionary_components)
             cli_config = self._original_kwargs.get('cli_config')
-            orchestrator_integration = self._agent_orchestrator  # Use agent_orchestrator as orchestrator_integration
+            orchestrator_integration = self._agent_orchestrator
             revolutionary_components = self._original_kwargs.get('revolutionary_components', {})
             
-            logger.debug(f"Creating RevolutionaryTUIInterface with cli_config={cli_config is not None}, "
-                        f"orchestrator_integration={orchestrator_integration is not None}, "
-                        f"revolutionary_components={len(revolutionary_components)} items")
+            logger.info("Creating RevolutionaryTUIInterface instance...")
             
-            # Create original TUI instance with correct parameter mapping
+            # Create the TUI instance - this is all we need for startup
             self._original_tui = RevolutionaryTUIInterface(
                 cli_config=cli_config,
                 orchestrator_integration=orchestrator_integration,
                 revolutionary_components=revolutionary_components
             )
             
-            logger.debug("RevolutionaryTUIInterface created successfully")
+            logger.info("RevolutionaryTUIInterface created successfully")
             
-            # Create component wrappers for startup orchestration
-            components['orchestrator'] = TUIComponentWrapper(
-                "orchestrator",
-                self._agent_orchestrator,
-                self._timeout_guardian
-            )
-            
-            components['display'] = TUIComponentWrapper(
-                "display_manager",
-                getattr(self._original_tui, 'display_manager', None),
-                self._timeout_guardian
-            )
-            
-            components['input'] = TUIComponentWrapper(
-                "input_handler", 
-                getattr(self._original_tui, 'input_pipeline', None),
-                self._timeout_guardian
-            )
-            
-            # Store components for recovery manager
-            self._components = {
-                'tui_interface': self._original_tui,
-                'agent_orchestrator': self._agent_orchestrator,
-                **components
-            }
-            
-            # Register components with recovery manager
+            # Register with recovery manager if available
             if self._recovery_manager:
-                for name, component in self._components.items():
-                    self._recovery_manager.register_component(name, component)
-                    
-            logger.debug(f"Prepared {len(components)} TUI components for startup")
-            return components
+                self._recovery_manager.register_component('tui_interface', self._original_tui)
+                self._recovery_manager.register_component('agent_orchestrator', self._agent_orchestrator)
+            
+            # Startup completed successfully
+            return StartupResult.SUCCESS
             
         except Exception as e:
-            logger.error(f"Failed to prepare TUI components: {e}")
-            logger.debug(f"TUI component preparation error details:\n{traceback.format_exc()}")
-            # Return minimal components to allow startup to continue
-            return {'orchestrator': self._agent_orchestrator}
+            logger.error(f"TUI instance creation failed: {e}")
+            return StartupResult.FAILURE
             
     async def _start_health_monitoring(self):
         """Start health monitoring with hang detection."""
@@ -415,24 +361,22 @@ class ReliableTUIInterface:
         try:
             # Create fresh original TUI instance if needed
             if self._original_tui is None:
+                cli_config = self._original_kwargs.get('cli_config')
+                orchestrator_integration = self._agent_orchestrator
+                revolutionary_components = self._original_kwargs.get('revolutionary_components', {})
+                
                 self._original_tui = RevolutionaryTUIInterface(
-                    self._agent_orchestrator,
-                    self._agent_state,
-                    **self._original_kwargs
+                    cli_config=cli_config,
+                    orchestrator_integration=orchestrator_integration,
+                    revolutionary_components=revolutionary_components
                 )
             
-            # Start original TUI with basic timeout protection
-            async with timeout_protection("fallback_startup", 15.0):
-                result = await self._original_tui.start(**kwargs)
-                
-            if result:
-                logger.info("Fallback to original TUI successful")
-                self._fallback_mode = True
-                self._startup_completed = True
-                return True
-            else:
-                logger.error("Fallback to original TUI also failed")
-                return False
+            # The Revolutionary TUI doesn't have a separate start() method
+            # Its run() method handles everything
+            logger.info("Fallback mode - TUI instance created, ready to run via run() method")
+            self._fallback_mode = True
+            self._startup_completed = True
+            return True
                 
         except Exception as e:
             logger.error(f"Fallback to original TUI failed: {e}")
@@ -578,35 +522,45 @@ class ReliableTUIInterface:
             # Full reliability mode - run with protected main loop
             logger.info("Running TUI main loop with reliability protection")
             
-            # CRITICAL FIX: Properly wait for main loop completion like original TUI
-            # The original TUI's run() method waits for the main loop using asyncio.wait()
-            # We need to replicate this pattern to prevent immediate return
+            # CRITICAL FIX: Actually call the original TUI's run() method
+            # The Revolutionary TUI's run() method contains:
+            # - Logging isolation setup
+            # - Component initialization via initialize()
+            # - Signal handlers setup  
+            # - Rich Live display creation with alternate screen
+            # - Main loop execution via _run_main_loop()
             
-            try:
-                # Instead of just calling run_main_loop() and returning immediately,
-                # we need to wait for the actual TUI completion
-                await self._wait_for_tui_completion()
+            if not self._original_tui:
+                logger.error("Cannot run TUI - original TUI not initialized")
+                return 1
                 
-                logger.info("TUI main loop completed successfully")
-                return 0
+            try:
+                logger.info("Initializing and running Revolutionary TUI Interface...")
+                
+                # The TUI's run() method contains Rich Live setup and input loops
+                # This is where the actual TUI rendering and input handling happens
+                result = await self._original_tui.run()
+                
+                logger.info(f"Revolutionary TUI run() completed with result: {result}")
+                return result
                 
             except Exception as e:
-                logger.error(f"TUI main loop failed: {e}")
+                logger.error(f"Revolutionary TUI run() failed: {e}")
                 
                 # Attempt recovery if available
                 if self._recovery_manager and self._config.enable_automatic_recovery:
-                    logger.info("Attempting automatic recovery from main loop failure")
+                    logger.info("Attempting automatic recovery from TUI run failure")
                     try:
                         recovery_result = await self._recovery_manager.manual_recovery(
-                            "main_loop",
+                            "tui_run",
                             RecoveryStrategy.RESTART_COMPONENT,
-                            f"Main loop failed: {e}"
+                            f"TUI run failed: {e}"
                         )
                         
                         if recovery_result.success:
-                            logger.info("Recovery successful - retrying main loop")
-                            await self._wait_for_tui_completion()
-                            return 0
+                            logger.info("Recovery successful - retrying TUI run")
+                            result = await self._original_tui.run()
+                            return result
                         else:
                             logger.error(f"Recovery failed: {recovery_result.error_message or 'Unknown error'}")
                             return 1
@@ -639,80 +593,10 @@ class ReliableTUIInterface:
             else:
                 logger.info("Finally block reached without shutdown request - skipping stop() to prevent Guardian shutdown")
     
-    async def _wait_for_tui_completion(self):
-        """
-        Wait for the TUI to complete execution, mirroring the original TUI's pattern.
-        
-        The original TUI's _run_main_loop() creates background tasks (input_loop, periodic_update)
-        and waits for them to complete using asyncio.wait() with FIRST_COMPLETED.
-        This method replicates that exact pattern to ensure we don't return until 
-        the user actually exits the TUI.
-        """
-        if not self._original_tui:
-            logger.error("Cannot wait for TUI completion - TUI not initialized")
-            return
-            
-        logger.info("Waiting for TUI completion (until user exits)...")
-        
-        try:
-            # If we're in fallback mode, the original TUI's run() method handles everything
-            if self._fallback_mode:
-                # This should not be reached in fallback mode, but handle gracefully
-                logger.warning("_wait_for_tui_completion called in fallback mode - this should not happen")
-                return
-                
-            # CRITICAL FIX: Replicate the exact pattern from original TUI's _run_main_loop()
-            # Create the same background tasks that the original TUI creates and wait for them
-            
-            logger.info("⚙️ Creating event-driven background tasks like original TUI...")
-            
-            # Create the same tasks as the original TUI
-            input_task = asyncio.create_task(self._original_tui._input_loop())
-            periodic_update_task = asyncio.create_task(self._original_tui._periodic_update_trigger())
-            
-            logger.info("🎯 Event-driven background tasks created, waiting for completion...")
-            
-            # Use the same waiting pattern as the original TUI
-            # Wait for any task to complete (usually from user interruption/exit)
-            done, pending = await asyncio.wait(
-                [input_task, periodic_update_task],
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            
-            logger.info(f"Wait completed - {len(done)} tasks done, {len(pending)} pending")
-            
-            # Log which task completed first (same as original)
-            for task in done:
-                task_name = "unknown"
-                if task is input_task:
-                    task_name = "input_task"
-                elif task is periodic_update_task:
-                    task_name = "periodic_update_task"
-                
-                logger.info(f"Task completed first: {task_name}")
-                try:
-                    result = task.result()
-                    logger.debug(f"Task {task_name} result: {result}")
-                except Exception as e:
-                    logger.error(f"Task {task_name} failed: {e}")
-            
-            # Cancel remaining tasks (same as original)
-            for task in pending:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-            
-            logger.info("TUI completion wait finished - user has exited")
-            # Mark shutdown as requested since user has exited
-            self._shutdown_requested = True
-            
-        except Exception as e:
-            logger.error(f"Error waiting for TUI completion: {e}")
-            # If there's an error, still mark shutdown as requested to prevent Guardian issues
-            self._shutdown_requested = True
-            raise
+    # REMOVED: _wait_for_tui_completion method was fundamentally broken
+    # It tried to manually call the original TUI's internal methods without 
+    # properly initializing the TUI via its run() method first.
+    # The fix is to simply call the original TUI's run() method directly.
             
     # Property access delegation
     
