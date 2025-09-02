@@ -123,11 +123,8 @@ class RevolutionaryTUIInterface:
         self.target_fps = 15.0  # Smooth refresh rate: 15 FPS for responsive feel
         self.max_fps = 30.0  # Reasonable cap to balance performance and responsiveness
         
-        # Content change detection - Optimized for responsive updates
-        # Smart content hashing with balanced throttling for smooth experience
-        self._panel_content_hashes = {}
-        self._last_global_update = 0.0
-        self._global_throttle_interval = 0.1  # Minimum 100ms between global updates for responsiveness
+        # Layout initialized flag
+        self._layout_initialized = False
         
         # Debug control - THREAT: Debug output floods scrollback buffer
         # MITIGATION: Strict debug mode control with logging instead of print statements
@@ -135,10 +132,7 @@ class RevolutionaryTUIInterface:
         self._debug_print_throttle = 0.0
         self._debug_throttle_interval = 2.0  # Minimum 2s between debug prints
     
-    def _get_content_hash(self, content: str, extra_data: str = "") -> str:
-        """Generate a stable hash for content comparison."""
-        combined = f"{content}{extra_data}"
-        return hashlib.md5(combined.encode('utf-8')).hexdigest()[:8]
+    # Content hashing removed - no longer needed since Rich Live handles updates automatically
         
         # Orchestrator setup
         self.orchestrator = None
@@ -244,17 +238,11 @@ class RevolutionaryTUIInterface:
         )
         
         # Initialize panels
-        await self._update_layout_panels()
+        await self._initialize_layout_panels()
     
-    async def _update_layout_panels(self):
-        """Update all layout panels with current content."""
+    async def _initialize_layout_panels(self):
+        """Initialize layout panels with current content once during setup."""
         if not RICH_AVAILABLE or not self.layout:
-            return
-        
-        # Optimized global throttle - Balanced for smooth updates with performance
-        # Smart throttling with content change detection for responsive experience
-        current_time = time.time()
-        if current_time - self._last_global_update < self._global_throttle_interval:
             return
         
         try:
@@ -264,100 +252,70 @@ class RevolutionaryTUIInterface:
                 header_text.append(" • ", style="dim")
                 header_text.append(self.state.processing_message, style="yellow")
             
-            header_content = str(header_text)
-            header_hash = self._get_content_hash(header_content, str(self.state.is_processing))
-            
-            if self._panel_content_hashes.get('header') != header_hash:
-                self.layout["header"].update(
-                    Panel(
-                        Align.center(header_text),
-                        box=box.ROUNDED,
-                        style="bright_blue"
-                    )
+            self.layout["header"].update(
+                Panel(
+                    Align.center(header_text),
+                    box=box.ROUNDED,
+                    style="bright_blue"
                 )
-                self._panel_content_hashes['header'] = header_hash
+            )
             
             # Status panel - Agent status and metrics
             status_content = self._create_status_panel()
-            status_hash = self._get_content_hash(status_content)
-            
-            if self._panel_content_hashes.get('status') != status_hash:
-                self.layout["status"].update(
-                    Panel(
-                        status_content,
-                        title="Agent Status",
-                        box=box.ROUNDED,
-                        style="green"
-                    )
+            self.layout["status"].update(
+                Panel(
+                    status_content,
+                    title="Agent Status",
+                    box=box.ROUNDED,
+                    style="green"
                 )
-                self._panel_content_hashes['status'] = status_hash
+            )
             
             # Dashboard panel - Symphony dashboard
             dashboard_content = await self._create_dashboard_panel()
-            dashboard_hash = self._get_content_hash(dashboard_content)
-            
-            if self._panel_content_hashes.get('dashboard') != dashboard_hash:
-                self.layout["dashboard"].update(
-                    Panel(
-                        dashboard_content,
-                        title="Symphony Dashboard",
-                        box=box.ROUNDED,
-                        style="magenta"
-                    )
+            self.layout["dashboard"].update(
+                Panel(
+                    dashboard_content,
+                    title="Symphony Dashboard",
+                    box=box.ROUNDED,
+                    style="magenta"
                 )
-                self._panel_content_hashes['dashboard'] = dashboard_hash
+            )
             
             # Chat panel - Conversation history
             chat_content = self._create_chat_panel()
-            chat_hash = self._get_content_hash(chat_content, str(len(self.state.conversation_history)))
-            
-            if self._panel_content_hashes.get('chat') != chat_hash:
-                self.layout["chat"].update(
-                    Panel(
-                        chat_content,
-                        title="Conversation",
-                        box=box.ROUNDED,
-                        style="white"
-                    )
+            self.layout["chat"].update(
+                Panel(
+                    chat_content,
+                    title="Conversation",
+                    box=box.ROUNDED,
+                    style="white"
                 )
-                self._panel_content_hashes['chat'] = chat_hash
+            )
             
             # Input panel - Smart input with suggestions
             input_content = self._create_input_panel()
-            input_hash = self._get_content_hash(input_content, str(len(self.state.input_suggestions)))
-            
-            if self._panel_content_hashes.get('input') != input_hash:
-                self.layout["input"].update(
-                    Panel(
-                        input_content,
-                        title="AI Command Composer",
-                        box=box.ROUNDED,
-                        style="cyan"
-                    )
+            self.layout["input"].update(
+                Panel(
+                    input_content,
+                    title="AI Command Composer",
+                    box=box.ROUNDED,
+                    style="cyan"
                 )
-                self._panel_content_hashes['input'] = input_hash
+            )
             
             # Footer - Help and shortcuts
             footer_content = self._create_footer_panel()
-            footer_hash = self._get_content_hash(footer_content)
-            
-            if self._panel_content_hashes.get('footer') != footer_hash:
-                self.layout["footer"].update(
-                    Panel(
-                        footer_content,
-                        box=box.ROUNDED,
-                        style="dim"
-                    )
+            self.layout["footer"].update(
+                Panel(
+                    footer_content,
+                    box=box.ROUNDED,
+                    style="dim"
                 )
-                self._panel_content_hashes['footer'] = footer_hash
-            
-            # Update global throttle timestamp
-            self._last_global_update = current_time
+            )
             
         except Exception as e:
-            logger.warning(f"Error updating layout panels: {e}")
-            # Still update throttle timestamp even on error
-            self._last_global_update = current_time
+            logger.warning(f"Error initializing layout panels: {e}")
     
     def _create_status_panel(self) -> str:
         """Create the agent status panel content."""
@@ -384,6 +342,7 @@ class RevolutionaryTUIInterface:
             content.append(f"📊 FPS:{fps} • RAM:{memory:.0f}MB")
             content.append(f"⚡ CPU:{cpu:.0f}% • Tasks:{tasks}")
         
+        # Keep all content lines to maintain consistent panel structure
         return "\n".join(content)
     
     async def _create_dashboard_panel(self) -> str:
@@ -424,6 +383,8 @@ class RevolutionaryTUIInterface:
                         short_activity = activity[:25] + "..." if len(activity) > 25 else activity
                         content.append(f"• {short_activity}")
                 
+                # Filter empty strings and strip whitespace to prevent Rich rendering corruption
+                content = [line.strip() for line in content if line.strip()]
                 return "\n".join(content)
             else:
                 return "🎼 Loading..."  # Ultra compact loading
@@ -445,6 +406,10 @@ class RevolutionaryTUIInterface:
             message = entry.get('content', '')
             timestamp = entry.get('timestamp', '')
             
+            # Skip empty messages that could cause rendering issues
+            if not message.strip():
+                continue
+            
             # Truncate long messages for better density
             max_msg_len = 60
             if len(message) > max_msg_len:
@@ -454,12 +419,13 @@ class RevolutionaryTUIInterface:
             short_time = timestamp.split(':')[-1] if ':' in timestamp else timestamp[-2:]
             
             if role == 'user':
-                content.append(f"👤{short_time} {message}")
+                content.append(f"👤{short_time} {message.strip()}")
             elif role == 'assistant':
-                content.append(f"🤖{short_time} {message}")
+                content.append(f"🤖{short_time} {message.strip()}")
             elif role == 'system':
-                content.append(f"⚙️{short_time} {message}")
+                content.append(f"⚙️{short_time} {message.strip()}")
         
+        # Keep all content lines to maintain consistent panel structure
         return "\n".join(content)
     
     def _create_input_panel(self) -> str:
@@ -493,14 +459,18 @@ class RevolutionaryTUIInterface:
         
         # Combine status items into single line
         if status_items:
-            content.append(" • ".join(status_items))
+            status_line = " • ".join(status_items).strip()
+            if status_line:
+                content.append(status_line)
         
         # Ultra compact suggestions - single line format
         if self.state.input_suggestions:
             suggestions_text = " ".join([f"{i+1}.{suggestion[:20]}..." if len(suggestion) > 20 else f"{i+1}.{suggestion}" 
                                         for i, suggestion in enumerate(self.state.input_suggestions[:2])])
-            content.append(f"✨ {suggestions_text}")
+            if suggestions_text.strip():
+                content.append(f"✨ {suggestions_text}")
         
+        # Keep all content lines to maintain consistent panel structure
         return "\n".join(content)
     
     def _create_footer_panel(self) -> str:
@@ -516,7 +486,11 @@ class RevolutionaryTUIInterface:
         # Compact performance info
         fps_info = f"F{self.frame_count % 61}"
         
-        return " • ".join(help_items) + f" • {fps_info}"
+        # Filter empty items and ensure clean formatting
+        help_items = [item.strip() for item in help_items if item.strip()]
+        footer_content = " • ".join(help_items) + f" • {fps_info}"
+        
+        return footer_content.strip()
     
     async def run(self) -> int:
         """Run the Revolutionary TUI Interface."""
@@ -773,36 +747,8 @@ class RevolutionaryTUIInterface:
                 logger.info("KeyboardInterrupt in simple input loop - exiting")
                 break
     
-    async def _render_loop(self):
-        """Render loop for smooth 60fps updates."""
-        while self.running:
-            try:
-                start_time = time.time()
-                
-                # Update layout panels at smooth intervals for responsive display
-                current_time = time.time()
-                if not hasattr(self, '_last_panel_update') or current_time - self._last_panel_update > 1.0:
-                    await self._update_layout_panels()
-                    self._last_panel_update = current_time
-                
-                # Apply any visual effects
-                if self.enhancements:
-                    await self._apply_visual_effects()
-                
-                # Update frame counter
-                self.frame_count += 1
-                
-                # Calculate frame time and sleep
-                frame_time = time.time() - start_time
-                target_frame_time = 1.0 / self.target_fps
-                sleep_time = max(0, target_frame_time - frame_time)
-                
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
-                
-            except Exception as e:
-                logger.error(f"Error in render loop: {e}")
-                await asyncio.sleep(0.1)
+    # Render loop removed - Rich Live handles all rendering automatically
+    # This eliminates the layout corruption that occurred when manually updating panels
     
     async def _input_loop(self):
         """Input handling loop with actual keyboard input processing."""
@@ -1342,54 +1288,10 @@ class RevolutionaryTUIInterface:
         # Make cursor visible and reset blink timer  
         self.state.last_update = time.time()
         
-        # Throttled visual feedback to prevent scrollback flooding
-        self._update_input_display_immediate()
+        # Visual feedback handled automatically by Rich Live
     
-    def _update_input_display_immediate(self):
-        """Update input display with heavy throttling to prevent flooding."""
-        if not self.live_display or not self.layout:
-            return
-        
-        # Responsive input throttle - Optimized for immediate feedback
-        # Balanced throttling for smooth real-time typing experience
-        current_time = time.time()
-        input_throttle_interval = 0.05  # 20 FPS for responsive input display
-        if hasattr(self, '_last_display_update'):
-            if current_time - self._last_display_update < input_throttle_interval:
-                return
-        self._last_display_update = current_time
-            
-        try:
-            # Only update if content actually changed
-            input_content = self._create_input_panel()
-            input_hash = self._get_content_hash(input_content, str(len(self.state.input_suggestions)))
-            
-            if self._panel_content_hashes.get('input_immediate') == input_hash:
-                return  # No change, skip update
-            
-            # Update just the input panel
-            from rich import box
-            self.layout["input"].update(
-                Panel(
-                    input_content,
-                    title="AI Command Composer",
-                    box=box.ROUNDED,
-                    style="cyan"
-                )
-            )
-            self._panel_content_hashes['input_immediate'] = input_hash
-            
-            # Smooth refresh for responsive display - Optimized for real-time updates
-            # Balanced refresh rate for smooth visual feedback
-            if hasattr(self.live_display, 'refresh') and current_time - getattr(self, '_last_refresh', 0) > 0.2:
-                try:
-                    self.live_display.refresh()
-                    self._last_refresh = current_time
-                except Exception:
-                    pass  # Ignore refresh errors
-                    
-        except Exception as e:
-            logger.debug(f"Error in throttled input display update: {e}")
+    # Input display updates removed - Rich Live handles all updates automatically
+    # Manual panel updates during Live operation were corrupting the display
     
     def _handle_backspace_input(self):
         """Handle backspace key input with immediate visual feedback."""
@@ -1397,8 +1299,7 @@ class RevolutionaryTUIInterface:
             self.state.current_input = self.state.current_input[:-1]
             self.state.last_update = time.time()
             
-            # Throttled visual feedback to prevent flooding
-            self._update_input_display_immediate()
+            # Visual feedback handled automatically by Rich Live
     
     async def _handle_enter_input(self):
         """Handle Enter key - submit the current input."""
@@ -1410,8 +1311,7 @@ class RevolutionaryTUIInterface:
             self.state.current_input = ""
             self.state.input_suggestions = []
             
-            # Update display with heavy throttling
-            self._update_input_display_immediate()
+            # Display updates handled automatically by Rich Live
     
     def _handle_up_arrow(self):
         """Handle up arrow key - navigate to previous input in history."""
@@ -1426,8 +1326,7 @@ class RevolutionaryTUIInterface:
             self.state.current_input = history_item
             self.state.last_update = time.time()
             
-            # Update display with throttling
-            self._update_input_display_immediate()
+            # Display updates handled automatically by Rich Live
     
     def _handle_down_arrow(self):
         """Handle down arrow key - navigate to next input in history."""
@@ -1443,22 +1342,21 @@ class RevolutionaryTUIInterface:
                 
             self.state.last_update = time.time()
             
-            # Update display with throttling
-            self._update_input_display_immediate()
+            # Display updates handled automatically by Rich Live
     
     def _handle_left_arrow(self):
         """Handle left arrow key - move cursor left (future enhancement)."""
         # TODO: Implement cursor position control
         # For now, just refresh display to show we received the key
         self.state.last_update = time.time()
-        self._update_input_display_immediate()
+        # Display updates handled automatically by Rich Live
     
     def _handle_right_arrow(self):
         """Handle right arrow key - move cursor right (future enhancement)."""  
         # TODO: Implement cursor position control
         # For now, just refresh display to show we received the key
         self.state.last_update = time.time()
-        self._update_input_display_immediate()
+        # Display updates handled automatically by Rich Live
     
     def _handle_escape_key(self):
         """Handle ESC key - clear current input."""
@@ -1468,7 +1366,7 @@ class RevolutionaryTUIInterface:
         self.state.last_update = time.time()
         
         # Update display with throttling
-        self._update_input_display_immediate()
+        # Display updates handled automatically by Rich Live
     
     async def _handle_exit(self):
         """Handle Ctrl+C/Ctrl+D - graceful exit."""
