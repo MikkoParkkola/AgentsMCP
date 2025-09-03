@@ -2,13 +2,21 @@
 
 import pytest
 from unittest.mock import Mock, patch, call
-from src.agentsmcp.ui.v3 import (
-    PlainCLIRenderer,
-    SimpleTUIRenderer,
-    RichTUIRenderer,
-    TerminalCapabilities,
-    UIState
-)
+
+# Mock Rich components before any imports to prevent rendering
+with patch('rich.console.Console'), \
+     patch('rich.live.Live'), \
+     patch('rich.layout.Layout'), \
+     patch('rich.panel.Panel'), \
+     patch('rich.text.Text'), \
+     patch('rich.align.Align'):
+    from src.agentsmcp.ui.v3 import (
+        PlainCLIRenderer,
+        SimpleTUIRenderer,
+        RichTUIRenderer,
+        TerminalCapabilities,
+        UIState
+    )
 
 
 @pytest.fixture
@@ -95,11 +103,13 @@ class TestPlainCLIRenderer:
     
     def test_initialization_failure(self, minimal_capabilities, ui_state):
         """Test initialization failure handling."""
-        with patch('builtins.print', side_effect=Exception("Print failed")):
+        with patch('builtins.print', side_effect=Exception("Print failed")) as mock_print:
             renderer = PlainCLIRenderer(minimal_capabilities)
             renderer.state = ui_state
             
             assert renderer.initialize() is False
+            # Check that error was attempted to be printed
+            assert mock_print.called
     
     def test_cleanup(self, minimal_capabilities, ui_state):
         """Test renderer cleanup."""
@@ -204,11 +214,12 @@ class TestSimpleTUIRenderer:
     
     def test_initialization_failure(self, basic_capabilities, ui_state):
         """Test initialization failure handling."""
-        with patch('builtins.print', side_effect=Exception("Init failed")):
+        with patch('builtins.print', side_effect=Exception("Init failed")) as mock_print:
             renderer = SimpleTUIRenderer(basic_capabilities)
             renderer.state = ui_state
             
             assert renderer.initialize() is False
+            assert mock_print.called
     
     def test_cleanup_with_tty(self, basic_capabilities, ui_state):
         """Test cleanup with TTY support."""
@@ -327,8 +338,19 @@ class TestRichTUIRenderer:
     
     @patch('rich.console.Console')
     @patch('rich.live.Live')
-    def test_initialization_with_rich_support(self, mock_live, mock_console, full_capabilities, ui_state):
+    @patch('rich.layout.Layout')
+    def test_initialization_with_rich_support(self, mock_layout, mock_live, mock_console, full_capabilities, ui_state):
         """Test successful initialization with Rich support."""
+        # Mock Live.start to prevent actual rendering
+        mock_live_instance = Mock()
+        mock_live_instance.start = Mock()
+        mock_live.return_value = mock_live_instance
+        
+        # Mock Layout for proper initialization
+        mock_layout_instance = Mock()
+        mock_layout_instance.split_column = Mock()
+        mock_layout.return_value = mock_layout_instance
+        
         renderer = RichTUIRenderer(full_capabilities)
         renderer.state = ui_state
         
@@ -337,36 +359,53 @@ class TestRichTUIRenderer:
         assert result is True
         assert mock_console.called
         assert mock_live.called
+        assert mock_live_instance.start.called
     
-    def test_initialization_failure(self, full_capabilities, ui_state):
+    @patch('rich.console.Console', side_effect=Exception("Rich failed"))
+    def test_initialization_failure(self, mock_console, full_capabilities, ui_state):
         """Test initialization failure handling."""
-        with patch('rich.console.Console', side_effect=Exception("Rich failed")):
-            renderer = RichTUIRenderer(full_capabilities)
-            renderer.state = ui_state
-            
-            assert renderer.initialize() is False
-    
-    @patch('rich.live.Live')
-    def test_cleanup(self, mock_live, full_capabilities, ui_state):
-        """Test renderer cleanup."""
-        mock_live_instance = Mock()
-        mock_live.return_value = mock_live_instance
+        renderer = RichTUIRenderer(full_capabilities)
+        renderer.state = ui_state
         
-        with patch('rich.console.Console'):
-            renderer = RichTUIRenderer(full_capabilities)
-            renderer.state = ui_state
-            renderer.initialize()
-            
-            renderer.cleanup()
-            
-            mock_live_instance.stop.assert_called_once()
+        assert renderer.initialize() is False
     
     @patch('rich.live.Live')
     @patch('rich.console.Console')
-    def test_render_frame(self, mock_console, mock_live, full_capabilities, ui_state):
+    @patch('rich.layout.Layout')
+    def test_cleanup(self, mock_layout, mock_console, mock_live, full_capabilities, ui_state):
+        """Test renderer cleanup."""
+        mock_live_instance = Mock()
+        mock_live_instance.start = Mock()
+        mock_live_instance.stop = Mock()
+        mock_live.return_value = mock_live_instance
+        
+        # Mock Layout
+        mock_layout_instance = Mock()
+        mock_layout_instance.split_column = Mock()
+        mock_layout.return_value = mock_layout_instance
+        
+        renderer = RichTUIRenderer(full_capabilities)
+        renderer.state = ui_state
+        renderer.initialize()
+        
+        renderer.cleanup()
+        
+        mock_live_instance.stop.assert_called_once()
+    
+    @patch('rich.live.Live')
+    @patch('rich.console.Console')
+    @patch('rich.layout.Layout')
+    def test_render_frame(self, mock_layout, mock_console, mock_live, full_capabilities, ui_state):
         """Test frame rendering."""
         mock_live_instance = Mock()
+        mock_live_instance.start = Mock()
+        mock_live_instance.refresh = Mock()
         mock_live.return_value = mock_live_instance
+        
+        # Mock Layout
+        mock_layout_instance = Mock()
+        mock_layout_instance.split_column = Mock()
+        mock_layout.return_value = mock_layout_instance
         
         renderer = RichTUIRenderer(full_capabilities)
         renderer.state = ui_state
@@ -377,9 +416,7 @@ class TestRichTUIRenderer:
         mock_live_instance.refresh.assert_called()
     
     @patch('select.select')
-    @patch('rich.live.Live')
-    @patch('rich.console.Console')
-    def test_handle_input_enter(self, mock_console, mock_live, mock_select, full_capabilities, ui_state):
+    def test_handle_input_enter(self, mock_select, full_capabilities, ui_state):
         """Test handling Enter key in Rich TUI."""
         mock_select.return_value = ([True], [], [])
         
@@ -394,9 +431,7 @@ class TestRichTUIRenderer:
             assert renderer._input_buffer == ""
             assert renderer.state.current_input == ""
     
-    @patch('rich.live.Live')
-    @patch('rich.console.Console')  
-    def test_show_message(self, mock_console, mock_live, full_capabilities, ui_state):
+    def test_show_message(self, full_capabilities, ui_state):
         """Test showing message in Rich TUI."""
         renderer = RichTUIRenderer(full_capabilities)
         renderer.state = ui_state
@@ -405,9 +440,7 @@ class TestRichTUIRenderer:
         
         assert "[yellow]Rich message[/yellow]" in renderer.state.status_message
     
-    @patch('rich.live.Live')
-    @patch('rich.console.Console')
-    def test_message_rendering_with_messages(self, mock_console, mock_live, full_capabilities, ui_state):
+    def test_message_rendering_with_messages(self, full_capabilities, ui_state):
         """Test rendering messages in Rich TUI."""
         renderer = RichTUIRenderer(full_capabilities)
         renderer.state = ui_state
@@ -422,9 +455,7 @@ class TestRichTUIRenderer:
         assert "Hello" in str(result)
         assert "Hi there!" in str(result)
     
-    @patch('rich.live.Live')
-    @patch('rich.console.Console')
-    def test_message_rendering_empty(self, mock_console, mock_live, full_capabilities, ui_state):
+    def test_message_rendering_empty(self, full_capabilities, ui_state):
         """Test rendering with no messages."""
         renderer = RichTUIRenderer(full_capabilities)
         renderer.state = ui_state
