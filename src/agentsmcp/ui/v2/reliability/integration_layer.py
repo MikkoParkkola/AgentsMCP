@@ -490,13 +490,23 @@ class ReliableTUIInterface:
         Returns:
             0 on successful completion, 1 on error
         """
+        print("🔥 EMERGENCY: ReliableTUIInterface.run() ENTRY POINT")
+        logger.info("ReliableTUIInterface.run() method called")
         logger.info("Starting ReliableTUIInterface.run() with reliability guarantees")
         
         try:
+            print("🔥 EMERGENCY: About to call self._original_tui.run()")
+            print(f"🔥 EMERGENCY: self._original_tui type: {type(self._original_tui)}")
+            logger.info("Starting TUI with reliability protection")
+            
             # Start the TUI with reliability protection
             startup_success = await self.start(**kwargs)
             
+            print(f"🔧 DEBUG: TUI startup result: {startup_success}")
+            logger.info(f"TUI startup completed with success: {startup_success}")
+            
             if not startup_success:
+                print("🔧 DEBUG: TUI startup failed - returning error code 1")
                 logger.error("TUI startup failed - returning error code 1")
                 return 1
                 
@@ -507,13 +517,22 @@ class ReliableTUIInterface:
                 # In fallback mode, delegate directly to original TUI's run method
                 if self._original_tui and hasattr(self._original_tui, 'run'):
                     try:
+                        print("🔥 EMERGENCY: About to call Revolutionary TUI run() method (FALLBACK MODE)")
+                        print(f"🔥 EMERGENCY: self._original_tui type: {type(self._original_tui)}")
+                        logger.info("Calling Revolutionary TUI run() method in fallback mode")
+                        
                         # CRITICAL: Wait for original TUI to complete - don't return immediately
                         # This prevents the finally block from running prematurely
                         result = await self._original_tui.run()
-                        logger.info("Fallback TUI run completed successfully")
+                        
+                        print(f"🔥 EMERGENCY: Revolutionary TUI run() returned: {result} (FALLBACK MODE)")
+                        logger.info(f"Fallback TUI run completed successfully with result: {result}")
                         return result
                     except Exception as e:
+                        print(f"🔥 EMERGENCY: Exception in fallback TUI run: {e}")
                         logger.error(f"Fallback TUI run failed: {e}")
+                        import traceback
+                        traceback.print_exc()
                         return 1
                 else:
                     logger.error("Fallback mode but no original TUI available")
@@ -535,17 +554,26 @@ class ReliableTUIInterface:
                 return 1
                 
             try:
+                print("🔥 EMERGENCY: About to call Revolutionary TUI run() method (FULL RELIABILITY MODE)")
+                print(f"🔥 EMERGENCY: self._original_tui type: {type(self._original_tui)}")
                 logger.info("Initializing and running Revolutionary TUI Interface...")
+                logger.info("Calling Revolutionary TUI run() method in full reliability mode")
                 
                 # The TUI's run() method contains Rich Live setup and input loops
                 # This is where the actual TUI rendering and input handling happens
                 result = await self._original_tui.run()
                 
+                print(f"🔥 EMERGENCY: Revolutionary TUI run() returned: {result} (FULL RELIABILITY MODE)")
                 logger.info(f"Revolutionary TUI run() completed with result: {result}")
                 return result
                 
             except Exception as e:
+                print(f"🔥 EMERGENCY: Exception in Revolutionary TUI run(): {e}")
                 logger.error(f"Revolutionary TUI run() failed: {e}")
+                import traceback
+                print(f"🔥 EMERGENCY: Revolutionary TUI exception traceback:\n{traceback.format_exc()}")
+                traceback.print_exc()
+                logger.debug(f"Revolutionary TUI exception traceback:\n{traceback.format_exc()}")
                 
                 # Attempt recovery if available
                 if self._recovery_manager and self._config.enable_automatic_recovery:
@@ -572,12 +600,16 @@ class ReliableTUIInterface:
                     return 1
                     
         except KeyboardInterrupt:
+            print("🔧 DEBUG: TUI interrupted by user (KeyboardInterrupt)")
             logger.info("TUI interrupted by user")
             self._shutdown_requested = True
             return 0
             
         except Exception as e:
+            print(f"🔧 DEBUG: TUI run failed with unexpected error: {e}")
             logger.error(f"TUI run failed with unexpected error: {e}")
+            import traceback
+            print(f"🔧 DEBUG: TUI run unexpected exception traceback:\n{traceback.format_exc()}")
             logger.debug(f"TUI run exception traceback:\n{traceback.format_exc()}")
             return 1
             

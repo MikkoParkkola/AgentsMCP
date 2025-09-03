@@ -279,6 +279,7 @@ class RevolutionaryTUIInterface:
     
     async def initialize(self) -> bool:
         """Initialize all revolutionary components."""
+        print("🔥 EMERGENCY: Revolutionary TUI initialize() called")
         logger.error("🚀 INITIALIZE: Starting Revolutionary TUI initialization")
         
         # Environment and TTY status checks
@@ -894,14 +895,24 @@ class RevolutionaryTUIInterface:
     
     async def run(self) -> int:
         """Run the Revolutionary TUI Interface."""
+        print("🔥 EMERGENCY: Revolutionary TUI Interface run() method ENTRY - IF YOU SEE THIS, TUI IS RUNNING!")
+        print("🔥 EMERGENCY: Revolutionary TUI Interface run() method called successfully!")
+        self._safe_log("info", "Revolutionary TUI Interface run() method started")
+        
         # Store event loop for cross-thread communication
         self._event_loop = asyncio.get_running_loop()
         
         debug_mode = self._debug_mode or getattr(self.cli_config, 'debug_mode', False)
         
+        print("🔧 DEBUG: Revolutionary TUI about to set up logging isolation")
+        self._safe_log("info", "Revolutionary TUI about to set up logging isolation")
+        
         # Use unified logging architecture to prevent console pollution
         if self.logging_manager:
+            print("🔧 DEBUG: Activating logging manager isolation")
             await self.logging_manager.activate_isolation(tui_active=True, log_level=LogLevel.INFO)
+        else:
+            print("🔧 DEBUG: No logging manager available")
         
         # Store original logging levels for restoration in finally block
         original_log_level = logging.getLogger().level
@@ -909,6 +920,8 @@ class RevolutionaryTUIInterface:
         original_orchestrator_level = logging.getLogger('agentsmcp.orchestration').level
         
         try:
+            print("🔧 DEBUG: Revolutionary TUI entering try block - setting up logging suppression")
+            
             # CRITICAL FIX: Complete logging suppression during TUI operation
             # Create a null handler to completely prevent any log output to terminal
             null_handler = logging.NullHandler()
@@ -958,15 +971,21 @@ class RevolutionaryTUIInterface:
                 logger.debug(f"CLI config: {self.cli_config}")
             
             # Initialize components
+            print("🔧 DEBUG: Revolutionary TUI about to call initialize()")
             if debug_mode:
                 logger.debug("Calling initialize()")
             
-            if not await self.initialize():
+            init_result = await self.initialize()
+            print(f"🔧 DEBUG: Revolutionary TUI initialize() returned: {init_result}")
+            
+            if not init_result:
+                print("🔧 DEBUG: Revolutionary TUI initialization FAILED - returning 1")
                 logger.error("Failed to initialize Revolutionary TUI Interface")
                 if debug_mode:
                     logger.debug("Revolutionary TUI Interface initialization failed")
                 return 1
             
+            print("🔧 DEBUG: Revolutionary TUI initialization SUCCESSFUL")
             if debug_mode:
                 logger.debug("Revolutionary TUI Interface initialized successfully")
             
@@ -1038,6 +1057,7 @@ class RevolutionaryTUIInterface:
                             logger.warning(f"Could not explicitly enter alternate screen: {screen_e}")
                         
                         # Create Live with anti-scrollback configuration
+                        print("🔧 DEBUG: Revolutionary TUI creating Rich Live display configuration")
                         live_config = {
                             "renderable": self.layout,
                             "console": self.console,
@@ -1048,6 +1068,7 @@ class RevolutionaryTUIInterface:
                             "transient": False  # Ensure proper screen buffer isolation
                         }
                         
+                        print("🔧 DEBUG: Revolutionary TUI entering Rich Live context")
                         with Live(**live_config) as live:
                             logger.info("📺 Rich Live display context entered successfully (alternate screen)")
                             if debug_mode:
@@ -1056,12 +1077,21 @@ class RevolutionaryTUIInterface:
                             self.live_display = live
                             
                             # Don't stop the Live display - let it run so TUI is visible
+                            print("🔧 DEBUG: Revolutionary TUI about to start main loop with Rich Live display")
                             logger.info("🚀 Starting main loop with Rich Live display active...")
                             
                             if debug_mode:
                                 logger.debug("About to call _run_main_loop() with Rich Live active")
                             
-                            await self._run_main_loop()
+                            print("🔥 EMERGENCY: Revolutionary TUI calling _run_main_loop() NOW")
+                            try:
+                                await self._run_main_loop()
+                                print("🔥 EMERGENCY: Revolutionary TUI _run_main_loop() COMPLETED SUCCESSFULLY")
+                            except Exception as main_loop_e:
+                                print(f"🔧 DEBUG: Exception in _run_main_loop(): {main_loop_e}")
+                                import traceback
+                                print(f"🔧 DEBUG: _run_main_loop() exception traceback:\n{traceback.format_exc()}")
+                                raise
                             
                             if debug_mode:
                                 logger.debug("_run_main_loop() completed")
@@ -1231,12 +1261,16 @@ class RevolutionaryTUIInterface:
     
     async def _run_main_loop(self):
         """Main loop with Rich interface."""
+        print("🔥 EMERGENCY: _run_main_loop() ENTRY POINT - MAIN LOOP STARTED!")
+        print("🔥 EMERGENCY: Revolutionary TUI main loop is executing!")
         debug_mode = getattr(self.cli_config, 'debug_mode', False)
         
         logger.info("🚀 Revolutionary TUI Interface started with Rich display")
         if debug_mode:
             logger.debug("_run_main_loop() started")
             logger.debug(f"self.running = {self.running}")
+        
+        print(f"🔧 DEBUG: _run_main_loop() self.running = {self.running}")
         
         # Start event-driven background tasks - no more polling
         logger.info("⚙️ Creating event-driven background tasks...")
@@ -1878,6 +1912,7 @@ class RevolutionaryTUIInterface:
     
     def _handle_character_input(self, char: str):
         """Handle a single character input using unified input rendering pipeline."""
+        print(f"🔥 EMERGENCY: Character input: '{char}' -> buffer: '{self.state.current_input}'")
         # Add character to current input
         self.state.current_input += char
         
