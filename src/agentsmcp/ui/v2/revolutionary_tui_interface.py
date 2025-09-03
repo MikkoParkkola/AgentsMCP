@@ -279,7 +279,6 @@ class RevolutionaryTUIInterface:
     
     async def initialize(self) -> bool:
         """Initialize all revolutionary components."""
-        print("🔥 EMERGENCY: Revolutionary TUI initialize() called")
         logger.error("🚀 INITIALIZE: Starting Revolutionary TUI initialization")
         
         # Environment and TTY status checks
@@ -785,20 +784,10 @@ class RevolutionaryTUIInterface:
         except Exception:
             max_width = 74
         
-        # CRITICAL FIX: Sync state from input pipeline if available (fix for QA finding)
-        if self.input_pipeline and hasattr(self.input_pipeline, '_current_state'):
-            try:
-                pipeline_text = getattr(self.input_pipeline._current_state, 'text', '')
-                if pipeline_text and pipeline_text != self.state.current_input:
-                    # Sync pipeline state to display state
-                    self.state.current_input = pipeline_text
-                    debug_mode = getattr(self.cli_config, 'debug_mode', False)
-                    if debug_mode:
-                        self._safe_log("debug", f"SYNC: Pipeline->Display '{pipeline_text}' (was '{self.state.current_input}')")
-            except Exception as e:
-                debug_mode = getattr(self.cli_config, 'debug_mode', False)
-                if debug_mode:
-                    self._safe_log("debug", f"SYNC ERROR: {e}")
+        # FIXED: Remove pipeline sync that was corrupting user input during typing
+        # The state.current_input is now the authoritative source of truth
+        # Pipeline state is updated TO MATCH the display state in _handle_character_input()
+        # This prevents the race condition where stale pipeline overwrites fresh user input
         
         # Build content as lines
         content_lines = []
@@ -895,8 +884,6 @@ class RevolutionaryTUIInterface:
     
     async def run(self) -> int:
         """Run the Revolutionary TUI Interface."""
-        print("🔥 EMERGENCY: Revolutionary TUI Interface run() method ENTRY - IF YOU SEE THIS, TUI IS RUNNING!")
-        print("🔥 EMERGENCY: Revolutionary TUI Interface run() method called successfully!")
         self._safe_log("info", "Revolutionary TUI Interface run() method started")
         
         # Store event loop for cross-thread communication
@@ -904,15 +891,13 @@ class RevolutionaryTUIInterface:
         
         debug_mode = self._debug_mode or getattr(self.cli_config, 'debug_mode', False)
         
-        print("🔧 DEBUG: Revolutionary TUI about to set up logging isolation")
         self._safe_log("info", "Revolutionary TUI about to set up logging isolation")
         
         # Use unified logging architecture to prevent console pollution
         if self.logging_manager:
-            print("🔧 DEBUG: Activating logging manager isolation")
             await self.logging_manager.activate_isolation(tui_active=True, log_level=LogLevel.INFO)
         else:
-            print("🔧 DEBUG: No logging manager available")
+            pass
         
         # Store original logging levels for restoration in finally block
         original_log_level = logging.getLogger().level
@@ -920,7 +905,6 @@ class RevolutionaryTUIInterface:
         original_orchestrator_level = logging.getLogger('agentsmcp.orchestration').level
         
         try:
-            print("🔧 DEBUG: Revolutionary TUI entering try block - setting up logging suppression")
             
             # CRITICAL FIX: Complete logging suppression during TUI operation
             # Create a null handler to completely prevent any log output to terminal
@@ -971,21 +955,17 @@ class RevolutionaryTUIInterface:
                 logger.debug(f"CLI config: {self.cli_config}")
             
             # Initialize components
-            print("🔧 DEBUG: Revolutionary TUI about to call initialize()")
             if debug_mode:
                 logger.debug("Calling initialize()")
             
             init_result = await self.initialize()
-            print(f"🔧 DEBUG: Revolutionary TUI initialize() returned: {init_result}")
             
             if not init_result:
-                print("🔧 DEBUG: Revolutionary TUI initialization FAILED - returning 1")
                 logger.error("Failed to initialize Revolutionary TUI Interface")
                 if debug_mode:
                     logger.debug("Revolutionary TUI Interface initialization failed")
                 return 1
             
-            print("🔧 DEBUG: Revolutionary TUI initialization SUCCESSFUL")
             if debug_mode:
                 logger.debug("Revolutionary TUI Interface initialized successfully")
             
@@ -1057,7 +1037,6 @@ class RevolutionaryTUIInterface:
                             logger.warning(f"Could not explicitly enter alternate screen: {screen_e}")
                         
                         # Create Live with anti-scrollback configuration
-                        print("🔧 DEBUG: Revolutionary TUI creating Rich Live display configuration")
                         live_config = {
                             "renderable": self.layout,
                             "console": self.console,
@@ -1068,7 +1047,6 @@ class RevolutionaryTUIInterface:
                             "transient": False  # Ensure proper screen buffer isolation
                         }
                         
-                        print("🔧 DEBUG: Revolutionary TUI entering Rich Live context")
                         with Live(**live_config) as live:
                             logger.info("📺 Rich Live display context entered successfully (alternate screen)")
                             if debug_mode:
@@ -1077,20 +1055,17 @@ class RevolutionaryTUIInterface:
                             self.live_display = live
                             
                             # Don't stop the Live display - let it run so TUI is visible
-                            print("🔧 DEBUG: Revolutionary TUI about to start main loop with Rich Live display")
                             logger.info("🚀 Starting main loop with Rich Live display active...")
                             
                             if debug_mode:
                                 logger.debug("About to call _run_main_loop() with Rich Live active")
                             
-                            print("🔥 EMERGENCY: Revolutionary TUI calling _run_main_loop() NOW")
                             try:
                                 await self._run_main_loop()
-                                print("🔥 EMERGENCY: Revolutionary TUI _run_main_loop() COMPLETED SUCCESSFULLY")
                             except Exception as main_loop_e:
-                                print(f"🔧 DEBUG: Exception in _run_main_loop(): {main_loop_e}")
                                 import traceback
-                                print(f"🔧 DEBUG: _run_main_loop() exception traceback:\n{traceback.format_exc()}")
+                                self._safe_log("error", f"Exception in _run_main_loop(): {main_loop_e}")
+                                self._safe_log("error", f"_run_main_loop() exception traceback:\n{traceback.format_exc()}")
                                 raise
                             
                             if debug_mode:
@@ -1261,8 +1236,6 @@ class RevolutionaryTUIInterface:
     
     async def _run_main_loop(self):
         """Main loop with Rich interface."""
-        print("🔥 EMERGENCY: _run_main_loop() ENTRY POINT - MAIN LOOP STARTED!")
-        print("🔥 EMERGENCY: Revolutionary TUI main loop is executing!")
         debug_mode = getattr(self.cli_config, 'debug_mode', False)
         
         logger.info("🚀 Revolutionary TUI Interface started with Rich display")
@@ -1270,7 +1243,6 @@ class RevolutionaryTUIInterface:
             logger.debug("_run_main_loop() started")
             logger.debug(f"self.running = {self.running}")
         
-        print(f"🔧 DEBUG: _run_main_loop() self.running = {self.running}")
         
         # Start event-driven background tasks - no more polling
         logger.info("⚙️ Creating event-driven background tasks...")
@@ -1912,9 +1884,9 @@ class RevolutionaryTUIInterface:
     
     def _handle_character_input(self, char: str):
         """Handle a single character input using unified input rendering pipeline."""
-        print(f"🔥 EMERGENCY: Character input: '{char}' -> buffer: '{self.state.current_input}'")
-        # Add character to current input
+        # Add character to current input FIRST
         self.state.current_input += char
+        print(f"🔥 EMERGENCY: Character input: '{char}' -> buffer: '{self.state.current_input}'")
         
         # Make cursor visible and reset blink timer  
         self.state.last_update = time.time()
@@ -1924,10 +1896,13 @@ class RevolutionaryTUIInterface:
         if debug_mode:
             self._safe_log("debug", f"Character input: '{char}' -> '{self.state.current_input}'")
         
-        # Use input rendering pipeline for immediate visibility
-        pipeline_success = False
+        # FIXED: Update pipeline to match state instead of vice versa
         if self.input_pipeline:
             try:
+                # Update pipeline state to match current input buffer - prevent desync
+                if hasattr(self.input_pipeline, '_current_state'):
+                    self.input_pipeline._current_state.text = self.state.current_input
+                
                 # Render input immediately for instant feedback
                 pipeline_success = self.input_pipeline.render_immediate_feedback(
                     char, self.state.current_input, cursor_position=len(self.state.current_input)
@@ -1946,7 +1921,7 @@ class RevolutionaryTUIInterface:
         try:
             self._sync_refresh_display()
             if debug_mode:
-                self._safe_log("debug", "Sync refresh completed")
+                self._safe_log("debug", f"Sync refresh completed, final buffer: '{self.state.current_input}'")
         except Exception as e:
             if debug_mode:
                 self._safe_log("debug", f"Sync refresh error: {e}")
@@ -1968,9 +1943,13 @@ class RevolutionaryTUIInterface:
             if debug_mode:
                 self._safe_log("debug", f"Backspace: New input '{self.state.current_input}'")
             
-            # Use input rendering pipeline for immediate visibility
+            # FIXED: Update pipeline to match state to prevent desync
             if self.input_pipeline:
                 try:
+                    # Update pipeline state to match current input buffer - prevent desync
+                    if hasattr(self.input_pipeline, '_current_state'):
+                        self.input_pipeline._current_state.text = self.state.current_input
+                    
                     # Render backspace immediately for instant feedback
                     self.input_pipeline.render_deletion_feedback(
                         self.state.current_input, cursor_position=len(self.state.current_input)
@@ -2435,22 +2414,14 @@ class RevolutionaryTUIInterface:
     def _sync_refresh_display(self):
         """Synchronously refresh the Live display - for use from input thread."""
         try:
-            # CRITICAL FIX: Ensure state sync before display updates (fix for QA finding)
+            # FIXED: State is now the source of truth - no more buffer corruption
             debug_mode = getattr(self.cli_config, 'debug_mode', False)
             if debug_mode:
                 self._safe_log("debug", f"SYNC_REFRESH: Current state '{self.state.current_input}'")
                 
-            # Sync with pipeline state if available 
-            if self.input_pipeline and hasattr(self.input_pipeline, '_current_state'):
-                try:
-                    pipeline_text = getattr(self.input_pipeline._current_state, 'text', '')
-                    if pipeline_text != self.state.current_input:
-                        if debug_mode:
-                            self._safe_log("debug", f"SYNC_REFRESH: Pipeline sync '{pipeline_text}' (was '{self.state.current_input}')")
-                        self.state.current_input = pipeline_text
-                except Exception as e:
-                    if debug_mode:
-                        self._safe_log("debug", f"SYNC_REFRESH ERROR: {e}")
+            # REMOVED: Pipeline sync that was corrupting the buffer
+            # The pipeline state is now updated in _handle_character_input to match the buffer
+            # This prevents the race condition where stale pipeline state overwrote fresh input
             
             if (hasattr(self, 'live_display') and self.live_display and 
                 sys.stdin.isatty() and sys.stdout.isatty()):
