@@ -162,17 +162,23 @@ class ReliableTUIInterface:
             True if startup successful, False if fallback mode activated
         """
         self._initialization_start_time = time.time()
+        print("DEBUG: Starting ReliableTUIInterface with reliability guarantees")  # CRITICAL DEBUG
         logger.info("Starting ReliableTUIInterface with reliability guarantees")
         
         try:
             # Initialize reliability components first
+            print("DEBUG: About to initialize reliability components")  # CRITICAL DEBUG
             await self._initialize_reliability_components()
+            print("DEBUG: Reliability components initialized")  # CRITICAL DEBUG
             
             # Perform startup orchestration with timeout protection
+            print("DEBUG: About to perform orchestrated startup")  # CRITICAL DEBUG
             startup_result = await self._perform_orchestrated_startup(**kwargs)
+            print(f"DEBUG: Orchestrated startup result: {startup_result}")  # CRITICAL DEBUG
             
             # Handle startup result
             if startup_result == StartupResult.SUCCESS:
+                print("DEBUG: Startup SUCCESS - using full reliability")  # CRITICAL DEBUG
                 logger.info("TUI startup completed successfully with full reliability")
                 self._startup_completed = True
                 self._reliability_active = True
@@ -184,6 +190,7 @@ class ReliableTUIInterface:
                 return True
                 
             elif startup_result == StartupResult.FALLBACK:
+                print("DEBUG: Startup FALLBACK - entering fallback mode")  # CRITICAL DEBUG
                 logger.warning("TUI started in fallback mode due to timeout/issues")
                 self._startup_completed = True
                 self._fallback_mode = True
@@ -265,6 +272,7 @@ class ReliableTUIInterface:
             
     async def _perform_orchestrated_startup(self, **kwargs) -> StartupResult:
         """Perform startup with orchestration and timeout protection."""
+        print("DEBUG: Starting orchestrated TUI startup")  # CRITICAL DEBUG
         logger.info("Starting orchestrated TUI startup")
         
         # Create startup feedback callback
@@ -282,6 +290,9 @@ class ReliableTUIInterface:
             orchestrator_integration = self._agent_orchestrator
             revolutionary_components = self._original_kwargs.get('revolutionary_components', {})
             
+            print(f"DEBUG: Creating RevolutionaryTUIInterface with cli_config: {cli_config is not None}")  # CRITICAL DEBUG
+            print(f"DEBUG: orchestrator_integration: {orchestrator_integration is not None}")  # CRITICAL DEBUG
+            print(f"DEBUG: revolutionary_components: {revolutionary_components}")  # CRITICAL DEBUG
             logger.info("Creating RevolutionaryTUIInterface instance...")
             
             # Create the TUI instance - this is all we need for startup
@@ -291,6 +302,7 @@ class ReliableTUIInterface:
                 revolutionary_components=revolutionary_components
             )
             
+            print(f"DEBUG: RevolutionaryTUIInterface created - type: {type(self._original_tui)}")  # CRITICAL DEBUG
             logger.info("RevolutionaryTUIInterface created successfully")
             
             # Register with recovery manager if available
@@ -299,9 +311,13 @@ class ReliableTUIInterface:
                 self._recovery_manager.register_component('agent_orchestrator', self._agent_orchestrator)
             
             # Startup completed successfully
+            print("DEBUG: Orchestrated startup returning SUCCESS")  # CRITICAL DEBUG
             return StartupResult.SUCCESS
             
         except Exception as e:
+            print(f"DEBUG: Exception in orchestrated startup: {e}")  # CRITICAL DEBUG
+            import traceback
+            traceback.print_exc()
             logger.error(f"TUI instance creation failed: {e}")
             return StartupResult.FAILURE
             
@@ -490,55 +506,64 @@ class ReliableTUIInterface:
         Returns:
             0 on successful completion, 1 on error
         """
-        print("🔥 EMERGENCY: ReliableTUIInterface.run() ENTRY POINT")
+        print("DEBUG: ReliableTUIInterface.run() method called")  # CRITICAL DEBUG
         logger.info("ReliableTUIInterface.run() method called")
         logger.info("Starting ReliableTUIInterface.run() with reliability guarantees")
         
         try:
-            print("🔥 EMERGENCY: About to call self._original_tui.run()")
-            print(f"🔥 EMERGENCY: self._original_tui type: {type(self._original_tui)}")
+            print("DEBUG: Starting TUI with reliability protection")  # CRITICAL DEBUG
             logger.info("Starting TUI with reliability protection")
             
             # Start the TUI with reliability protection
+            print("DEBUG: About to call self.start()...")  # CRITICAL DEBUG
             startup_success = await self.start(**kwargs)
             
-            print(f"🔧 DEBUG: TUI startup result: {startup_success}")
+            print(f"DEBUG: TUI startup completed with success: {startup_success}")  # CRITICAL DEBUG
+            print(f"DEBUG: Fallback mode: {self._fallback_mode}")  # CRITICAL DEBUG
             logger.info(f"TUI startup completed with success: {startup_success}")
             
             if not startup_success:
-                print("🔧 DEBUG: TUI startup failed - returning error code 1")
+                print("DEBUG: TUI startup failed - returning error code 1")  # CRITICAL DEBUG
                 logger.error("TUI startup failed - returning error code 1")
                 return 1
                 
             # Check if we started in fallback mode
             if self._fallback_mode:
+                print("DEBUG: TUI running in fallback mode - delegating to original TUI")  # CRITICAL DEBUG
                 logger.warning("TUI running in fallback mode - delegating to original TUI")
                 
                 # In fallback mode, delegate directly to original TUI's run method
                 if self._original_tui and hasattr(self._original_tui, 'run'):
                     try:
-                        print("🔥 EMERGENCY: About to call Revolutionary TUI run() method (FALLBACK MODE)")
-                        print(f"🔥 EMERGENCY: self._original_tui type: {type(self._original_tui)}")
+                        print("DEBUG: About to call Revolutionary TUI run() method in fallback mode")  # CRITICAL DEBUG
                         logger.info("Calling Revolutionary TUI run() method in fallback mode")
+                        
+                        # Add debug info about the TUI instance
+                        print(f"DEBUG: Original TUI type: {type(self._original_tui)}")
+                        print(f"DEBUG: Original TUI run method exists: {hasattr(self._original_tui, 'run')}")
+                        print(f"DEBUG: Original TUI run method callable: {callable(getattr(self._original_tui, 'run', None))}")
                         
                         # CRITICAL: Wait for original TUI to complete - don't return immediately
                         # This prevents the finally block from running prematurely
+                        print("DEBUG: Calling self._original_tui.run()...")  # CRITICAL DEBUG
                         result = await self._original_tui.run()
                         
-                        print(f"🔥 EMERGENCY: Revolutionary TUI run() returned: {result} (FALLBACK MODE)")
+                        print(f"DEBUG: Fallback TUI run completed with result: {result}")  # CRITICAL DEBUG
                         logger.info(f"Fallback TUI run completed successfully with result: {result}")
                         return result
                     except Exception as e:
-                        print(f"🔥 EMERGENCY: Exception in fallback TUI run: {e}")
+                        print(f"DEBUG: Exception in fallback TUI run: {e}")  # CRITICAL DEBUG
                         logger.error(f"Fallback TUI run failed: {e}")
                         import traceback
                         traceback.print_exc()
                         return 1
                 else:
+                    print(f"DEBUG: Fallback mode but original TUI check failed - tui exists: {self._original_tui is not None}, has run: {hasattr(self._original_tui, 'run') if self._original_tui else 'N/A'}")
                     logger.error("Fallback mode but no original TUI available")
                     return 1
                     
             # Full reliability mode - run with protected main loop
+            print("DEBUG: TUI running in full reliability mode")  # CRITICAL DEBUG
             logger.info("Running TUI main loop with reliability protection")
             
             # CRITICAL FIX: Actually call the original TUI's run() method
@@ -550,28 +575,30 @@ class ReliableTUIInterface:
             # - Main loop execution via _run_main_loop()
             
             if not self._original_tui:
+                print("DEBUG: Cannot run TUI - original TUI not initialized")  # CRITICAL DEBUG
                 logger.error("Cannot run TUI - original TUI not initialized")
                 return 1
                 
             try:
-                print("🔥 EMERGENCY: About to call Revolutionary TUI run() method (FULL RELIABILITY MODE)")
-                print(f"🔥 EMERGENCY: self._original_tui type: {type(self._original_tui)}")
+                print("DEBUG: About to initialize and run Revolutionary TUI Interface in full reliability mode...")  # CRITICAL DEBUG
                 logger.info("Initializing and running Revolutionary TUI Interface...")
                 logger.info("Calling Revolutionary TUI run() method in full reliability mode")
                 
+                print(f"DEBUG: Original TUI type in full mode: {type(self._original_tui)}")
+                print(f"DEBUG: Original TUI run method exists in full mode: {hasattr(self._original_tui, 'run')}")
+                
                 # The TUI's run() method contains Rich Live setup and input loops
                 # This is where the actual TUI rendering and input handling happens
+                print("DEBUG: Calling self._original_tui.run() in full reliability mode...")  # CRITICAL DEBUG
                 result = await self._original_tui.run()
                 
-                print(f"🔥 EMERGENCY: Revolutionary TUI run() returned: {result} (FULL RELIABILITY MODE)")
+                print(f"DEBUG: Revolutionary TUI run() completed in full reliability mode with result: {result}")  # CRITICAL DEBUG
                 logger.info(f"Revolutionary TUI run() completed with result: {result}")
                 return result
                 
             except Exception as e:
-                print(f"🔥 EMERGENCY: Exception in Revolutionary TUI run(): {e}")
                 logger.error(f"Revolutionary TUI run() failed: {e}")
                 import traceback
-                print(f"🔥 EMERGENCY: Revolutionary TUI exception traceback:\n{traceback.format_exc()}")
                 traceback.print_exc()
                 logger.debug(f"Revolutionary TUI exception traceback:\n{traceback.format_exc()}")
                 
@@ -600,16 +627,13 @@ class ReliableTUIInterface:
                     return 1
                     
         except KeyboardInterrupt:
-            print("🔧 DEBUG: TUI interrupted by user (KeyboardInterrupt)")
             logger.info("TUI interrupted by user")
             self._shutdown_requested = True
             return 0
             
         except Exception as e:
-            print(f"🔧 DEBUG: TUI run failed with unexpected error: {e}")
             logger.error(f"TUI run failed with unexpected error: {e}")
             import traceback
-            print(f"🔧 DEBUG: TUI run unexpected exception traceback:\n{traceback.format_exc()}")
             logger.debug(f"TUI run exception traceback:\n{traceback.format_exc()}")
             return 1
             

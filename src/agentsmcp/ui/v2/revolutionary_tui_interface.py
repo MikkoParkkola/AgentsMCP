@@ -22,6 +22,7 @@ import logging
 import os
 import shutil
 import sys
+import threading
 import time
 import signal
 import hashlib
@@ -99,115 +100,190 @@ class RevolutionaryTUIInterface:
     """
     
     def __init__(self, cli_config=None, orchestrator_integration=None, revolutionary_components=None):
-        """Initialize the Revolutionary TUI Interface with unified architecture."""
-        self.cli_config = cli_config
-        self.orchestrator_integration = orchestrator_integration
-        self.revolutionary_components = revolutionary_components or {}
-        
-        # Extract unified architecture components
-        self.terminal_controller: Optional[TerminalController] = self.revolutionary_components.get('terminal_controller')
-        self.logging_manager: Optional[LoggingIsolationManager] = self.revolutionary_components.get('logging_manager')
-        self.text_layout_engine: Optional[TextLayoutEngine] = self.revolutionary_components.get('text_layout_engine')
-        self.input_pipeline: Optional[InputRenderingPipeline] = self.revolutionary_components.get('input_pipeline')
-        self.display_manager: Optional[DisplayManager] = self.revolutionary_components.get('display_manager')
-        
-        # Initialize components if not provided
-        if not self.text_layout_engine:
-            self.text_layout_engine = TextLayoutEngine()
-        if not self.input_pipeline:
-            self.input_pipeline = InputRenderingPipeline()
-        
-        # Core systems
-        self.event_system = AsyncEventSystem()
-        self.state = TUIState()
-        self.running = False
-        self._event_loop = None  # Store event loop for cross-thread communication
-        
-        # Logging (using unified architecture to prevent console pollution)
-        self._isolated_logging = True  # Enable isolated logging by default
-        
-        # Revolutionary components
-        self.enhancements: Optional[RevolutionaryTUIEnhancements] = None
-        self.ai_composer: Optional[AICommandComposer] = None
-        self.symphony_dashboard: Optional[SymphonyDashboard] = None
-        
-        # Rich terminal setup with proper terminal size detection
-        if RICH_AVAILABLE:
-            # Initialize console without fixed dimensions to allow auto-detection
-            # Rich Console can automatically detect terminal size better than shutil
-            self.console = Console(
-                force_terminal=True,
-                legacy_windows=False,
-                # Force proper terminal control for alternate screen
-                file=sys.stdout,
-                stderr=False,
-                # Ensure no output leaks to scrollback
-                quiet=False,
-                # Enable proper alternate screen buffer handling
-                soft_wrap=False
-            )
+        """Initialize the Revolutionary TUI Interface."""
+        try:
+            self.cli_config = cli_config
+            self.orchestrator_integration = orchestrator_integration or False
             
-            # Get actual terminal dimensions from Rich Console
-            # Rich handles terminal size detection more reliably
-            try:
-                console_size = self.console.size
-                self.terminal_width = console_size.width
-                self.terminal_height = console_size.height
-            except Exception as e:
-                # Fallback to shutil if Rich detection fails
+            # Initialize logging attributes first (needed by _safe_log)
+            self._isolated_logging = False  # Start with non-isolated logging
+            self.logging_manager = None  # Will be set up later if needed
+            
+            # Set up logging
+            if self.orchestrator_integration:
+                self.logger = logger
+            else:
+                logging.basicConfig(level=logging.DEBUG)
+                self.logger = logger
+                
+            # Initialize state management
+            self.state = TUIState()
+            self.running = False
+            self.shutdown_event = asyncio.Event()
+            
+            # Initialize components from orchestrator if provided
+            self.revolutionary_components = revolutionary_components or {}
+            
+            # Revolutionary enhancements
+            self.enhancements: Optional[RevolutionaryTUIEnhancements] = None
+            self.ai_composer: Optional[AICommandComposer] = None
+            self.symphony_dashboard: Optional[SymphonyDashboard] = None
+            
+            # Rich terminal setup with improved terminal size detection
+            if RICH_AVAILABLE:
+                # First, get actual terminal size using multiple methods
+                actual_width, actual_height = self._detect_actual_terminal_size()
+                
+                # Initialize console with proper size detection
+                self.console = Console(
+                    # Don't force terminal - let Rich detect properly
+                    force_terminal=None,  # Let Rich auto-detect
+                    legacy_windows=False,
+                    file=sys.stdout,
+                    stderr=False,
+                    quiet=False,
+                    soft_wrap=False,
+                    # Explicitly set size if detection worked
+                    width=actual_width if actual_width > 0 else None,
+                    height=actual_height if actual_height > 0 else None
+                )
+                
+                # Verify and set terminal dimensions
                 try:
-                    term_size = shutil.get_terminal_size()
-                    self.terminal_width = term_size.columns
-                    self.terminal_height = term_size.lines
-                except Exception:
-                    self.terminal_width = 80
-                    self.terminal_height = 24
-                self._safe_log("warning", f"Terminal size detection failed, using fallback: {self.terminal_width}x{self.terminal_height}")
-        else:
+                    console_size = self.console.size
+                    detected_width = console_size.width
+                    detected_height = console_size.height
+                    
+                    # Use the larger of detected vs actual size to avoid layout truncation
+                    self.terminal_width = max(detected_width, actual_width) if actual_width > 0 else detected_width
+                    self.terminal_height = max(detected_height, actual_height) if actual_height > 0 else detected_height
+                    
+                    self._safe_log("debug", f"Terminal size detection: Rich={detected_width}x{detected_height}, Actual={actual_width}x{actual_height}, Using={self.terminal_width}x{self.terminal_height}")
+                    
+                except Exception as e:
+                    # Fallback to actual detected size
+                    if actual_width > 0 and actual_height > 0:
+                        self.terminal_width = actual_width
+                        self.terminal_height = actual_height
+                        self._safe_log("info", f"Using actual terminal size: {self.terminal_width}x{self.terminal_height}")
+                    else:
+                        self.terminal_width = 80
+                        self.terminal_height = 24
+                        self._safe_log("warning", f"Terminal size detection failed, using fallback: {self.terminal_width}x{self.terminal_height}")
+            else:
+                self.console = None
+                self.terminal_width = 80
+                self.terminal_height = 24
+            
+            self.layout = None
+            self.live_display = None
+            
+            # Input handling - UNIFIED: Use only self.state.current_input (removed duplicate input_buffer)
+            self.input_history = deque(maxlen=100)
+            self.history_index = -1
+            
+            # Performance and animation - Balanced for smooth TUI experience  
+            self.last_render_time = 0.0
+            self.frame_count = 0
+            
+            # Screen management
+            self._alternate_screen_active = False
+            
+            # Event system
+            self.event_system = AsyncEventSystem()
+            
+            # Add input rendering pipeline
+            self.input_pipeline = InputRenderingPipeline()
+            
+            # Initialize controller (non-async)
+            self.terminal_controller = TerminalController()
+            
+            # Threading
+            self.main_thread_id = threading.get_ident()
+            self.refresh_throttle = 16  # 60 FPS - reduced for better responsiveness
+            self.last_refresh_time = 0.0
+            self.refresh_lock = asyncio.Lock()
+            
+            # Initialize thread-safe event loop reference
+            try:
+                self.loop = asyncio.get_running_loop()
+            except RuntimeError:
+                self.loop = None
+                
+        except Exception as e:
+            self._safe_log("error", f"Failed to initialize Revolutionary TUI: {e}")
+            # Set minimal fallback state
             self.console = None
             self.terminal_width = 80
             self.terminal_height = 24
-        self.layout = None
-        self.live_display = None
+            self.state = TUIState()
+            self.running = False
+
+    def _detect_actual_terminal_size(self):
+        """
+        Detect actual terminal size using multiple methods.
         
-        # Input handling - UNIFIED: Use only self.state.current_input (removed duplicate input_buffer)
-        self.input_history = deque(maxlen=100)
-        self.history_index = -1
+        Returns:
+            tuple: (width, height) or (0, 0) if detection fails
+        """
+        methods = []
         
-        # Performance and animation - Balanced for smooth TUI experience  
-        self.last_render_time = 0.0
-        self.frame_count = 0
-        self.target_fps = 4.0   # Smooth update rate for TUI responsiveness
-        self.max_fps = 10.0     # Maximum refresh rate for active usage
+        # Method 1: shutil.get_terminal_size() - most reliable
+        try:
+            import shutil
+            term_size = shutil.get_terminal_size()
+            methods.append(("shutil", term_size.columns, term_size.lines))
+        except Exception as e:
+            self._safe_log("debug", f"shutil terminal size detection failed: {e}")
         
-        # Terminal control flags
-        self._alternate_screen_active = False
-        self._terminal_pollution_detected = False
+        # Method 2: os.get_terminal_size() if available
+        try:
+            import os
+            if hasattr(os, 'get_terminal_size'):
+                term_size = os.get_terminal_size()
+                methods.append(("os", term_size.columns, term_size.lines))
+        except Exception as e:
+            self._safe_log("debug", f"os terminal size detection failed: {e}")
         
-        # Layout initialized flag
-        self._layout_initialized = False
+        # Method 3: Environment variables COLUMNS/LINES
+        try:
+            cols = int(os.environ.get('COLUMNS', 0))
+            lines = int(os.environ.get('LINES', 0))
+            if cols > 0 and lines > 0:
+                methods.append(("env", cols, lines))
+        except Exception as e:
+            self._safe_log("debug", f"environment variable terminal size detection failed: {e}")
         
-        # Terminal resize handling
-        self._last_terminal_size = (self.terminal_width, self.terminal_height)
-        self._resize_pending = False
+        # Method 4: Rich Console auto-detection (as fallback reference)
+        try:
+            from rich.console import Console
+            temp_console = Console()
+            size = temp_console.size
+            methods.append(("rich", size.width, size.height))
+        except Exception as e:
+            self._safe_log("debug", f"Rich terminal size detection failed: {e}")
         
-        # Debug control - THREAT: Debug output floods scrollback buffer
-        # MITIGATION: Strict debug mode control with logging instead of print statements
-        self._debug_mode = os.environ.get('REVOLUTIONARY_TUI_DEBUG', '').lower() in ('1', 'true', 'yes')
-        self._debug_print_throttle = 0.0
-        self._debug_throttle_interval = 2.0  # Minimum 2s between debug prints
-    
-    # Content hashing removed - no longer needed since Rich Live handles updates automatically
+        # Log all detected sizes
+        if methods:
+            size_info = ", ".join([f"{method}={w}x{h}" for method, w, h in methods])
+            self._safe_log("debug", f"Terminal size detection results: {size_info}")
+            
+            # Use the first (most reliable) method
+            _, width, height = methods[0]
+            
+            # Sanity check: ensure reasonable terminal size
+            if width >= 40 and height >= 10 and width <= 1000 and height <= 200:
+                return width, height
+            else:
+                self._safe_log("warning", f"Detected terminal size {width}x{height} seems unreasonable, trying next method")
+                # Try other methods if first one gives unreasonable results
+                for method, w, h in methods[1:]:
+                    if w >= 40 and h >= 10 and w <= 1000 and h <= 200:
+                        self._safe_log("info", f"Using {method} terminal size: {w}x{h}")
+                        return w, h
         
-        # Orchestrator setup
-        self.orchestrator = None
-        
-        # Track startup time for uptime display
-        import time
-        self._startup_time = time.time()
-        
-        # Safe logging using unified architecture
-        self._safe_log("info", "Revolutionary TUI Interface initialized")
+        self._safe_log("warning", "All terminal size detection methods failed")
+        return 0, 0
     
     def _safe_log(self, level: str, message: str, **kwargs) -> None:
         """Safely log messages without polluting TUI display."""
@@ -882,40 +958,25 @@ class RevolutionaryTUIInterface:
         content_text = "\n".join(content_lines)
         return self._safe_layout_text(content_text, max_width)
     
-    async def run(self) -> int:
-        """Run the Revolutionary TUI Interface."""
-        self._safe_log("info", "Revolutionary TUI Interface run() method started")
-        
-        # Store event loop for cross-thread communication
-        self._event_loop = asyncio.get_running_loop()
-        
-        debug_mode = self._debug_mode or getattr(self.cli_config, 'debug_mode', False)
-        
-        self._safe_log("info", "Revolutionary TUI about to set up logging isolation")
-        
-        # Use unified logging architecture to prevent console pollution
-        if self.logging_manager:
-            await self.logging_manager.activate_isolation(tui_active=True, log_level=LogLevel.INFO)
-        else:
-            pass
-        
-        # Store original logging levels for restoration in finally block
-        original_log_level = logging.getLogger().level
-        original_llm_client_level = logging.getLogger('agentsmcp.conversation.llm_client').level
-        original_orchestrator_level = logging.getLogger('agentsmcp.orchestration').level
-        
+    async def run(self):
+        """Main entry point for Revolutionary TUI Interface with terminal state management."""
         try:
+            # Import required modules
+            import signal
+            import sys
+            import os
+            import logging
             
-            # CRITICAL FIX: Complete logging suppression during TUI operation
-            # Create a null handler to completely prevent any log output to terminal
-            null_handler = logging.NullHandler()
+            # Get debug mode configuration
+            debug_mode = getattr(self, 'debug_mode', False)
+            
+            logger.info("🚀 Revolutionary TUI Interface starting...")
+            
+            # Save original handlers to restore later
             original_handlers = {}
             
-            # Store original handlers and replace with null handler
-            root_logger = logging.getLogger()
-            original_handlers['root'] = root_logger.handlers.copy()
-            root_logger.handlers = [null_handler]
-            root_logger.setLevel(logging.CRITICAL)
+            # Create a null handler to suppress output
+            null_handler = logging.NullHandler()
             
             # Set logging to ERROR level to prevent debug/info output during TUI operation
             logging.getLogger('agentsmcp.conversation.llm_client').setLevel(logging.CRITICAL)
@@ -992,247 +1053,267 @@ class RevolutionaryTUIInterface:
             stdin_tty = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
             stderr_tty = sys.stderr.isatty() if hasattr(sys.stderr, 'isatty') else False
             
-            if RICH_AVAILABLE and is_tty:
-                logger.info("🎨 Using Rich Live display for TUI (TTY confirmed)")
-                if debug_mode:
-                    logger.debug("Rich is available and TTY confirmed, using Live display")
-                    logger.debug(f"Layout object: {self.layout}")
-                    logger.debug(f"TTY Status - stdin: {stdin_tty}, stdout: {stdout_tty}, stderr: {stderr_tty}")
-                
-                # Use Rich Live display for smooth updates
-                try:
-                    logger.info("📺 Attempting to create Rich Live display...")
+            # CRITICAL FIX: Save original terminal state BEFORE Rich starts
+            original_terminal_state = None
+            try:
+                if stdin_tty:
+                    original_terminal_state = self._save_terminal_state()
                     if debug_mode:
-                        logger.debug("Creating Rich Live display context")
-                        logger.debug(f"Layout valid: {self.layout is not None}")
-                        logger.debug(f"Layout type: {type(self.layout)}")
-                        logger.debug(f"Terminal size: {os.get_terminal_size() if hasattr(os, 'get_terminal_size') else 'unknown'}")
-                        logger.debug(f"Is TTY: {sys.stdin.isatty()}")
-                        logger.debug(f"TERM env: {os.environ.get('TERM', 'not set')}")
+                        logger.debug("💾 Original terminal state saved before Rich Live context")
+            except Exception as e:
+                logger.warning(f"Could not save original terminal state: {e}")
+            
+            try:
+                if RICH_AVAILABLE and is_tty:
+                    logger.info("🎨 Using Rich Live display for TUI (TTY confirmed)")
+                    if debug_mode:
+                        logger.debug("Rich is available and TTY confirmed, using Live display")
+                        logger.debug(f"Layout object: {self.layout}")
+                        logger.debug(f"TTY Status - stdin: {stdin_tty}, stdout: {stdout_tty}, stderr: {stderr_tty}")
                     
-                    # CRITICAL: Force alternate screen mode with proper terminal isolation
-                    # MITIGATION: Explicit terminal control to prevent any scrollback pollution
+                    # Use Rich Live display for smooth updates
                     try:
+                        logger.info("📺 Attempting to create Rich Live display...")
                         if debug_mode:
-                            logger.debug("Attempting Live context with screen=True (alternate screen)")
+                            logger.debug("Creating Rich Live display context")
+                            logger.debug(f"Layout valid: {self.layout is not None}")
+                            logger.debug(f"Layout type: {type(self.layout)}")
+                            logger.debug(f"Terminal size: {os.get_terminal_size() if hasattr(os, 'get_terminal_size') else 'unknown'}")
+                            logger.debug(f"Is TTY: {sys.stdin.isatty()}")
+                            logger.debug(f"TERM env: {os.environ.get('TERM', 'not set')}")
                         
-                        # CRITICAL FIX: Force alternate screen buffer with terminal isolation
+                        # CRITICAL: Force alternate screen mode with proper terminal isolation
+                        # MITIGATION: Explicit terminal control to prevent any scrollback pollution
                         try:
-                            # Use terminal_controller for proper screen management if available
-                            if hasattr(self, 'terminal_controller') and self.terminal_controller:
-                                self.terminal_controller.enter_alternate_screen()
-                                self._alternate_screen_active = True
-                            else:
-                                # Enhanced manual terminal control to prevent scrollback pollution
-                                self.console.clear()
-                                if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
-                                    # More robust sequence to prevent scrollback contamination
-                                    self.console._file.write('\033[2J\033[H')     # Clear screen and home cursor
-                                    self.console._file.write('\033[?47h')        # Save screen buffer
-                                    self.console._file.write('\033[?1049h')      # Enter alternate screen
-                                    self.console._file.write('\033[?25l')        # Hide cursor during transition
-                                    self.console._file.flush()
-                                    self._alternate_screen_active = True
-                        except Exception as screen_e:
-                            logger.warning(f"Could not explicitly enter alternate screen: {screen_e}")
-                        
-                        # Create Live with anti-scrollback configuration
-                        live_config = {
-                            "renderable": self.layout,
-                            "console": self.console,
-                            "screen": True,  # Force alternate screen buffer
-                            "refresh_per_second": min(self.target_fps, 10.0),  # Cap refresh rate to prevent flooding
-                            "auto_refresh": False,  # Disable auto-refresh to prevent scrollback leaks
-                            "vertical_overflow": "crop",  # Prevent overflow that could leak to main screen
-                            "transient": False  # Ensure proper screen buffer isolation
-                        }
-                        
-                        with Live(**live_config) as live:
-                            logger.info("📺 Rich Live display context entered successfully (alternate screen)")
                             if debug_mode:
-                                logger.debug("Rich Live display context active (alternate screen)")
+                                logger.debug("Attempting Live context with screen=True (alternate screen)")
                             
-                            self.live_display = live
-                            
-                            # Don't stop the Live display - let it run so TUI is visible
-                            logger.info("🚀 Starting main loop with Rich Live display active...")
-                            
-                            if debug_mode:
-                                logger.debug("About to call _run_main_loop() with Rich Live active")
-                            
+                            # CRITICAL FIX: Force alternate screen buffer with terminal isolation
                             try:
-                                await self._run_main_loop()
-                            except Exception as main_loop_e:
-                                import traceback
-                                self._safe_log("error", f"Exception in _run_main_loop(): {main_loop_e}")
-                                self._safe_log("error", f"_run_main_loop() exception traceback:\n{traceback.format_exc()}")
-                                raise
-                            
-                            if debug_mode:
-                                logger.debug("_run_main_loop() completed")
-                            
-                            logger.info("✅ Main loop completed")
-                    
-                    except Exception as live_e:
-                        if debug_mode:
-                            logger.debug(f"Live context (alternate screen) failed: {type(live_e).__name__}: {live_e}")
-                            logger.debug("Retrying with alternate screen buffer")
-                        
-                        # EMERGENCY RETRY: Force alternate screen with reduced refresh rate
-                        # CRITICAL: Must prevent any scrollback buffer pollution
-                        try:
-                            import time
-                            time.sleep(0.1)  # Brief pause before retry
-                            
-                            # EMERGENCY: Force terminal reset and alternate screen
-                            try:
-                                # Clear console and force terminal reset
-                                self.console.clear()
-                                
-                                # Force alternate screen control sequence
-                                if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
-                                    self.console._file.write('\033[?1049h')  # Force alternate screen
-                                    self.console._file.flush()
+                                # Use terminal_controller for proper screen management if available
+                                if hasattr(self, 'terminal_controller') and self.terminal_controller:
+                                    self.terminal_controller.enter_alternate_screen()
                                     self._alternate_screen_active = True
-                            except Exception:
-                                pass  # Ignore errors in emergency mode
+                                else:
+                                    # Enhanced manual terminal control to prevent scrollback pollution
+                                    self.console.clear()
+                                    if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
+                                        # More robust sequence to prevent scrollback contamination
+                                        self.console._file.write('\033[2J\033[H')     # Clear screen and home cursor
+                                        self.console._file.write('\033[?47h')        # Save screen buffer
+                                        self.console._file.write('\033[?1049h')      # Enter alternate screen
+                                        self.console._file.write('\033[?25l')        # Hide cursor during transition
+                                        self.console._file.flush()
+                                        self._alternate_screen_active = True
+                            except Exception as screen_e:
+                                logger.warning(f"Could not explicitly enter alternate screen: {screen_e}")
                             
-                            # Force alternate screen with emergency fallback config
-                            emergency_live_config = {
+                            # Create Live with anti-scrollback configuration
+                            live_config = {
                                 "renderable": self.layout,
                                 "console": self.console,
-                                "screen": True,  # Force alternate screen
-                                "refresh_per_second": max(1.0, min(self.target_fps / 2, 5.0)),  # Very low refresh rate
-                                "auto_refresh": False,  # Disable auto-refresh for anti-scrollback  
-                                "vertical_overflow": "crop",
-                                "transient": False
+                                "screen": True,  # Force alternate screen buffer
+                                "refresh_per_second": min(self.target_fps, 10.0),  # Cap refresh rate to prevent flooding
+                                "auto_refresh": False,  # Disable auto-refresh to prevent scrollback leaks
+                                "vertical_overflow": "crop",  # Prevent overflow that could leak to main screen
+                                "transient": False  # Ensure proper screen buffer isolation
                             }
                             
-                            with Live(**emergency_live_config) as live:
-                                logger.info("📺 Rich Live display context entered successfully (retry)")
+                            with Live(**live_config) as live:
+                                logger.info("📺 Rich Live display context entered successfully (alternate screen)")
                                 if debug_mode:
-                                    logger.debug("Rich Live display context active (retry)")
+                                    logger.debug("Rich Live display context active (alternate screen)")
                                 
                                 self.live_display = live
                                 
                                 # Don't stop the Live display - let it run so TUI is visible
-                                logger.info("🚀 Starting main loop with Rich Live display active (retry)...")
+                                logger.info("🚀 Starting main loop with Rich Live display active...")
                                 
                                 if debug_mode:
-                                    logger.debug("About to call _run_main_loop() with emergency Rich Live active")
+                                    logger.debug("About to call _run_main_loop() with Rich Live active")
                                 
-                                await self._run_main_loop()
+                                try:
+                                    await self._run_main_loop()
+                                except Exception as main_loop_e:
+                                    import traceback
+                                    self._safe_log("error", f"Exception in _run_main_loop(): {main_loop_e}")
+                                    self._safe_log("error", f"_run_main_loop() exception traceback:\n{traceback.format_exc()}")
+                                    raise
                                 
                                 if debug_mode:
                                     logger.debug("_run_main_loop() completed")
                                 
                                 logger.info("✅ Main loop completed")
-                        except Exception as retry_e:
+                        
+                        except Exception as live_e:
                             if debug_mode:
-                                logger.debug(f"Retry also failed: {retry_e}")
-                            logger.error(f"❌ Both Rich Live attempts failed: {retry_e}")
+                                logger.debug(f"Live context (alternate screen) failed: {type(live_e).__name__}: {live_e}")
+                                logger.debug("Retrying with alternate screen buffer")
                             
-                            # EMERGENCY FALLBACK: Disable Rich entirely to prevent scrollback pollution
-                            logger.warning("🚨 EMERGENCY: Rich Live failed - disabling all Rich output to prevent terminal pollution")
-                            
+                            # EMERGENCY RETRY: Force alternate screen with reduced refresh rate
+                            # CRITICAL: Must prevent any scrollback buffer pollution
                             try:
-                                # Comprehensive terminal cleanup to prevent scrollback pollution
-                                self.console.clear()
+                                import time
+                                time.sleep(0.1)  # Brief pause before retry
                                 
-                                # Enhanced alternate screen exit sequence
-                                if self._alternate_screen_active and hasattr(self.console, '_file'):
-                                    # More robust cleanup sequence
-                                    self.console._file.write('\033[?25h')        # Show cursor
-                                    self.console._file.write('\033[?1049l')      # Exit alternate screen
-                                    self.console._file.write('\033[?47l')        # Restore screen buffer
-                                    self.console._file.write('\033[2J\033[H')    # Clear and home
-                                    self.console._file.flush()
-                                    self._alternate_screen_active = False
-                            except Exception:
-                                pass  # Ignore cleanup errors in emergency
-                            
-                            # Use minimal fallback mode with ZERO Rich output
-                            await self._run_emergency_fallback_loop()
-                            return 0
+                                # EMERGENCY: Force terminal reset and alternate screen
+                                try:
+                                    # Clear console and force terminal reset
+                                    self.console.clear()
+                                    
+                                    # Force alternate screen control sequence
+                                    if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
+                                        self.console._file.write('\033[?1049h')  # Force alternate screen
+                                        self.console._file.flush()
+                                        self._alternate_screen_active = True
+                                except Exception:
+                                    pass  # Ignore errors in emergency mode
+                                
+                                # Force alternate screen with emergency fallback config
+                                emergency_live_config = {
+                                    "renderable": self.layout,
+                                    "console": self.console,
+                                    "screen": True,  # Force alternate screen
+                                    "refresh_per_second": max(1.0, min(self.target_fps / 2, 5.0)),  # Very low refresh rate
+                                    "auto_refresh": False,  # Disable auto-refresh for anti-scrollback  
+                                    "vertical_overflow": "crop",
+                                    "transient": False
+                                }
+                                
+                                with Live(**emergency_live_config) as live:
+                                    logger.info("📺 Emergency Rich Live display context entered (alternate screen)")
+                                    self.live_display = live
+                                    logger.info("🚀 Starting main loop with emergency Rich Live display...")
+                                    
+                                    try:
+                                        await self._run_main_loop()
+                                    except Exception as emergency_main_loop_e:
+                                        import traceback
+                                        self._safe_log("error", f"Exception in emergency _run_main_loop(): {emergency_main_loop_e}")
+                                        self._safe_log("error", f"Emergency _run_main_loop() exception traceback:\n{traceback.format_exc()}")
+                                        raise
+                                    
+                                    logger.info("✅ Emergency main loop completed")
+                                
+                            except Exception as emergency_live_e:
+                                logger.error(f"Emergency Rich Live display also failed: {emergency_live_e}")
+                                if debug_mode:
+                                    import traceback
+                                    logger.debug(f"Emergency Rich Live traceback:\n{traceback.format_exc()}")
+                                
+                                # FINAL FALLBACK: Run without Rich
+                                logger.warning("🔄 Falling back to emergency non-Rich mode")
+                                await self._run_emergency_fallback_loop()
+                    
+                    except Exception as rich_e:
+                        logger.error(f"Rich Live display creation failed: {rich_e}")
+                        if debug_mode:
+                            import traceback
+                            logger.debug(f"Rich Live creation traceback:\n{traceback.format_exc()}")
+                        
+                        # Fallback to emergency mode
+                        logger.warning("🔄 Falling back to emergency non-Rich mode")
+                        await self._run_emergency_fallback_loop()
                 
-                except Exception as e:
-                    logger.error(f"❌ Rich Live display failed: {e}")
+                else:
+                    # Rich not available or not TTY - run in demo mode
+                    logger.info("📱 Rich not available or not in TTY - running demo mode")
                     if debug_mode:
-                        logger.debug(f"Rich Live display failed: {type(e).__name__}: {e}")
-                        logger.debug("Full exception traceback:", exc_info=True)
-                    logger.info("🔄 Falling back to basic display")
-                    await self._run_fallback_loop()
-            else:
-                logger.info("📟 Using basic display (Rich not available or TTY not detected)")
-                if debug_mode:
-                    logger.debug(f"Rich available: {RICH_AVAILABLE}, TTY status: is_tty={is_tty}")
-                    logger.debug("Using fallback display mode")
-                # Use fallback mode instead of returning immediately
-                await self._run_fallback_loop()
+                        logger.debug(f"Rich available: {RICH_AVAILABLE}, Is TTY: {is_tty}")
+                    await self._demo_mode_loop()
+                
+            finally:
+                # CRITICAL FIX: Restore original terminal state AFTER Rich exits
+                if original_terminal_state is not None:
+                    try:
+                        self._restore_terminal_state(original_terminal_state)
+                        logger.info("🔧 Terminal echo state restored after Rich Live display")
+                        if debug_mode:
+                            logger.debug("✅ Original terminal state successfully restored")
+                    except Exception as e:
+                        logger.warning(f"Could not restore original terminal state: {e}")
+                
+                # Restore original logging handlers
+                for logger_name, handlers in original_handlers.items():
+                    logger_instance = logging.getLogger(logger_name)
+                    logger_instance.handlers = handlers
+                    logger_instance.setLevel(logging.DEBUG)  # Reset to default level
             
-            logger.info("🏁 Revolutionary TUI Interface execution completed")
-            if debug_mode:
-                logger.debug("Revolutionary TUI Interface execution completed normally")
+            # CRITICAL FIX: Always call cleanup before normal exit
+            try:
+                await self._cleanup()
+                logger.info("✅ Revolutionary TUI Interface completed successfully with cleanup")
+            except Exception as cleanup_e:
+                logger.warning(f"Cleanup error on normal exit: {cleanup_e}")
             return 0
             
         except KeyboardInterrupt:
-            logger.info("Revolutionary TUI interrupted by user")
-            if debug_mode:
-                logger.debug("Revolutionary TUI interrupted by KeyboardInterrupt")
-            return 0
+            logger.info("⚠️  Revolutionary TUI Interface interrupted by user")
+            # CRITICAL FIX: Call cleanup on keyboard interrupt
+            try:
+                await self._cleanup()
+                logger.info("✅ Cleanup completed after keyboard interrupt")
+            except Exception as cleanup_e:
+                logger.warning(f"Cleanup error on interrupt: {cleanup_e}")
+            return 130
         except Exception as e:
-            logger.error(f"Revolutionary TUI Interface error: {e}")
+            logger.error(f"💥 Revolutionary TUI Interface crashed: {e}")
             if debug_mode:
-                logger.debug(f"Revolutionary TUI Interface exception: {type(e).__name__}: {e}")
-                logger.debug("Full exception traceback:", exc_info=True)
+                import traceback
+                logger.error(f"Revolutionary TUI crash traceback:\n{traceback.format_exc()}")
+            # CRITICAL FIX: Call cleanup even on crash
+            try:
+                await self._cleanup()
+                logger.info("✅ Cleanup completed after crash")
+            except Exception as cleanup_e:
+                logger.warning(f"Cleanup error on crash: {cleanup_e}")
             return 1
-        finally:
-            # CRITICAL: Restore original logging levels and handlers to prevent side effects
-            try:
-                logging.getLogger().setLevel(original_log_level)
-                logging.getLogger('agentsmcp.conversation.llm_client').setLevel(original_llm_client_level)
-                logging.getLogger('agentsmcp.orchestration').setLevel(original_orchestrator_level)
+
+    def _save_terminal_state(self):
+        """Save original terminal state before Rich Live context."""
+        try:
+            import termios
+            import sys
+            
+            if sys.stdin.isatty():
+                fd = sys.stdin.fileno()
+                original_attrs = termios.tcgetattr(fd)
+                logger.debug("💾 Terminal state saved successfully")
+                return original_attrs
+            else:
+                logger.debug("⚠️  Not a TTY - cannot save terminal state")
+                return None
                 
-                # Restore original handlers
-                if 'original_handlers' in locals():
-                    for logger_name, handlers in original_handlers.items():
-                        if logger_name == 'root':
-                            logging.getLogger().handlers = handlers
-                        else:
-                            logging.getLogger(logger_name).handlers = handlers
-            except Exception:
-                pass  # Ignore errors during logging restoration
+        except Exception as e:
+            logger.warning(f"Could not save terminal state: {e}")
+            return None
+    
+    def _restore_terminal_state(self, original_attrs):
+        """Restore original terminal state after Rich Live context exits."""
+        if original_attrs is None:
+            return
             
-            if debug_mode:
-                logger.debug("Revolutionary TUI Interface cleanup starting")
+        try:
+            import termios
+            import sys
             
-            # CRITICAL: Emergency terminal cleanup to prevent scrollback pollution
-            try:
-                # Use terminal_controller for proper cleanup if available
-                if hasattr(self, 'terminal_controller') and self.terminal_controller:
-                    try:
-                        self.terminal_controller.exit_alternate_screen()
-                    except Exception:
-                        pass
+            if sys.stdin.isatty():
+                fd = sys.stdin.fileno()
                 
-                # Force exit alternate screen with comprehensive cleanup if still active
-                if getattr(self, '_alternate_screen_active', False) and hasattr(self, 'console') and self.console:
-                    try:
-                        if hasattr(self.console, '_file') and hasattr(self.console._file, 'write'):
-                            # Comprehensive terminal cleanup sequence
-                            self.console._file.write('\033[?25h')        # Show cursor
-                            self.console._file.write('\033[?1049l')      # Exit alternate screen
-                            self.console._file.write('\033[?47l')        # Restore screen buffer
-                            self.console._file.write('\033[2J\033[H')    # Clear and home cursor
-                            self.console._file.flush()
-                    except Exception:
-                        pass  # Ignore terminal control errors during emergency cleanup
-            except Exception:
-                pass  # Ignore all errors during emergency cleanup
-            
-            await self._cleanup()
-            if debug_mode:
-                logger.debug("Revolutionary TUI Interface cleanup completed")
+                # Restore the original terminal attributes
+                termios.tcsetattr(fd, termios.TCSADRAIN, original_attrs)
+                
+                # Ensure echo and canonical mode are enabled for input visibility
+                new_attrs = termios.tcgetattr(fd)
+                new_attrs[3] = (new_attrs[3] | termios.ICANON | termios.ECHO)
+                termios.tcsetattr(fd, termios.TCSADRAIN, new_attrs)
+                
+                logger.debug("🔧 Terminal state restored and echo enabled")
+            else:
+                logger.debug("⚠️  Not a TTY - cannot restore terminal state")
+                
+        except Exception as e:
+            logger.warning(f"Could not restore terminal state: {e}")
     
     async def _run_main_loop(self):
         """Main loop with Rich interface."""
@@ -1392,7 +1473,6 @@ class RevolutionaryTUIInterface:
         
         import sys
         import os
-        import threading
         import time
         
         # Check if we have access to a proper TTY
@@ -1499,7 +1579,7 @@ class RevolutionaryTUIInterface:
                             # Enter (13) - Submit input
                             elif b == 13:
                                 if loop:
-                                    loop.call_soon_threadsafe(lambda: asyncio.create_task(self._handle_enter_input()))
+                                    loop.call_soon_threadsafe(self._handle_enter_input_sync)
                                 i += 1
                                 continue
                             
@@ -1650,6 +1730,9 @@ class RevolutionaryTUIInterface:
             await self._demo_mode_loop()
             return
         
+        # NOTE: Terminal state management is now handled in the main run() method
+        # No longer restoring terminal state here as it's done in the proper finally block
+        
         # Use a thread pool executor for blocking input
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         
@@ -1720,8 +1803,8 @@ class RevolutionaryTUIInterface:
             executor.shutdown(wait=False)
     
     async def _demo_mode_loop(self):
-        """Demo mode for non-TTY environments - runs for a few seconds then exits gracefully."""
-        logger.info("Starting demo mode for non-TTY environment")
+        """Enhanced demo mode with input support for non-TTY environments."""
+        logger.info("Starting enhanced demo mode for non-TTY environment")
         
         print("\n🚀 Revolutionary TUI Interface - Demo Mode")
         print("Running in non-TTY environment - demonstrating TUI capabilities...")
@@ -1761,9 +1844,61 @@ class RevolutionaryTUIInterface:
             logger.info(f"Demo countdown: {countdown}s remaining")
             await asyncio.sleep(1.0)
         
+        # Enhanced: Add interactive input capability after demo
+        print("\n💬 Interactive mode now available:")
+        print("   • Type messages and press Enter to see them processed") 
+        print("   • Type '/quit' to exit")
+        print("   • Type '/help' for available commands")
+        print("   • Type '/status' for system status")
+        sys.stdout.flush()
+        logger.info("Starting interactive input mode in demo")
+        
+        # Ensure we're still running for the interactive part
+        self.running = True
+        
+        while self.running:
+            try:
+                # Provide visible input prompt
+                user_input = input("\n💬 TUI> ")
+                
+                # Echo the input so user sees what they typed
+                if user_input.strip():
+                    print(f"📝 You typed: {user_input}")
+                    sys.stdout.flush()
+                    
+                    # Process the input through the existing system
+                    await self._process_user_input(user_input)
+                    
+                    # If a quit command was processed, running will be False
+                    if not self.running:
+                        break
+                        
+                    # Show any conversation updates that resulted from input processing
+                    if hasattr(self.state, 'conversation_history') and self.state.conversation_history:
+                        # Show the last assistant response if any
+                        last_message = self.state.conversation_history[-1]
+                        if last_message.get('role') == 'assistant':
+                            print(f"🤖 Assistant: {last_message.get('content', '')}")
+                            sys.stdout.flush()
+                else:
+                    # Handle empty input
+                    print("💭 (Empty input - type something or '/help' for commands)")
+                    sys.stdout.flush()
+                    
+            except (EOFError, KeyboardInterrupt):
+                print("\n👋 Exiting TUI...")
+                sys.stdout.flush()
+                logger.info("Demo mode interrupted by user (EOF/Ctrl+C)")
+                break
+            except Exception as e:
+                logger.error(f"Error in demo input loop: {e}")
+                print(f"❌ Input error: {e}")
+                print("💡 Try again or type '/quit' to exit")
+                sys.stdout.flush()
+        
         print("\n✅ Demo completed - TUI shutting down gracefully")
         sys.stdout.flush()
-        logger.info("Demo mode completed successfully - TUI lifecycle demonstrated")
+        logger.info("Enhanced demo mode completed successfully")
         self.running = False
     
     # Polling-based update loop REMOVED - replaced with event-driven updates
@@ -1886,10 +2021,12 @@ class RevolutionaryTUIInterface:
         """Handle a single character input using unified input rendering pipeline."""
         # Add character to current input FIRST
         self.state.current_input += char
-        print(f"🔥 EMERGENCY: Character input: '{char}' -> buffer: '{self.state.current_input}'")
         
         # Make cursor visible and reset blink timer  
         self.state.last_update = time.time()
+        
+        # CRITICAL DEBUG: Always log character input to understand what's happening
+        self._safe_log("info", f"🔤 CHAR INPUT: '{char}' -> buffer: '{self.state.current_input}'")
         
         # Debug logging for input visibility
         debug_mode = getattr(self.cli_config, 'debug_mode', False)
@@ -1912,19 +2049,17 @@ class RevolutionaryTUIInterface:
                     pipeline_current = getattr(self.input_pipeline._current_state, 'text', 'N/A') if hasattr(self.input_pipeline, '_current_state') else 'N/A'
                     self._safe_log("debug", f"Pipeline feedback: {pipeline_success}, Pipeline state: '{pipeline_current}'")
             except Exception as e:
-                if debug_mode:
-                    self._safe_log("debug", f"Pipeline error: {e}")
+                self._safe_log("info", f"🔧 PIPELINE ERROR: {e}")
                 pass  # Continue without pipeline if it fails
         
         # Immediately refresh the Live display to show typed characters
         # Must be synchronous since this runs in input thread, not async context
         try:
+            self._safe_log("info", f"🔄 REFRESHING display for: '{self.state.current_input}'")
             self._sync_refresh_display()
-            if debug_mode:
-                self._safe_log("debug", f"Sync refresh completed, final buffer: '{self.state.current_input}'")
+            self._safe_log("info", f"✅ REFRESH completed for: '{self.state.current_input}'")
         except Exception as e:
-            if debug_mode:
-                self._safe_log("debug", f"Sync refresh error: {e}")
+            self._safe_log("info", f"❌ REFRESH ERROR: {e}")
         
         # Emit input changed event for reactive UI updates (async)
         if hasattr(self, '_event_loop') and self._event_loop and not self._event_loop.is_closed():
@@ -1981,6 +2116,55 @@ class RevolutionaryTUIInterface:
             
             # Emit input changed event for clearing input
             await self._publish_input_changed()
+
+    def _handle_enter_input_sync(self):
+        """
+        CRITICAL FIX: Sync wrapper for Enter key handling from thread context.
+        This properly schedules the async _handle_enter_input to be executed.
+        """
+        try:
+            debug_mode = getattr(self.cli_config, 'debug_mode', False)
+            if debug_mode:
+                self._safe_log("debug", f"ENTER_KEY: Sync wrapper called with input: '{self.state.current_input}'")
+            
+            # Get the current event loop
+            try:
+                loop = asyncio.get_running_loop()
+                
+                # FIXED: Create a task and store it so it gets executed
+                # The key is to create the task and let the event loop handle it
+                async def enter_task():
+                    try:
+                        await self._handle_enter_input()
+                        if debug_mode:
+                            self._safe_log("debug", "ENTER_KEY: Async processing completed successfully")
+                    except Exception as e:
+                        self._safe_log("error", f"ENTER_KEY: Async processing failed: {e}")
+                        import traceback
+                        self._safe_log("error", f"Enter key error traceback:\n{traceback.format_exc()}")
+                
+                # Schedule the task to run in the event loop
+                task = loop.create_task(enter_task())
+                
+                # CRITICAL: Store the task to prevent garbage collection
+                if not hasattr(self, '_pending_enter_tasks'):
+                    self._pending_enter_tasks = []
+                self._pending_enter_tasks.append(task)
+                
+                # Clean up completed tasks
+                self._pending_enter_tasks = [t for t in self._pending_enter_tasks if not t.done()]
+                
+                if debug_mode:
+                    self._safe_log("debug", f"ENTER_KEY: Task created and scheduled (pending tasks: {len(self._pending_enter_tasks)})")
+                
+            except RuntimeError:
+                # No event loop running - this shouldn't happen in our case
+                self._safe_log("error", "ENTER_KEY: No event loop available for async processing")
+                
+        except Exception as e:
+            self._safe_log("error", f"ENTER_KEY: Sync wrapper failed: {e}")
+            import traceback
+            self._safe_log("error", f"Enter key sync wrapper error:\n{traceback.format_exc()}")
     
     def _handle_up_arrow(self):
         """Handle up arrow key - navigate to previous input in history and emit events."""
@@ -2052,9 +2236,26 @@ class RevolutionaryTUIInterface:
             self._event_loop.call_soon_threadsafe(lambda: asyncio.create_task(self._publish_input_changed()))
     
     async def _handle_exit(self):
-        """Handle Ctrl+C/Ctrl+D - graceful exit."""
-        logger.info("Exit requested by user")
+        """Handle Ctrl+C/Ctrl+D - graceful exit with proper cleanup.
+        
+        CRITICAL FIX: Ensure cleanup is called for clean application termination.
+        """
+        logger.info("Exit requested by user - initiating graceful shutdown")
+        
+        # Set running flag first to stop loops
         self.running = False
+        
+        # Perform cleanup to ensure proper resource deallocation
+        try:
+            await self._cleanup()
+            logger.info("✅ Graceful exit completed with cleanup")
+        except Exception as e:
+            logger.warning(f"Error during exit cleanup: {e}")
+            # Still exit even if cleanup fails
+        
+        # Ensure we actually terminate the application
+        import sys
+        sys.exit(0)
     
     async def _process_user_input(self, user_input: str):
         """Process user input through the revolutionary system."""
@@ -2233,21 +2434,45 @@ class RevolutionaryTUIInterface:
     async def _register_event_handlers(self):
         """Register event handlers for the revolutionary interface."""
         try:
+            logger.info("Starting event handler registration...")
+            
             # Register handlers for UI update events
             await self.event_system.subscribe("input_changed", self._on_input_changed)
+            logger.info("Registered input_changed handler")
+            
             await self.event_system.subscribe("agent_status_changed", self._on_agent_status_changed)
+            logger.info("Registered agent_status_changed handler")
+            
             await self.event_system.subscribe("metrics_updated", self._on_metrics_updated)
+            logger.info("Registered metrics_updated handler")
+            
             await self.event_system.subscribe("conversation_updated", self._on_conversation_updated)
+            logger.info("Registered conversation_updated handler")
+            
             await self.event_system.subscribe("processing_state_changed", self._on_processing_state_changed)
+            logger.info("Registered processing_state_changed handler")
+            
             await self.event_system.subscribe("ui_refresh", self._on_ui_refresh)
+            logger.info("Registered ui_refresh handler")
             
             # Legacy handlers for backward compatibility
             await self.event_system.subscribe("user_input", self._handle_user_input_event)
+            logger.info("Registered user_input handler")
+            
             await self.event_system.subscribe("agent_status_change", self._handle_agent_status_change)
+            logger.info("Registered agent_status_change handler")
+            
             await self.event_system.subscribe("performance_update", self._handle_performance_update)
+            logger.info("Registered performance_update handler")
+            
+            # Check final stats
+            stats = self.event_system.get_stats()
+            logger.info(f"Event handler registration complete. Handler count: {stats['handler_count']}")
             
         except Exception as e:
-            logger.warning(f"Error registering event handlers: {e}")
+            logger.error(f"Error registering event handlers: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     async def _handle_user_input_event(self, event_data: Dict[str, Any]):
         """Handle user input events."""
@@ -2330,7 +2555,11 @@ class RevolutionaryTUIInterface:
             pass  # Silently ignore event handling errors
     
     async def _refresh_panel(self, panel_name: str):
-        """Refresh a specific UI panel - with manual Live display refresh."""
+        """Refresh a specific UI panel - LAYOUT CORRUPTION FIX APPLIED.
+        
+        CRITICAL FIX: Removed manual Live.refresh() calls that corrupt layout structure.
+        Rich Live display will automatically refresh when panel content is updated.
+        """
         try:
             if not self.layout or not RICH_AVAILABLE or not sys.stdin.isatty():
                 return  # Skip all Rich operations in non-TTY environments
@@ -2399,48 +2628,117 @@ class RevolutionaryTUIInterface:
                     )
                 )
             
-            # Force manual refresh since auto-refresh is disabled to prevent scrollback pollution
-            try:
-                if (hasattr(self, 'live_display') and self.live_display and 
-                    sys.stdin.isatty() and sys.stdout.isatty()):
-                    # Manual refresh needed since auto-refresh is disabled for anti-scrollback
-                    self.live_display.refresh()
-            except Exception:
-                pass  # Ignore refresh errors
+            # CRITICAL FIX: DO NOT call manual refresh - this corrupts the layout!
+            # Rich Live display will automatically refresh when panel content is updated.
+            # Manual refresh() calls disrupt the layout's internal state causing corruption.
+            
+            # OLD CODE (causes corruption):
+            # self.live_display.refresh()
+            
+            # NEW APPROACH: Let Rich handle refreshes automatically
+            # The Live display will detect panel updates and refresh appropriately
+            # without disrupting the layout structure.
                 
         except Exception as e:
-            pass  # Silently ignore panel refresh errors
+            pass  # Silently ignore panel refresh errors  # Silently ignore panel refresh errors
     
     def _sync_refresh_display(self):
-        """Synchronously refresh the Live display - for use from input thread."""
+        """
+        CRITICAL FIX FOR TYPING VISIBILITY: We need to trigger refresh when input changes
+        because auto_refresh=False in Live display (to prevent scrollback pollution).
+        BUT we must throttle refreshes to prevent race conditions and layout corruption.
+        FIXED: Reduced throttling from 50ms to 16ms for real-time typing visibility.
+        """
+        import time
+        
         try:
-            # FIXED: State is now the source of truth - no more buffer corruption
+            # RACE CONDITION FIX: Throttle refreshes to prevent layout corruption
+            current_time = time.time()
+            if not hasattr(self, '_last_manual_refresh_time'):
+                self._last_manual_refresh_time = 0
+            
+            # FIXED: Reduced throttling for real-time typing (16ms = ~60 FPS)
+            min_refresh_interval = 0.016  # 16ms minimum between refreshes (60 FPS max)
+            time_since_last = current_time - self._last_manual_refresh_time
+            
+            # FIXED: Only check for changes if sufficient time has passed OR this is first call
+            current_input = self.state.current_input
+            if not hasattr(self, '_last_input_refresh_content'):
+                self._last_input_refresh_content = ""
+            
+            # FIXED: Always refresh on first call or when input actually changes
+            input_changed = current_input != self._last_input_refresh_content
+            sufficient_time_passed = time_since_last >= min_refresh_interval
+            
+            # FIXED: State is now the source of truth - no buffer corruption
             debug_mode = getattr(self.cli_config, 'debug_mode', False)
             if debug_mode:
-                self._safe_log("debug", f"SYNC_REFRESH: Current state '{self.state.current_input}'")
-                
-            # REMOVED: Pipeline sync that was corrupting the buffer
-            # The pipeline state is now updated in _handle_character_input to match the buffer
-            # This prevents the race condition where stale pipeline state overwrote fresh input
+                self._safe_log("debug", f"SYNC_REFRESH: Current state '{current_input}' (changed: {input_changed}, Δt: {time_since_last:.3f}s)")
             
-            if (hasattr(self, 'live_display') and self.live_display and 
-                sys.stdin.isatty() and sys.stdout.isatty()):
-                # Update input panel content first
-                if self.layout and "input" in self.layout:
-                    input_content = self._create_input_panel()
-                    self.layout["input"].update(
-                        Panel(
-                            input_content,
-                            title="AI Command Composer",
-                            box=box.ROUNDED,
-                            style="cyan"
-                        )
-                    )
+            # FIXED: Skip refresh only if no change AND too recent
+            if not input_changed and not sufficient_time_passed:
+                if debug_mode:
+                    self._safe_log("debug", f"REFRESH_SKIPPED: No change and too soon (Δt: {time_since_last:.3f}s)")
+                return
                 
-                # Manual refresh needed since auto-refresh is disabled for anti-scrollback
-                self.live_display.refresh()
-        except Exception:
-            pass  # Ignore refresh errors - input should still work even if display fails
+            # Check if we have a valid Live display and TTY
+            if not (hasattr(self, 'live_display') and self.live_display and 
+                    sys.stdin.isatty()):
+                if debug_mode:
+                    self._safe_log("debug", "INPUT_REFRESH: Live display or TTY not available")
+                return
+                    
+            if not self.layout:
+                if debug_mode:
+                    self._safe_log("debug", "INPUT_REFRESH: No layout available")
+                return
+            
+            # CRITICAL FIX: Update input panel content safely
+            try:
+                # FIXED: Check if layout has "input" key safely to avoid KeyError
+                try:
+                    _ = self.layout["input"]
+                except (KeyError, ValueError):
+                    if debug_mode:
+                        available_keys = list(self.layout.keys()) if hasattr(self.layout, 'keys') else "No keys method"
+                        self._safe_log("debug", f"INPUT_REFRESH: Layout missing 'input' key. Available: {available_keys}")
+                    return
+                
+                # Create fresh input panel with current state
+                input_panel = self._create_input_panel()
+                
+                # Update layout with new panel
+                self.layout["input"].update(input_panel)
+                
+                # FIXED: Force refresh of Live display
+                if hasattr(self.live_display, 'refresh'):
+                    self.live_display.refresh()
+                    
+                # Update tracking variables
+                self._last_manual_refresh_time = current_time
+                self._last_input_refresh_content = current_input
+                
+                if debug_mode:
+                    self._safe_log("debug", f"INPUT_REFRESH: Successful refresh for input '{current_input}' (length: {len(current_input)})")
+                
+            except Exception as panel_e:
+                # Panel creation/update failed - this is the main source of corruption
+                self._safe_log("error", f"INPUT_REFRESH: Panel update failed: {panel_e}")
+                
+                # Try to recreate layout structure on failure
+                try:
+                    from rich.layout import Layout
+                    if not self.layout or not hasattr(self.layout, 'get'):
+                        self.layout = Layout()
+                        self.layout.split_column(Layout(name="input"))
+                        self._safe_log("info", "INPUT_REFRESH: Layout recreated after failure")
+                except Exception as layout_e:
+                    self._safe_log("error", f"INPUT_REFRESH: Layout recreation failed: {layout_e}")
+                
+        except Exception as e:
+            self._safe_log("error", f"CRITICAL: _sync_refresh_display failed: {e}")
+            import traceback
+            self._safe_log("error", f"Refresh failure traceback:\n{traceback.format_exc()}")  # Ignore refresh errors - input should still work even if display fails  # Ignore refresh errors - input should still work even if display fails  # Ignore refresh errors - input should still work even if display fails
     
     # Event publishing methods
     async def _publish_input_changed(self, current_input: str = None, suggestions: List[str] = None):

@@ -811,6 +811,53 @@ class InputRenderingPipeline:
             'performance_target_ms': self._performance_target_ms,
             'cursor_visible': self._cursor_visible
         }
+    
+    def render_immediate_feedback(self, char: str, current_input: str, cursor_position: int) -> bool:
+        """
+        Immediate feedback for character input - non-async for input thread compatibility.
+        
+        Args:
+            char: Character that was just typed
+            current_input: Full current input string
+            cursor_position: Current cursor position
+            
+        Returns:
+            bool: True if rendering succeeded
+        """
+        try:
+            # For immediate feedback, we don't need complex rendering
+            # Just ensure the input state is updated correctly
+            with self._lock:
+                self._current_state = InputState(
+                    text=current_input,
+                    cursor_position=cursor_position
+                )
+            return True
+        except Exception:
+            return False
+    
+    def render_deletion_feedback(self, current_input: str, cursor_position: int) -> bool:
+        """
+        Immediate feedback for backspace/deletion - non-async for input thread compatibility.
+        
+        Args:
+            current_input: Full current input string after deletion
+            cursor_position: Current cursor position after deletion
+            
+        Returns:
+            bool: True if rendering succeeded
+        """
+        try:
+            # For deletion feedback, we don't need complex rendering
+            # Just ensure the input state is updated correctly
+            with self._lock:
+                self._current_state = InputState(
+                    text=current_input,
+                    cursor_position=cursor_position
+                )
+            return True
+        except Exception:
+            return False
 
 
 # Convenience functions for easy usage

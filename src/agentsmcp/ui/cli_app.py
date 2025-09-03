@@ -989,7 +989,7 @@ async def main():
             setattr(config, key, value)
     
     # Create and start the CLI application
-    app = CLIApp(config)
+    app = CLIApp(config, mode=args.mode)
     
     try:
         result = await app.start()

@@ -78,6 +78,7 @@ class AsyncEventSystem:
         """
         self._handlers: Dict[EventType, List[weakref.ref]] = {}
         self._named_handlers: Dict[str, List[weakref.ref]] = {}  # For string event names
+        self._strong_handler_refs: List[EventHandler] = []  # Keep strong refs to prevent GC
         self._running = False
         self._event_queue = asyncio.Queue()
         self._worker_task: Optional[asyncio.Task] = None
@@ -124,9 +125,18 @@ class AsyncEventSystem:
         if event_type not in self._handlers:
             self._handlers[event_type] = []
         
+        # Keep a strong reference to prevent garbage collection
+        self._strong_handler_refs.append(handler)
+        
         # Use weak reference to prevent memory leaks
         self._handlers[event_type].append(weakref.ref(handler))
-        logger.debug(f"Added handler {handler.name} for {event_type.value}")
+        
+        # Safe handler name extraction for logging
+        handler_name = getattr(handler, 'name', None) or getattr(handler, '__name__', 'unknown_handler')
+        
+        # Safe event type name extraction for logging
+        event_type_name = getattr(event_type, 'value', None) or str(event_type)
+        logger.debug(f"Added handler {handler_name} for {event_type_name}")
     
     async def subscribe(self, event_type: Union[str, EventType], handler_func: Callable):
         """
@@ -155,6 +165,9 @@ class AsyncEventSystem:
                     return False
         
         handler = FunctionEventHandler(handler_func)
+        
+        # Keep a strong reference to prevent garbage collection
+        self._strong_handler_refs.append(handler)
         
         # Handle string event names vs EventType enums
         if isinstance(event_type, str):
@@ -401,6 +414,8 @@ class AsyncEventSystem:
             
             # Clear all handlers
             self._handlers.clear()
+            self._named_handlers.clear()
+            self._strong_handler_refs.clear()
             
             # Reset stats
             self._stats = {
@@ -418,10 +433,14 @@ class AsyncEventSystem:
     
     def get_stats(self) -> Dict[str, Any]:
         """Get event system statistics."""
+        # Count handlers from both enum-based and string-based storage
+        enum_handler_count = sum(len(handlers) for handlers in self._handlers.values())
+        named_handler_count = sum(len(handlers) for handlers in self._named_handlers.values())
+        
         return {
             'running': self._running,
             'queue_size': self._event_queue.qsize(),
-            'handler_count': sum(len(handlers) for handlers in self._handlers.values()),
+            'handler_count': enum_handler_count + named_handler_count,
             'events_processed': self._stats['events_processed'],
             'events_dropped': self._stats['events_dropped'],
             'handler_timeouts': self._stats['handler_timeouts'],
