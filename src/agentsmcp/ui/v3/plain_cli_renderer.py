@@ -96,25 +96,37 @@ class PlainCLIRenderer(UIRenderer):
         self.show_message(error, "error")
     
     def handle_streaming_update(self, content: str) -> None:
-        """Handle real-time streaming updates in plain text."""
+        """Handle real-time streaming updates in plain text - Environment-aware streaming."""
         try:
             # First streaming update - initialize
             if not self._streaming_active:
                 self._streaming_active = True
                 self._current_streaming_content = ""
-                print("🤖 AI (streaming): ", end="", flush=True)
+                
+                if self.capabilities.is_tty:
+                    # TTY environment - we can use carriage returns
+                    print("🤖 AI (streaming): ", end="", flush=True)
+                else:
+                    # Non-TTY environment - use progress dots
+                    print("🤖 AI: ", end="", flush=True)
             
-            # Update content
-            self._current_streaming_content = content
-            
-            # For plain CLI, we'll show a truncated version during streaming
-            if len(content) > 100:
-                display_content = content[:97] + "..."
+            # Update content based on environment
+            if self.capabilities.is_tty:
+                # TTY: Update with carriage return (line overwrite)
+                if len(content) > len(self._current_streaming_content) + 10:  # Throttle updates
+                    self._current_streaming_content = content
+                    
+                    if len(content) > 80:
+                        display_content = content[:77] + "..."
+                    else:
+                        display_content = content
+                    
+                    print(f"\r🤖 AI (streaming): {display_content}", end="", flush=True)
             else:
-                display_content = content
-            
-            # Use carriage return to overwrite the line
-            print(f"\r🤖 AI (streaming): {display_content}", end="", flush=True)
+                # Non-TTY: Show progress dots periodically
+                if len(content) > len(self._current_streaming_content) + 20:  # Less frequent dots
+                    self._current_streaming_content = content
+                    print(".", end="", flush=True)
             
         except Exception as e:
             print(f"\nStreaming update error: {e}")
@@ -124,12 +136,28 @@ class PlainCLIRenderer(UIRenderer):
         try:
             # If we were streaming and this is the final assistant message
             if self._streaming_active and role == "assistant":
-                # Finalize the streaming display
-                print()  # New line to finish streaming
+                # Finalize the streaming display with complete message
+                if self.capabilities.is_tty:
+                    print()  # New line to finish streaming line
+                else:
+                    print(" [Complete]")  # Finish the progress dots
+                
                 self._streaming_active = False
                 self._current_streaming_content = ""
                 
-                # Don't display the message again - it's already been shown during streaming
+                # Display the complete final message
+                role_symbols = {
+                    "user": "👤",
+                    "assistant": "🤖", 
+                    "system": "ℹ️"
+                }
+                symbol = role_symbols.get(role, "❓")
+                role_name = role.title()
+                
+                if timestamp:
+                    print(f"{timestamp} {symbol} {role_name}: {content}")
+                else:
+                    print(f"{symbol} {role_name}: {content}")
                 return
             
             # Format messages based on role with emojis and timestamp

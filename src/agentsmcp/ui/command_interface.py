@@ -2187,7 +2187,7 @@ job monitoring, and system health checks."""
         header = f"Primary: {primary}\n" + ("-" * 60)
         for i, p in enumerate(order, 1):
             if p == 'ollama':
-                status = 'will try (local, no key required, timeout ~120s)'
+                status = 'will try (local, no key required, timeout 5min)'
             else:
                 conf = api_keys.get(p, '')
                 envv = env_map.get(p)
@@ -2213,7 +2213,7 @@ job monitoring, and system health checks."""
             for k, v in timeouts.items():
                 lines.append(f"  - {k}: {v}")
         lines.append("")
-        lines.append("Note: Local Ollama may be slow on first run; timeout is set high by default (~120s). Adjust via ~/.agentsmcp/config.json → timeouts.local_ollama.")
+        lines.append("Note: Local Ollama may be slow on first run; timeout is set to 5 minutes by default. Adjust via ~/.agentsmcp/config.json → timeouts.local_ollama.")
         content = header + "\n" + "\n".join(lines)
         return self.ui.box(content, title="🧭 Provider Fallback Order", style='light')
     

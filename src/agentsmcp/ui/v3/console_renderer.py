@@ -129,18 +129,6 @@ class ConsoleRenderer(UIRenderer):
         except Exception as e:
             print(f"Message display error: {e}")
     
-    def display_chat_message(self, role: str, content: str, timestamp: str = None) -> None:
-        """Display a chat message using console formatter."""
-        try:
-            if not self.console or not self.formatter:
-                return
-            
-            # Use the dedicated formatter for consistent styling
-            self.formatter.format_and_display_message(role, content, timestamp)
-                
-        except Exception as e:
-            print(f"Chat message display error: {e}")
-    
     def show_status(self, status: str) -> None:
         """Show status message with enhanced formatting for detailed progress."""
         try:
@@ -189,35 +177,45 @@ class ConsoleRenderer(UIRenderer):
         self.show_message(error, "error")
     
     def handle_streaming_update(self, content: str) -> None:
-        """Handle real-time streaming updates with Rich formatting."""
+        """Handle real-time streaming updates with Rich formatting - Environment-aware."""
         try:
             if not self.console:
-                # Fallback to plain text
-                print(f"\r🤖 AI: {content[:100]}{'...' if len(content) > 100 else ''}", end="", flush=True)
+                # Fallback to plain text behavior
                 return
             
             # First streaming update - initialize
             if not self._streaming_active:
                 self._streaming_active = True
                 self._current_streaming_content = ""
-                # Show initial streaming indicator
-                streaming_header = Text("🤖 AI (streaming): ", style="bold blue")
-                self.console.print(streaming_header, end="")
+                
+                if self.capabilities.is_tty:
+                    # TTY environment - can use carriage returns
+                    self.console.print("🤖 AI (streaming): ", end="")
+                else:
+                    # Non-TTY environment - use progress dots
+                    self.console.print("🤖 AI: ", end="")
             
-            # Update content
-            self._current_streaming_content = content
-            
-            # For streaming updates, we'll overwrite the current response line
-            # Move cursor to beginning of line and clear it
-            # This is a simplified approach - in a real TUI we'd use proper cursor control
-            if len(content) > 200:  # Truncate very long responses during streaming
-                display_content = content[:197] + "..."
+            # Update display based on environment
+            if self.capabilities.is_tty:
+                # TTY: Update with carriage return (line overwrite)
+                if len(content) > len(self._current_streaming_content) + 10:  # Throttle updates
+                    self._current_streaming_content = content
+                    
+                    if len(content) > 100:
+                        display_content = content[:97] + "..."
+                    else:
+                        display_content = content
+                    
+                    try:
+                        self.console.print(f"\r🤖 AI (streaming): {display_content}", end="")
+                    except Exception:
+                        # Fallback to simple print
+                        print(f"\r🤖 AI (streaming): {display_content}", end="", flush=True)
             else:
-                display_content = content
-            
-            # Use carriage return to overwrite the line
-            streaming_text = Text(f"\r🤖 AI (streaming): {display_content}", style="cyan")
-            self.console.print(streaming_text, end="", markup=False)
+                # Non-TTY: Show progress dots
+                if len(content) > len(self._current_streaming_content) + 20:  # Less frequent
+                    self._current_streaming_content = content
+                    self.console.print(".", end="")
             
         except Exception as e:
             print(f"\nStreaming update error: {e}")
@@ -230,12 +228,17 @@ class ConsoleRenderer(UIRenderer):
             
             # If we were streaming and this is the final assistant message
             if self._streaming_active and role == "assistant":
-                # Finalize the streaming display
-                self.console.print()  # New line to finish streaming
+                # Finalize the streaming display with complete message
+                if self.capabilities.is_tty:
+                    self.console.print()  # New line to finish streaming line
+                else:
+                    self.console.print(" [Complete]")  # Finish the progress dots
+                
                 self._streaming_active = False
                 self._current_streaming_content = ""
                 
-                # Don't display the message again - it's already been shown during streaming
+                # Display the complete final message using formatter
+                self.formatter.format_and_display_message(role, content, timestamp)
                 return
             
             # Use the dedicated formatter for consistent styling

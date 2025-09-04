@@ -104,6 +104,11 @@ class LLMClient:
         self.config = self._load_config(config_path)
         self.model = self.config.get("model", "gpt-oss:20b")
         self.provider = self.config.get("provider", "ollama-turbo")
+        
+        # Preprocessing configuration - separate provider/model for preprocessing
+        self.preprocessing_provider = self.config.get("preprocessing_provider", self.provider)
+        self.preprocessing_model = self.config.get("preprocessing_model", self.model)
+        
         self.conversation_history: List[ConversationMessage] = []
         # Check if MCP orchestration is actually working
         orchestration_working = self._check_mcp_availability()
@@ -212,6 +217,112 @@ class LLMClient:
         mode_desc = "Multi-turn tool execution with tool calling" if self.preprocessing_enabled else "Direct LLM responses only"
         
         return f"🔧 Preprocessing: {status}\n📝 Description: {mode_desc}\n\n💡 Commands:\n  • /preprocessing on - Enable preprocessing\n  • /preprocessing off - Disable preprocessing\n  • /preprocessing toggle - Switch mode"
+
+    def set_preprocessing_provider(self, provider: str) -> str:
+        """Set the provider for preprocessing operations."""
+        # Validate provider
+        valid_providers = ["ollama", "ollama-turbo", "openai", "anthropic", "openrouter"]
+        if provider not in valid_providers:
+            return f"❌ Invalid provider: {provider}\n💡 Valid providers: {', '.join(valid_providers)}"
+        
+        self.preprocessing_provider = provider
+        return f"✅ Preprocessing provider set to: {provider}\n📝 Use '/preprocessing model <model>' to set the preprocessing model\n💡 Use '/preprocessing config' to see current configuration"
+
+    def set_preprocessing_model(self, model: str) -> str:
+        """Set the model for preprocessing operations."""
+        if not model.strip():
+            return "❌ Model name cannot be empty\n💡 Example: /preprocessing model gpt-oss:20b"
+        
+        self.preprocessing_model = model.strip()
+        return f"✅ Preprocessing model set to: {model}\n📝 Provider: {self.preprocessing_provider}\n💡 Use '/preprocessing config' to see full configuration"
+
+    async def optimize_prompt(self, original_prompt: str) -> str:
+        """Use preprocessing provider/model to optimize the user's prompt."""
+        try:
+            # If preprocessing is disabled, return original prompt
+            if not getattr(self, 'preprocessing_enabled', True):
+                return original_prompt
+            
+            # Create optimization prompt
+            optimization_prompt = f"""Please optimize this user prompt to be more specific, detailed, and effective for getting comprehensive AI assistance. Keep the core intent but make it clearer and more actionable:
+
+Original prompt: "{original_prompt}"
+
+Optimized prompt:"""
+            
+            # Save current provider/model
+            original_provider = self.provider
+            original_model = self.model
+            
+            try:
+                # Temporarily switch to preprocessing provider/model
+                self.provider = self.preprocessing_provider
+                self.model = self.preprocessing_model
+                
+                # Get optimized prompt using preprocessing configuration
+                optimized = await self._send_simple_message(optimization_prompt)
+                
+                # Extract just the optimized prompt, remove any extra text
+                lines = optimized.strip().split('\n')
+                # Find the line that looks like the optimized prompt
+                optimized_prompt = original_prompt  # Fallback
+                for line in lines:
+                    line = line.strip()
+                    if line and not line.lower().startswith(('here', 'optimized', 'improved')):
+                        if len(line) > len(original_prompt) * 0.7:  # Should be substantial
+                            optimized_prompt = line
+                            break
+                
+                return optimized_prompt
+                
+            finally:
+                # Restore original provider/model
+                self.provider = original_provider
+                self.model = original_model
+                
+        except Exception as e:
+            logger.error(f"Error optimizing prompt: {e}")
+            return original_prompt  # Fallback to original on error
+
+    def get_preprocessing_config(self) -> str:
+        """Get detailed preprocessing configuration."""
+        config_msg = "🔧 Preprocessing Configuration\n"
+        config_msg += "=" * 35 + "\n\n"
+        
+        # Current settings
+        status = "enabled" if getattr(self, 'preprocessing_enabled', True) else "disabled"
+        config_msg += f"📊 Current Status: {status}\n"
+        config_msg += f"🔄 Preprocessing Provider: {self.preprocessing_provider}\n"
+        config_msg += f"🤖 Preprocessing Model: {self.preprocessing_model}\n\n"
+        
+        # Main conversation settings
+        config_msg += "📱 Main Conversation:\n"
+        config_msg += f"  • Provider: {self.provider}\n"
+        config_msg += f"  • Model: {self.model}\n\n"
+        
+        # Configuration differences
+        if self.preprocessing_provider != self.provider or self.preprocessing_model != self.model:
+            config_msg += "🎯 Using Different Settings for Preprocessing:\n"
+            config_msg += f"  • This allows using fast local models for preprocessing\n"
+            config_msg += f"  • While using powerful cloud models for main responses\n\n"
+        else:
+            config_msg += "🔄 Using Same Settings for Both:\n"
+            config_msg += f"  • Preprocessing and main conversation use identical configuration\n\n"
+        
+        # Commands
+        config_msg += "💡 Commands:\n"
+        config_msg += "  • /preprocessing provider <provider> - Set preprocessing provider\n"
+        config_msg += "  • /preprocessing model <model> - Set preprocessing model\n"
+        config_msg += "  • /preprocessing on/off/toggle - Control preprocessing mode\n"
+        config_msg += "  • /preprocessing status - Show current mode\n\n"
+        
+        # Examples
+        config_msg += "🚀 Example Configurations:\n"
+        config_msg += "  • Fast local preprocessing: ollama + gpt-oss:20b\n"
+        config_msg += "  • Powerful cloud responses: anthropic + claude-3.5-sonnet\n"
+        config_msg += "  • Mixed setup for cost/performance optimization\n"
+        
+        return config_msg
         
     def _load_config(self, config_path: Optional[Path] = None) -> Dict[str, Any]:
         """Load LLM configuration from user's settings."""
@@ -1407,7 +1518,7 @@ Remember: Be truthful about the system's current state rather than creating fals
             # Use detected max tokens
             max_tokens = await self._get_max_tokens_for_api()
             
-            turbo_timeout = self._get_timeout("ollama_turbo", 30.0)
+            turbo_timeout = self._get_timeout("ollama_turbo", 300.0)
             async with httpx.AsyncClient(timeout=turbo_timeout) as client:
                 response = await client.post(
                     "https://ollama.com/api/chat",
@@ -1465,8 +1576,8 @@ Remember: Be truthful about the system's current state rather than creating fals
             # Use detected max tokens
             max_tokens = await self._get_max_tokens_for_api()
             
-            # Local proxy can be a thin shim; allow a bit more time (configurable)
-            proxy_timeout = self._get_timeout("proxy", 60.0)
+            # Local proxy can be a thin shim; allow generous timeout for complex operations (configurable)
+            proxy_timeout = self._get_timeout("proxy", 300.0)
             async with httpx.AsyncClient(timeout=proxy_timeout) as client:
                 response = await client.post(
                     "http://127.0.0.1:11435/api/chat",
@@ -1517,8 +1628,8 @@ Remember: Be truthful about the system's current state rather than creating fals
             # Use detected max tokens
             max_tokens = await self._get_max_tokens_for_api()
             
-            # Local Ollama can cold-start models; allow generous timeout (configurable)
-            local_timeout = self._get_timeout("local_ollama", 120.0)
+            # Local Ollama can cold-start models; allow generous timeout for complex operations (configurable)
+            local_timeout = self._get_timeout("local_ollama", 300.0)
             async with httpx.AsyncClient(timeout=local_timeout) as client:
                 response = await client.post(
                     "http://localhost:11434/api/chat",
@@ -1675,7 +1786,7 @@ Remember: Be truthful about the system's current state rather than creating fals
                 "tools": self.mcp_tools if enable_tools else None,
                 "tool_choice": "auto" if enable_tools else "none",
             }
-            timeout = self._get_timeout("openrouter", 30.0)
+            timeout = self._get_timeout("openrouter", 300.0)
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
             if resp.status_code != 200:
@@ -1732,7 +1843,7 @@ Remember: Be truthful about the system's current state rather than creating fals
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             }
-            timeout = self._get_timeout("anthropic", 30.0)
+            timeout = self._get_timeout("anthropic", 300.0)
             async with httpx.AsyncClient(timeout=timeout) as client:
                 for _ in range(3):
                     payload = {

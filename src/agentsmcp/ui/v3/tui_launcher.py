@@ -23,6 +23,7 @@ class TUILauncher:
         self.running = False
         self._cleanup_called = False  # Guard against multiple cleanup calls
         self._goodbye_shown = False   # Ensure single goodbye message
+        self._streaming_active = False  # Global streaming state tracking
         
     def initialize(self) -> bool:
         """Initialize V3 TUI launcher - PHASE 2 COMPLETE: Rich renderer with proper EOF handling."""
@@ -112,17 +113,66 @@ class TUILauncher:
             traceback.print_exc()
             return False
     def _on_status_change(self, status: str) -> None:
-        """Handle status change from chat engine, including streaming updates and detailed progress."""
+        """Handle status change from chat engine, including streaming updates and orchestration visibility."""
         if status.startswith("streaming_update:"):
-            # Handle streaming response update
+            # Handle streaming response update and track streaming state
             content = status[17:]  # Remove "streaming_update:" prefix
+            self._streaming_active = True
             self._handle_streaming_update(content)
-        elif self.current_renderer and hasattr(self.current_renderer, 'show_status'):
-            # Rich renderer - use Rich status display with enhanced formatting
-            self.current_renderer.show_status(status)
-        elif status and status != "Ready":  # Avoid spamming "Ready" status
-            # Enhanced status display for plain renderer
-            self._display_enhanced_status(status)
+        else:
+            # Check for streaming-related status messages and set streaming state
+            if "streaming" in status.lower() and "response" in status.lower():
+                self._streaming_active = True
+                # Suppress streaming status messages to avoid mixing with content
+                return
+                
+            # Completely suppress ALL status messages during streaming to avoid mixing
+            if self._streaming_active:
+                # Special case: "Ready" means streaming is done
+                if status == "Ready":
+                    # Reset streaming state when processing is complete
+                    # But don't show the "Ready" status to keep output clean
+                    pass  # Don't reset here, let message display handle it
+                # Silently ignore all other status updates while streaming
+                return
+                
+            # Only show status if not streaming
+            if self.current_renderer and hasattr(self.current_renderer, 'show_status'):
+                # Rich renderer - use Rich status display with enhanced formatting
+                enhanced_status = self._enhance_status_with_orchestration(status)
+                self.current_renderer.show_status(enhanced_status)
+            elif status and status != "Ready":  # Avoid spamming "Ready" status
+                # Enhanced status display for plain renderer
+                enhanced_status = self._enhance_status_with_orchestration(status)
+                self._display_enhanced_status(enhanced_status)
+    
+    def _enhance_status_with_orchestration(self, status: str) -> str:
+        """Enhance status messages with orchestration visibility and agent role information."""
+        try:
+            # Detect orchestration patterns and enhance status
+            if "orchestrating" in status.lower() or "coordinating" in status.lower():
+                return f"🎯 Orchestrator: {status}"
+            elif "tool:" in status.lower():
+                # Extract tool name and show active role
+                if "mcp__" in status:
+                    # MCP tool execution
+                    tool_part = status.split("mcp__")[1].split("__")[0] if "mcp__" in status else "unknown"
+                    return f"🛠️ Agent-{tool_part.upper()}: {status}"
+                else:
+                    return f"🛠️ Tool Agent: {status}"
+            elif "analyzing" in status.lower() or "processing" in status.lower():
+                return f"🔍 Analyst Agent: {status}"
+            elif "generating" in status.lower() or "creating" in status.lower():
+                return f"✨ Generator Agent: {status}"
+            elif "streaming" in status.lower():
+                return f"📡 Stream Manager: {status}"
+            else:
+                # Default enhancement with coordinator role
+                return f"🎯 Coordinator: {status}"
+                
+        except Exception:
+            # Fallback to original status
+            return status
     
     def _display_enhanced_status(self, status: str) -> None:
         """Display enhanced status for plain renderer with better formatting."""
@@ -137,7 +187,7 @@ class TUILauncher:
                     print(f"⏳ {message} {timing}")
                 else:
                     print(f"⏳ {status}")
-            elif status.startswith("🔍") or status.startswith("🛠️") or status.startswith("📊"):
+            elif status.startswith("🔍") or status.startswith("🛠️") or status.startswith("📊") or status.startswith("🎯"):
                 # Already has emoji, just display
                 print(f"  {status}")
             else:
@@ -152,6 +202,10 @@ class TUILauncher:
         """Handle new message from chat engine."""
         from datetime import datetime
         timestamp = datetime.now().strftime("[%H:%M:%S]")
+        
+        # If this is an assistant message, streaming is now complete
+        if message.role.value == "assistant":
+            self._streaming_active = False
         
         if self.current_renderer and hasattr(self.current_renderer, 'display_chat_message'):
             # Rich renderer - use Rich message display with timestamp

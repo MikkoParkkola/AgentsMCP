@@ -167,9 +167,39 @@ class ChatEngine:
     async def _handle_chat_message(self, user_input: str) -> bool:
         """Handle regular chat message with streaming support."""
         try:
-            # Add user message to history
-            user_message = self.state.add_message(MessageRole.USER, user_input)
-            self._notify_message(user_message)
+            # Check if preprocessing is enabled and show optimized prompt
+            preprocessing_enabled = getattr(self._llm_client, 'preprocessing_enabled', True) if self._llm_client else True
+            
+            if preprocessing_enabled and self._llm_client:
+                # Add original user message to history
+                user_message = self.state.add_message(MessageRole.USER, user_input)
+                self._notify_message(user_message)
+                
+                # Show status while optimizing
+                self._notify_status("📝 Optimizing prompt...")
+                
+                # Get optimized prompt
+                optimized_prompt = await self._llm_client.optimize_prompt(user_input)
+                
+                # Show optimized prompt if it's different from original
+                if optimized_prompt != user_input and len(optimized_prompt.strip()) > len(user_input.strip()) * 0.8:
+                    # Create and show optimized prompt message
+                    optimized_message = ChatMessage(
+                        role=MessageRole.SYSTEM,
+                        content=f"📝 Optimized prompt: {optimized_prompt}",
+                        timestamp=self._format_timestamp()
+                    )
+                    self._notify_message(optimized_message)
+                    # Use optimized prompt for processing
+                    actual_prompt = optimized_prompt
+                else:
+                    # Use original prompt if optimization didn't improve it
+                    actual_prompt = user_input
+            else:
+                # Preprocessing disabled - just show user message with timestamp
+                user_message = self.state.add_message(MessageRole.USER, user_input)
+                self._notify_message(user_message)
+                actual_prompt = user_input
             
             # Set processing state
             self.state.is_processing = True
@@ -177,10 +207,10 @@ class ChatEngine:
             
             # Check if streaming is available and enabled
             if await self._should_use_streaming():
-                await self._handle_streaming_response(user_input)
+                await self._handle_streaming_response(actual_prompt)
             else:
                 # Fallback to batch processing
-                response = await self._get_ai_response(user_input)
+                response = await self._get_ai_response(actual_prompt)
                 ai_message = self.state.add_message(MessageRole.ASSISTANT, response)
                 self._notify_message(ai_message)
             
@@ -211,21 +241,17 @@ class ChatEngine:
     async def _handle_streaming_response(self, user_input: str) -> None:
         """Handle streaming AI response with real-time updates."""
         try:
-            # Create AI message placeholder
-            ai_message = self.state.add_message(MessageRole.ASSISTANT, "")
-            self._notify_message(ai_message)
-            
-            # Stream response chunks
+            # Stream response chunks directly without creating placeholder message
             full_response = ""
             async for chunk in self._get_ai_response_streaming(user_input):
                 if chunk:  # Only process non-empty chunks
                     full_response += chunk
-                    ai_message.content = full_response
                     # Notify UI of streaming update
                     self._notify_streaming_update(full_response)
             
-            # Final update to ensure complete message is displayed
-            ai_message.content = full_response
+            # After streaming is complete, create final message and display it properly
+            ai_message = self.state.add_message(MessageRole.ASSISTANT, full_response)
+            self._notify_message(ai_message)
             
         except Exception as e:
             # Handle streaming errors
@@ -307,8 +333,14 @@ class ChatEngine:
 • /status - Show basic system status
 • /config - Show detailed LLM configuration
 • /providers - Show LLM provider status
-• /preprocessing [on/off/toggle/status] - Control preprocessing mode
 • /timeouts [set <type> <seconds>|reset|status] - Manage request timeouts
+
+🛠️ **Preprocessing Commands:**
+• /preprocessing on/off/toggle - Control preprocessing mode
+• /preprocessing status - Show current preprocessing status
+• /preprocessing provider <provider> - Set preprocessing provider
+• /preprocessing model <model> - Set preprocessing model  
+• /preprocessing config - Show detailed preprocessing configuration
 
 🚀 **Quick Setup Guide:**
 If you're getting connection errors:
@@ -322,8 +354,16 @@ If you're getting connection errors:
    • OpenRouter: `export OPENROUTER_API_KEY=your_key`
 
 📊 **Preprocessing Modes:**
-• **On** (default): Multi-turn tool execution, slower but more capable
+• **On** (default): Multi-turn tool execution + prompt optimization
 • **Off**: Direct LLM responses only, faster but simpler
+
+🎯 **Advanced Preprocessing:**
+• **Custom Provider/Model**: Use different models for preprocessing vs responses
+• **Example**: Fast local Ollama for preprocessing, powerful Anthropic for responses
+• **Commands**: 
+  - `/preprocessing provider ollama`
+  - `/preprocessing model gpt-oss:20b`
+  - `/preprocessing config`
 
 ⏱️ **Timeout Issues:**
 • Use `/timeouts` to check current timeout settings
@@ -334,6 +374,8 @@ If you're getting connection errors:
 💡 **Tips:**
 • Type `/config` if you see connection errors
 • Use `/preprocessing off` for faster responses
+• Use `/preprocessing config` to see optimization setup
+• Mix providers: fast local preprocessing + powerful cloud responses
 • All environment variables should be set before starting TUI"""
         
         self._notify_message(ChatMessage(
@@ -450,12 +492,12 @@ If you're getting connection errors:
             
             # Timeout configuration
             status_msg += "⏱️ Timeout Settings:\n"
-            status_msg += f"  • Default Request: {self._llm_client._get_timeout('default', 30)}s\n"
-            status_msg += f"  • Anthropic: {self._llm_client._get_timeout('anthropic', 30)}s\n"
-            status_msg += f"  • OpenRouter: {self._llm_client._get_timeout('openrouter', 30)}s\n"
-            status_msg += f"  • Local Ollama: {self._llm_client._get_timeout('local_ollama', 120)}s\n"
-            status_msg += f"  • Ollama Turbo: {self._llm_client._get_timeout('ollama_turbo', 30)}s\n"
-            status_msg += f"  • Proxy: {self._llm_client._get_timeout('proxy', 60)}s\n\n"
+            status_msg += f"  • Default Request: {self._llm_client._get_timeout('default', 300)}s\n"
+            status_msg += f"  • Anthropic: {self._llm_client._get_timeout('anthropic', 300)}s\n"
+            status_msg += f"  • OpenRouter: {self._llm_client._get_timeout('openrouter', 300)}s\n"
+            status_msg += f"  • Local Ollama: {self._llm_client._get_timeout('local_ollama', 300)}s\n"
+            status_msg += f"  • Ollama Turbo: {self._llm_client._get_timeout('ollama_turbo', 300)}s\n"
+            status_msg += f"  • Proxy: {self._llm_client._get_timeout('proxy', 300)}s\n\n"
             
             # Help section
             status_msg += "💡 Commands:\n"
@@ -551,18 +593,47 @@ If you're getting connection errors:
                 self._notify_error("Failed to initialize LLM client")
                 return True
             
-            args = args.strip().lower()
+            args = args.strip()
+            parts = args.split(' ', 1) if args else ['']
+            command = parts[0].lower()
+            arg_value = parts[1] if len(parts) > 1 else ""
             
-            if args == "on":
+            if command == "on":
                 result = self._llm_client.toggle_preprocessing(True)
-            elif args == "off":
+            elif command == "off":
                 result = self._llm_client.toggle_preprocessing(False)
-            elif args == "toggle":
+            elif command == "toggle":
                 result = self._llm_client.toggle_preprocessing()
-            elif args == "status" or args == "":
+            elif command == "status" or command == "":
                 result = self._llm_client.get_preprocessing_status()
+            elif command == "provider":
+                if not arg_value:
+                    result = "❌ Provider name required\n💡 Usage: /preprocessing provider <provider>\n📋 Valid providers: ollama, ollama-turbo, openai, anthropic, openrouter"
+                else:
+                    result = self._llm_client.set_preprocessing_provider(arg_value)
+            elif command == "model":
+                if not arg_value:
+                    result = "❌ Model name required\n💡 Usage: /preprocessing model <model>\n📋 Example: /preprocessing model gpt-oss:20b"
+                else:
+                    result = self._llm_client.set_preprocessing_model(arg_value)
+            elif command == "config":
+                result = self._llm_client.get_preprocessing_config()
             else:
-                result = "❌ Invalid preprocessing command.\n\n💡 Usage:\n  • /preprocessing on - Enable preprocessing\n  • /preprocessing off - Disable preprocessing\n  • /preprocessing toggle - Switch mode\n  • /preprocessing status - Show current mode"
+                result = """❌ Invalid preprocessing command.
+
+💡 Usage:
+  • /preprocessing on - Enable preprocessing
+  • /preprocessing off - Disable preprocessing
+  • /preprocessing toggle - Switch mode
+  • /preprocessing status - Show current mode
+  • /preprocessing provider <provider> - Set preprocessing provider
+  • /preprocessing model <model> - Set preprocessing model
+  • /preprocessing config - Show detailed configuration
+
+🚀 Examples:
+  • /preprocessing provider ollama
+  • /preprocessing model gpt-oss:20b
+  • /preprocessing config"""
             
             self._notify_message(ChatMessage(
                 role=MessageRole.ASSISTANT,
@@ -615,12 +686,12 @@ If you're getting connection errors:
         """Get detailed timeout configuration status."""
         # Get all timeout types from the codebase
         timeout_types = {
-            "default": ("Default Request", 30),
-            "anthropic": ("Anthropic API", 30),
-            "openrouter": ("OpenRouter API", 30),
-            "local_ollama": ("Local Ollama", 120),
-            "ollama_turbo": ("Ollama Turbo", 30),
-            "proxy": ("Proxy Requests", 60)
+            "default": ("Default Request", 300),
+            "anthropic": ("Anthropic API", 300),
+            "openrouter": ("OpenRouter API", 300),
+            "local_ollama": ("Local Ollama", 300),
+            "ollama_turbo": ("Ollama Turbo", 300),
+            "proxy": ("Proxy Requests", 300)
         }
         
         status_msg = "⏱️ Timeout Configuration\n"
@@ -666,7 +737,7 @@ If you're getting connection errors:
             # we inform the user about how timeouts are configured
             return f"""ℹ️ Timeout Configuration Information
 
-Current timeout for '{timeout_type}': {self._llm_client._get_timeout(timeout_type, 30)}s
+Current timeout for '{timeout_type}': {self._llm_client._get_timeout(timeout_type, 300)}s
 Requested value: {timeout_value}s
 
 ⚠️ **Timeout Configuration Method:**
@@ -693,12 +764,12 @@ To modify timeouts, you would need to:
         return """⏱️ Default Timeout Values
 ===============================
 
-  • Default Request: 30s
-  • Anthropic API: 30s
-  • OpenRouter API: 30s
-  • Local Ollama: 120s
-  • Ollama Turbo: 30s
-  • Proxy Requests: 60s
+  • Default Request: 300s (5 minutes)
+  • Anthropic API: 300s (5 minutes)
+  • OpenRouter API: 300s (5 minutes)
+  • Local Ollama: 300s (5 minutes)
+  • Ollama Turbo: 300s (5 minutes)
+  • Proxy Requests: 300s (5 minutes)
 
 ℹ️ **Current vs Default:**
 Use '/timeouts' to see your current configuration.
