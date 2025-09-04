@@ -33,7 +33,9 @@ from ..tools.base_tools import tool_registry
 # Ensure default tools are registered only when client is instantiated
 from ..tools import ensure_default_tools_registered
 # Import project detection utilities for enhanced preprocessing
-from ..utils.project_detector import ProjectDetector, estimate_tokens, format_project_context
+from ..utils.project_detector import ProjectDetector, estimate_tokens, format_project_context, format_structured_project_context
+# Import structured prompt system
+from ..utils.structured_prompts import StructuredPromptBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -275,65 +277,65 @@ class LLMClient:
         return f"✅ Preprocessing model set to: {model}\n📝 Provider: {self.preprocessing_provider}\n💡 Use '/preprocessing config' to see full configuration"
 
     async def optimize_prompt(self, original_prompt: str) -> str:
-        """Use preprocessing provider/model to optimize the user's prompt with enhanced context awareness."""
+        """Use structured prompt engineering to enhance user prompts with professional templates."""
         try:
             # Check if preprocessing should be used based on word threshold
             if not self.should_use_preprocessing(original_prompt):
                 return original_prompt
             
-            # Build comprehensive context for preprocessing
-            preprocessing_context = await self._build_preprocessing_context(original_prompt)
+            # Build structured context for preprocessing
+            context = await self._build_structured_preprocessing_context(original_prompt)
             
-            # Create context-aware optimization prompt
-            optimization_prompt = f"""Please optimize this user prompt to be more specific, detailed, and effective for getting comprehensive AI assistance. Keep the core intent but make it clearer and more actionable.
-
-{preprocessing_context}
-
-USER CURRENT REQUEST:
-"{original_prompt}"
-
-OPTIMIZATION INSTRUCTIONS:
-- Consider the conversation history and project context above
-- Make the prompt more specific and actionable
-- Keep the original intent but add helpful context
-- If the request relates to the current project, reference relevant context
-- Make it clear what specific outcome the user wants
-
-Optimized prompt:"""
+            # Use structured prompt builder to create professional prompt
+            structured_prompt = StructuredPromptBuilder.optimize_prompt_with_structure(
+                original_prompt, context
+            )
             
-            # Save current provider/model
-            original_provider = self.provider
-            original_model = self.model
-            
-            try:
-                # Temporarily switch to preprocessing provider/model
-                self.provider = self.preprocessing_provider
-                self.model = self.preprocessing_model
-                
-                # Get optimized prompt using preprocessing configuration
-                optimized = await self._send_simple_message(optimization_prompt)
-                
-                # Extract just the optimized prompt, remove any extra text
-                lines = optimized.strip().split('\n')
-                # Find the line that looks like the optimized prompt
-                optimized_prompt = original_prompt  # Fallback
-                for line in lines:
-                    line = line.strip()
-                    if line and not line.lower().startswith(('here', 'optimized', 'improved', 'the optimized', 'here is')):
-                        if len(line) > len(original_prompt) * 0.7:  # Should be substantial
-                            optimized_prompt = line
-                            break
-                
-                return optimized_prompt
-                
-            finally:
-                # Restore original provider/model
-                self.provider = original_provider
-                self.model = original_model
+            return structured_prompt
                 
         except Exception as e:
-            logger.error(f"Error optimizing prompt: {e}")
-            return original_prompt  # Fallback to original on error  # Fallback to original on error  # Fallback to original on error
+            logger.error(f"Error optimizing prompt with structured approach: {e}")
+            # Fallback to original prompt on error
+            return original_prompt
+
+    async def _build_structured_preprocessing_context(self, user_input: str) -> Dict[str, Any]:
+        """Build structured context for structured prompt system."""
+        try:
+            context = {}
+            
+            # Add directory/project context if enabled
+            if self.preprocessing_directory_context_enabled:
+                try:
+                    project_context = ProjectDetector.detect_project_context(self.current_working_directory)
+                    structured_context = format_structured_project_context(project_context)
+                    context.update(structured_context)
+                except Exception as e:
+                    logger.warning(f"Failed to get structured project context: {e}")
+            
+            # Add conversation history if enabled
+            if self.preprocessing_history_enabled and self.conversation_history:
+                try:
+                    # Get recent messages for context
+                    recent_messages = list(reversed(self.conversation_history[-5:]))  # Last 5 messages
+                    history_parts = []
+                    
+                    for msg in recent_messages:
+                        role = msg.get('role', 'unknown')
+                        content = msg.get('content', '').strip()
+                        if content and len(content) < 200:  # Keep it concise
+                            history_parts.append(f"**{role.upper()}:** {content}")
+                    
+                    if history_parts:
+                        context['conversation_history'] = "**RECENT CONVERSATION:**\n" + "\n".join(history_parts[-3:])  # Last 3 for readability
+                
+                except Exception as e:
+                    logger.warning(f"Failed to get conversation history: {e}")
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Error building structured preprocessing context: {e}")
+            return {}
 
     async def _build_preprocessing_context(self, user_input: str) -> str:
         """Build comprehensive context for preprocessing including history and directory context."""

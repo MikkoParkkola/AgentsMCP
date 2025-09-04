@@ -69,13 +69,13 @@ class EnhancedAgentsMCPCLI(click.Group):
             return rv
             
         # Command not found - provide intelligent suggestions
-        suggestion_system = get_suggestion_system()
+        suggestion_system = suggestions_module.get_suggestion_system()
         suggestions = suggestion_system.suggest_for_invalid_command(cmd_name)
         
         # Display suggestions before raising error
         if suggestions:
             click.echo()  # Extra spacing
-            display_suggestions(suggestions, "💡 Did you mean?")
+            suggestions_module.display_suggestions(suggestions, "💡 Did you mean?")
         
         raise errors_module.InvalidCommandError(cmd_name)
 
@@ -195,7 +195,7 @@ def with_intelligent_suggestions(func):
                     command_name = ' '.join(reversed(parent_names)) + ' ' + command_name
             
             # Record successful usage and show suggestions
-            suggestion_system = get_suggestion_system()
+            suggestion_system = suggestions_module.get_suggestion_system()
             suggestion_system.record_command_usage(command_name, success=True)
             
             # Show next-step suggestions (but only in advanced mode or if specifically helpful)
@@ -208,14 +208,14 @@ def with_intelligent_suggestions(func):
             if should_show_suggestions:
                 suggestions = suggestion_system.suggest_next_actions(command_name)
                 if suggestions:
-                    display_suggestions(suggestions[:3], "💡 What's next?")  # Limit to 3
+                    suggestions_module.display_suggestions(suggestions[:3], "💡 What's next?")  # Limit to 3
                     
             return result
             
         except Exception as e:
             # Record failed usage
             if 'command_name' in locals():
-                suggestion_system = get_suggestion_system()
+                suggestion_system = suggestions_module.get_suggestion_system()
                 suggestion_system.record_command_usage(command_name, success=False)
             raise
         finally:

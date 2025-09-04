@@ -412,3 +412,48 @@ def format_project_context(project_context: Dict[str, Any]) -> str:
         lines.append(f"- Structure: {project_context['structure_summary']}")
     
     return '\n'.join(lines)
+
+
+def format_structured_project_context(project_context: Dict[str, Any]) -> Dict[str, Any]:
+    """Format project context for structured prompt system."""
+    if "error" in project_context:
+        return {"error": project_context['error']}
+    
+    # Build comprehensive project information
+    project_info_parts = []
+    
+    # Basic project information
+    project_info_parts.append(f"**PROJECT:** {project_context['project_name']} ({project_context['project_type'].title()})")
+    project_info_parts.append(f"**DIRECTORY:** {project_context['directory']}")
+    
+    if project_context.get('description'):
+        project_info_parts.append(f"**DESCRIPTION:** {project_context['description']}")
+    
+    # Technical details
+    tech_details = []
+    if project_context.get('languages'):
+        tech_details.append(f"Languages: {', '.join(project_context['languages'])}")
+    if project_context.get('frameworks'):
+        tech_details.append(f"Frameworks: {', '.join(project_context['frameworks'])}")
+    
+    if tech_details:
+        project_info_parts.append(f"**TECH STACK:** {' | '.join(tech_details)}")
+    
+    # Project structure
+    if project_context.get('structure_summary'):
+        project_info_parts.append(f"**STRUCTURE:** {project_context['structure_summary']}")
+    
+    # Key files (limited for readability)
+    if project_context.get('key_files'):
+        key_files = project_context['key_files'][:8]  # Limit for structured context
+        project_info_parts.append(f"**KEY FILES:** {', '.join(key_files)}")
+    
+    # Return structured format
+    return {
+        "project_info": "\n".join(project_info_parts),
+        "project_type": project_context['project_type'],
+        "project_name": project_context['project_name'],
+        "directory": project_context['directory'],
+        "languages": project_context.get('languages', []),
+        "frameworks": project_context.get('frameworks', [])
+    }
