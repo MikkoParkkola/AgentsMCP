@@ -1180,6 +1180,111 @@ def retrospective_config(show: bool, edit: bool, set_mode: Optional[str], set_in
         except Exception as e:
             raise click.ClickException(f"Failed to export configuration: {e}")
 
+@retrospective_group.command("tui")
+@click.pass_context
+def retrospective_tui(ctx):
+    """🚀 Launch the comprehensive retrospective TUI interface."""
+    
+    try:
+        from agentsmcp.ui.v3.terminal_capabilities import TerminalCapabilities
+        from agentsmcp.ui.v3.retrospective_tui_interface import RetrospectiveTUIInterface
+        
+        click.echo("🚀 Starting Retrospective TUI...")
+        
+        # Detect terminal capabilities
+        capabilities = TerminalCapabilities()
+        
+        # Create and launch retrospective TUI
+        retro_tui = RetrospectiveTUIInterface(capabilities)
+        exit_code = asyncio.run(retro_tui.launch())
+        
+        sys.exit(exit_code)
+        
+    except ImportError as e:
+        click.echo(f"❌ Retrospective TUI not available: {e}")
+        click.echo("💡 Please ensure the ui.v3 module is properly installed.")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"❌ Retrospective TUI failed: {e}")
+        click.echo("💡 Please check your terminal setup and try again")
+        sys.exit(1)
+
+
+@retrospective_group.command("approve")
+@click.option("--tui", is_flag=True, help="Use TUI interface for approvals")
+@click.option("--interactive", is_flag=True, help="Interactive analysis review")
+@click.pass_context
+def retrospective_approve(ctx, tui: bool, interactive: bool):
+    """✅ Interactive approval interface for improvement suggestions."""
+    
+    try:
+        if tui:
+            # Launch TUI-based approval interface
+            from agentsmcp.ui.v3.terminal_capabilities import TerminalCapabilities
+            from agentsmcp.ui.v3.retrospective_tui_interface import RetrospectiveTUIInterface
+            
+            capabilities = TerminalCapabilities()
+            retro_tui = RetrospectiveTUIInterface(capabilities)
+            exit_code = asyncio.run(retro_tui.launch())
+            sys.exit(exit_code)
+        else:
+            # Use existing CLI approval workflow
+            click.echo("📋 Starting CLI-based approval workflow...")
+            # TODO: Integrate with existing approval system
+            click.echo("🔄 This will integrate with the existing approval workflow")
+            
+    except ImportError as e:
+        click.echo(f"❌ Approval interface not available: {e}")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"❌ Approval process failed: {e}")
+        sys.exit(1)
+
+
+@retrospective_group.command("monitor")
+@click.pass_context  
+def retrospective_monitor(ctx):
+    """📈 Implementation monitoring TUI for approved improvements."""
+    
+    try:
+        from agentsmcp.ui.v3.terminal_capabilities import TerminalCapabilities
+        from agentsmcp.ui.v3.progress_monitoring_view import ProgressMonitoringView
+        from rich.console import Console
+        from rich.layout import Layout
+        
+        click.echo("📈 Starting Implementation Monitor...")
+        
+        capabilities = TerminalCapabilities()
+        console = Console(
+            force_terminal=capabilities.is_tty,
+            color_system="auto" if capabilities.supports_colors else None
+        )
+        
+        # Create monitoring interface
+        monitor = ProgressMonitoringView(console)
+        
+        # Mock improvements for demonstration
+        mock_improvements = []  # In real implementation, load from approved improvements
+        
+        if not mock_improvements:
+            console.print("ℹ️  [blue]No active implementations to monitor[/blue]")
+            console.print("💡 Run 'agentsmcp retrospective tui' to approve improvements first")
+            sys.exit(0)
+        
+        # Create layout and run monitoring
+        layout = Layout()
+        progress_dict = {}
+        
+        result = asyncio.run(monitor.monitor_implementation(mock_improvements, layout, progress_dict))
+        sys.exit(0 if result else 1)
+        
+    except ImportError as e:
+        click.echo(f"❌ Monitoring interface not available: {e}")
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"❌ Monitoring failed: {e}")
+        sys.exit(1)
+
 # =====================================================================
 # 6️⃣ SERVER GROUP - Infrastructure & Integration
 # =====================================================================

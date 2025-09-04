@@ -1553,6 +1553,94 @@
       },
       "agent_activities": [],
       "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T23:14:00.952113",
+      "role": "user",
+      "content": "hello",
+      "context_usage": {
+        "tokens": 1,
+        "percentage": 0.00078125
+      },
+      "agent_activities": [],
+      "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T23:14:02.211038",
+      "role": "assistant",
+      "content": "Hello! How can I help you today?",
+      "context_usage": {
+        "tokens": 9,
+        "percentage": 0.007031249999999999
+      },
+      "agent_activities": [],
+      "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T23:15:47.420950",
+      "role": "user",
+      "content": "hello",
+      "context_usage": {
+        "tokens": 10,
+        "percentage": 0.0078125
+      },
+      "agent_activities": [],
+      "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T23:15:48.556145",
+      "role": "assistant",
+      "content": "Hello! How can I help you today?",
+      "context_usage": {
+        "tokens": 18,
+        "percentage": 0.014062499999999999
+      },
+      "agent_activities": [],
+      "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T23:15:56.285797",
+      "role": "user",
+      "content": "what agents do you have?",
+      "context_usage": {
+        "tokens": 24,
+        "percentage": 0.01875
+      },
+      "agent_activities": [],
+      "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T23:16:05.474560",
+      "role": "assistant",
+      "content": "I’m equipped with a few built‑in “agents” (tools) that let me go beyond plain text responses:\n\n| Agent | What it does | When I use it |\n|-------|--------------|---------------|\n| **🖥️ Python** | Runs Python code for calculations, data analysis, simulations, generating plots, etc. | For any numeric or programmatic task that can be handled locally. |\n| **🌐 Browser** | Performs live web searches, fetches pages, and extracts up‑to‑date information. | When the answer requires current news, recent research, or data not in my training set. |\n| **🗂️ Retrieval (internal knowledge)** | Looks up information from the model’s own knowledge base (the training data up to 2024‑06). | For general facts, definitions, historical info, etc., without needing a live search. |\n\nI can combine these tools as needed to answer questions, solve problems, or gather the latest info. Let me know which kind of help you need!",
+      "context_usage": {
+        "tokens": 250,
+        "percentage": 0.1953125
+      },
+      "agent_activities": [],
+      "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T23:16:20.691666",
+      "role": "user",
+      "content": "no, not tools, but AI agents",
+      "context_usage": {
+        "tokens": 257,
+        "percentage": 0.20078125
+      },
+      "agent_activities": [],
+      "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T23:16:32.610406",
+      "role": "assistant",
+      "content": "AI agents are autonomous software entities that use a language model (or other AI model) to **perceive**, **reason**, and **act** in a loop until they achieve a goal.  \n\n| Aspect | AI Agent | Traditional “Tool” |\n|--------|----------|--------------------|\n| **Control flow** | Agent decides next action based on its own internal state and observations. | User or external program explicitly calls a function or API. |\n| **Memory** | Can maintain short‑term or long‑term context (e.g., a plan, past results). | Usually stateless; each call is independent. |\n| **Goal‑oriented** | Starts with a high‑level objective (e.g., “plan a weekend trip”) and breaks it into sub‑tasks. | Performs a single, well‑defined operation (e.g., “translate this text”). |\n| **Multi‑step reasoning** | Executes a chain of actions, possibly looping, revising, or backtracking. | Typically one‑shot; any sequencing must be orchestrated externally. |\n| **Autonomy** | Can trigger external services (APIs, browsers, databases) without further user prompts. | Requires the user or orchestrator to invoke each service. |\n| **Examples** | - ReAct agents (reason‑act‑observe loop) <br> - LangChain agents (tool‑using agents) <br> - Auto‑GPT / Baby‑AGI (self‑prompting loops) <br> - OpenAI function‑calling agents that decide when to call a function | - A translation API <br> - Sentiment‑analysis model <br> - Image‑generation endpoint |\n\n### How an AI agent typically works\n1. **Input** – receives a user query or an environment observation.  \n2. **Reason** – uses prompting patterns (e.g., “You are an assistant that can call APIs”) to generate a plan or decide which tool/action to use.  \n3. **Act** – invokes the chosen tool/API, performs a computation, or updates internal state.  \n4. **Observe** – reads the tool’s output, updates its context, and loops back to step 2 until the goal is satisfied or a stop condition is met.\n\n### When to prefer an agent over a simple tool\n- **Complex tasks** that need several dependent steps (e.g., “research a topic, summarize findings, and draft an email”).  \n- **Dynamic decision making** where the next action depends on intermediate results.  \n- **Long‑running workflows** that benefit from maintaining state across calls.  \n\n### Quick starter (pseudo‑code)\n\n```python\nfrom langchain.agents import initialize_agent, Tool\n\ndef search_web(query): ...\ndef get_weather(location): ...\n\ntools = [\n    Tool(name=\"WebSearch\", func=search_web, description=\"Search the internet.\"),\n    Tool(name=\"Weather\", func=get_weather, description=\"Get current weather.\")\n]\n\nagent = initialize_agent(\n    tools,\n    llm,                     # e.g., OpenAIChat()\n    agent_type=\"zero-shot-react-description\"\n)\n\nresult = agent.run(\"Plan a picnic in Paris for next Saturday.\")\nprint(result)\n```\n\nThe agent decides whether to call `WebSearch` to find venues, `Weather` to check forecasts, and then composes the final plan—all without the user manually orchestrating each step.",
+      "context_usage": {
+        "tokens": 998,
+        "percentage": 0.7796875
+      },
+      "agent_activities": [],
+      "metadata": {}
     }
   ],
   "context_compactions": [],

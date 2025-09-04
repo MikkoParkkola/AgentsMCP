@@ -25,7 +25,6 @@ import json
 import copy
 
 from ..retrospective import ActionPoint, ComprehensiveRetrospectiveReport
-from ..agents import AgentLoader, BaseAgent
 from ..config import Config
 from .models import TaskResult
 
@@ -210,8 +209,8 @@ class AgentFeedbackSystem:
         self.pending_modifications: Dict[str, AgentModification] = {}
         self.enhancement_recommendations: List[EnhancementRecommendation] = []
         
-        # Agent management
-        self.agent_loader = AgentLoader()
+        # Agent management - use lazy loading to avoid circular imports
+        self.agent_loader = None  # Will be initialized lazily
         self.monitored_agents: Set[str] = set()
         self.agent_configurations: Dict[str, Dict[str, Any]] = {}
         
@@ -227,6 +226,13 @@ class AgentFeedbackSystem:
         self._start_background_tasks()
         
         logger.info("AgentFeedbackSystem initialized")
+
+    def _get_agent_loader(self):
+        """Get the agent loader, initializing it lazily to avoid circular imports."""
+        if self.agent_loader is None:
+            from ..agents import AgentLoader
+            self.agent_loader = AgentLoader()
+        return self.agent_loader
 
     def _start_background_tasks(self):
         """Start background monitoring and enhancement tasks."""
@@ -779,7 +785,7 @@ class AgentFeedbackSystem:
         
         try:
             # Use agent loader to update role
-            await self.agent_loader.modify_agent_role(
+            await self._get_agent_loader().modify_agent_role(
                 modification.agent_id, 
                 modification.changes
             )
@@ -795,7 +801,7 @@ class AgentFeedbackSystem:
         
         try:
             # Use agent loader to add capability
-            await self.agent_loader.add_agent_capability(
+            await self._get_agent_loader().add_agent_capability(
                 modification.agent_id,
                 modification.changes
             )
@@ -816,7 +822,7 @@ class AgentFeedbackSystem:
                 config.update(modification.changes)
                 
                 # Apply to actual agent
-                await self.agent_loader.update_agent_parameters(
+                await self._get_agent_loader().update_agent_parameters(
                     modification.agent_id,
                     modification.changes
                 )
@@ -832,7 +838,7 @@ class AgentFeedbackSystem:
         
         try:
             # Apply specialization changes
-            await self.agent_loader.specialize_agent(
+            await self._get_agent_loader().specialize_agent(
                 modification.agent_id,
                 modification.changes
             )
@@ -845,7 +851,7 @@ class AgentFeedbackSystem:
         """Apply performance optimization modification."""
         try:
             # Apply performance optimizations
-            await self.agent_loader.optimize_agent_performance(
+            await self._get_agent_loader().optimize_agent_performance(
                 modification.agent_id,
                 modification.changes
             )
@@ -863,7 +869,7 @@ class AgentFeedbackSystem:
     async def _restore_agent_configuration(self, agent_id: str, previous_config: Dict[str, Any]):
         """Restore agent configuration from previous state."""
         self.agent_configurations[agent_id] = copy.deepcopy(previous_config)
-        await self.agent_loader.restore_agent_configuration(agent_id, previous_config)
+        await self._get_agent_loader().restore_agent_configuration(agent_id, previous_config)
 
     async def _convert_action_point_to_modifications(
         self, 

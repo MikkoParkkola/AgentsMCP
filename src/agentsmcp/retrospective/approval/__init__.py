@@ -56,6 +56,8 @@ Usage Examples:
     ```
 """
 
+from typing import Optional
+
 # Core data structures
 from .approval_decision import (
     ApprovalStatus,

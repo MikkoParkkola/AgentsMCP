@@ -7,9 +7,11 @@ easy modification and extension of agent capabilities.
 """
 
 from .agent_loader import AgentLoader, AgentDescription, get_agent_loader
+from .base import BaseAgent
 
 __all__ = [
     "AgentLoader",
     "AgentDescription", 
-    "get_agent_loader"
+    "get_agent_loader",
+    "BaseAgent"
 ]
