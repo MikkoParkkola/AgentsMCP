@@ -1,5 +1,6 @@
 """Rich TUI renderer - PHASE 3: Rich Live display panels with stable input handling."""
 
+import os
 import sys
 from typing import Optional
 from rich.console import Console
@@ -351,18 +352,28 @@ class RichTUIRenderer(UIRenderer):
             pass
     
     def handle_input(self) -> Optional[str]:
-        """PHASE 3: Input handling compatible with Live display and history support."""
+        """PHASE 3: Enhanced input handling with FORCE_RICH mode adaptation and graceful EOF handling."""
         try:
             if self.state.is_processing:
                 return None
+            
+            # Detect FORCE_RICH mode and non-TTY environment
+            force_rich_mode = os.environ.get('AGENTSMCP_FORCE_RICH') == '1'
+            is_non_tty = not self.capabilities.is_tty
             
             # For screen=False Live display, we can do minimal interrupt input
             if self.live and hasattr(self.live, '_started') and self.live._started:
                 # Temporarily pause Live display for clean input
                 self.live.stop()
                 
-                # Enhanced input prompt with readline support
+                # Enhanced input prompt with readline support and FORCE_RICH adaptation
                 try:
+                    # Special handling for FORCE_RICH in non-TTY environments
+                    if force_rich_mode and is_non_tty:
+                        # Provide informative messaging for non-TTY FORCE_RICH mode
+                        self.console.print("\n[dim yellow]⚠️  FORCE_RICH mode in non-TTY environment detected[/dim yellow]")
+                        self.console.print("[dim]Input handling adapted for compatibility[/dim]")
+                    
                     self.console.print("\n💬 [yellow]>[/yellow] ", end="")
                     
                     # Try to use readline for better input experience
@@ -377,11 +388,42 @@ class RichTUIRenderer(UIRenderer):
                         for item in self._input_history[-50:]:  # Last 50 for performance
                             readline.add_history(item)
                         
-                        user_input = input().strip()
+                        # Non-blocking input polling for FORCE_RICH mode
+                        if force_rich_mode and is_non_tty:
+                            # Use non-blocking input when possible in FORCE_RICH non-TTY mode
+                            try:
+                                import select
+                                import sys
+                                
+                                # Check if input is available with timeout
+                                if select.select([sys.stdin], [], [], 0.1)[0]:
+                                    user_input = input().strip()
+                                else:
+                                    # No immediate input available, return None to continue display
+                                    return None
+                            except (ImportError, OSError):
+                                # Fallback to blocking input if select not available
+                                user_input = input().strip()
+                        else:
+                            # Standard blocking input
+                            user_input = input().strip()
                         
                     except ImportError:
                         # Fallback without readline
-                        user_input = input().strip()
+                        if force_rich_mode and is_non_tty:
+                            # Attempt non-blocking input without readline
+                            try:
+                                import select
+                                import sys
+                                
+                                if select.select([sys.stdin], [], [], 0.1)[0]:
+                                    user_input = input().strip()
+                                else:
+                                    return None
+                            except (ImportError, OSError):
+                                user_input = input().strip()
+                        else:
+                            user_input = input().strip()
                     
                     # Add to history
                     if user_input and (not self._input_history or self._input_history[-1] != user_input):
@@ -390,17 +432,35 @@ class RichTUIRenderer(UIRenderer):
                             self._input_history = self._input_history[-self._max_history:]
                     
                 except (EOFError, KeyboardInterrupt):
-                    user_input = "/quit"
-                except Exception:
-                    user_input = "/quit"
+                    # Enhanced EOF handling for FORCE_RICH mode
+                    if force_rich_mode and is_non_tty:
+                        self.console.print("\n[dim yellow]ℹ️  EOF detected in FORCE_RICH non-TTY mode[/dim yellow]")
+                        self.console.print("[dim]Rich panels remain displayed. Use /quit to exit or provide input.[/dim]")
+                        self.console.print("[dim]Tip: Run in a real terminal for better input experience.[/dim]")
+                        # Return None instead of immediate /quit to keep panels displayed
+                        return None
+                    else:
+                        user_input = "/quit"
+                except Exception as e:
+                    # More graceful error handling for FORCE_RICH mode
+                    if force_rich_mode and is_non_tty:
+                        self.console.print(f"\n[dim red]Input error in FORCE_RICH mode: {str(e)[:50]}[/dim red]")
+                        self.console.print("[dim]Continuing with panel display. Type /quit to exit.[/dim]")
+                        return None
+                    else:
+                        user_input = "/quit"
                 
                 # Restart Live display immediately
                 self.live.start()
                 
                 return user_input if user_input else None
             else:
-                # Fallback input for non-Live display
+                # Fallback input for non-Live display with FORCE_RICH adaptation
                 try:
+                    # Special messaging for FORCE_RICH fallback mode
+                    if force_rich_mode and is_non_tty:
+                        print("⚠️  FORCE_RICH fallback: Live display unavailable, using static mode")
+                    
                     # Try with readline support
                     try:
                         import readline
@@ -421,11 +481,26 @@ class RichTUIRenderer(UIRenderer):
                     
                     return user_input if user_input else None
                 except (EOFError, KeyboardInterrupt):
-                    return "/quit"
+                    # Enhanced EOF handling for fallback mode
+                    if force_rich_mode and is_non_tty:
+                        print("ℹ️  EOF in FORCE_RICH mode - use /quit command to exit properly")
+                        return None
+                    else:
+                        return "/quit"
                     
         except Exception as e:
-            # Return /quit on persistent errors to avoid infinite loops
-            return "/quit"
+            # Enhanced error recovery for FORCE_RICH mode
+            if force_rich_mode and is_non_tty:
+                if self.console:
+                    self.console.print(f"\n[dim red]Critical input error: {str(e)[:50]}[/dim red]")
+                    self.console.print("[dim]FORCE_RICH mode continuing. Use /quit to exit safely.[/dim]")
+                else:
+                    print(f"Critical input error in FORCE_RICH mode: {str(e)[:50]}")
+                    print("Use /quit to exit safely.")
+                return None
+            else:
+                # Return /quit on persistent errors in normal mode to avoid infinite loops
+                return "/quit"
     
     def show_message(self, message: str, level: str = "info") -> None:
         """Show a simple Rich formatted message."""

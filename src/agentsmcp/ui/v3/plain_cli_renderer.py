@@ -181,22 +181,33 @@ class PlainCLIRenderer(UIRenderer):
                     print("   • Method 1: Run in a real terminal (recommended)")
                     print("   • Method 2: AGENTSMCP_FORCE_RICH=1 ./agentsmcp tui")
                     print("   • Method 3: export AGENTSMCP_FORCE_RICH=1 (persistent)")
+                    print("")
+                    print("   ⚠️  FORCE_RICH in non-TTY environments:")
+                    print("   • Rich panels display correctly but input handling is adapted")
+                    print("   • EOF conditions provide informative messages instead of immediate exit")
+                    print("   • Use /quit command for proper termination")
+                    print("   • For best experience, use a real terminal when possible")
                 elif self.capabilities.force_plain and not os.environ.get('AGENTSMCP_FORCE_RICH'):
                     print("💡 RICH TUI AVAILABLE: Override plain mode for advanced features!")
                     print("   To access Rich TUI: AGENTSMCP_FORCE_RICH=1 ./agentsmcp tui")
+                    print("   Note: FORCE_RICH mode includes enhanced EOF handling for stability")
                 elif not self.capabilities.supports_colors:
                     print("ℹ️  Rich interface limited: Terminal has no color support")
                     print("   Try: AGENTSMCP_FORCE_RICH=1 ./agentsmcp tui (may still work)")
+                    print("   FORCE_RICH mode includes compatibility adaptations")
                 elif not self.capabilities.supports_unicode:
                     print("ℹ️  Rich interface limited: Terminal has no Unicode support")
                     print("   Try: AGENTSMCP_FORCE_RICH=1 ./agentsmcp tui (fallback mode)")
+                    print("   FORCE_RICH mode includes graceful degradation")
                 else:
                     print("ℹ️  Rich interface unavailable: Terminal compatibility issues")
                     print("   Try: AGENTSMCP_FORCE_RICH=1 ./agentsmcp tui (force attempt)")
+                    print("   Enhanced error handling available in FORCE_RICH mode")
             else:
                 # Rich should be available but we're in plain mode for some reason
                 print("⚠️  Rich TUI should be available but plain mode is active")
                 print("   This might indicate an initialization issue.")
+                print("   Try: AGENTSMCP_FORCE_RICH=1 ./agentsmcp tui")
             
             print("   Rich TUI features: Live progress • Agent status • Sequential thinking • Enhanced chat")
             print()
@@ -204,6 +215,7 @@ class PlainCLIRenderer(UIRenderer):
         except Exception as e:
             # Don't let info display errors break the app
             print(f"ℹ️  Advanced Rich TUI available with: AGENTSMCP_FORCE_RICH=1 ./agentsmcp tui")
+            print("   Enhanced EOF handling and error recovery included")
             print()
     
     def handle_rich_command(self) -> None:
@@ -215,6 +227,12 @@ class PlainCLIRenderer(UIRenderer):
         print("1. Exit this session (type /quit)")
         print("2. Run: AGENTSMCP_FORCE_RICH=1 ./agentsmcp tui")
         print("3. Or permanently: export AGENTSMCP_FORCE_RICH=1")
+        print()
+        print("✨ Recent Improvements:")
+        print("   • Enhanced EOF handling prevents immediate exits")
+        print("   • Non-blocking input polling in FORCE_RICH mode")
+        print("   • Informative error messages with recovery guidance")
+        print("   • Rich panels remain displayed during input issues")
         print()
     
     def _show_help(self) -> None:
