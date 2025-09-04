@@ -114,7 +114,7 @@ class RichTUIRenderer(UIRenderer):
         )
     
     def _update_conversation_panel(self) -> None:
-        """Update the conversation panel with message history."""
+        """Update the conversation panel with message history and markdown rendering."""
         if not self._conversation_history:
             content = Text("No messages yet. Start a conversation!", style="dim italic")
         else:
@@ -129,18 +129,64 @@ class RichTUIRenderer(UIRenderer):
             # The Rich layout automatically handles the separation between conversation and status panels
             conversation_width = int(console_width * 0.75) - 6  # Panel borders + padding
             
-            for msg in recent_messages:
-                # Handle multiline messages properly by splitting on existing newlines first
-                msg_lines = msg.split('\n')
-                for msg_line in msg_lines:
-                    # Wrap long lines at word boundaries
-                    if len(msg_line) > conversation_width:
-                        import textwrap
-                        wrapped_lines = textwrap.wrap(msg_line, width=conversation_width)
-                        for line in wrapped_lines:
-                            content.append(f"{line}\n")
+            for msg_data in recent_messages:
+                # Handle both old string format and new structured format
+                if isinstance(msg_data, dict):
+                    role = msg_data.get("role", "unknown")
+                    msg_content = msg_data.get("content", "")
+                    time_prefix = msg_data.get("timestamp", "")
+                    is_markdown = msg_data.get("is_markdown", False)
+                    
+                    # Format role header with timestamp
+                    if role == "user":
+                        role_header = f"{time_prefix}[bold blue]👤 You:[/bold blue] "
+                    elif role == "assistant":
+                        role_header = f"{time_prefix}[bold green]🤖 AI:[/bold green] "
+                    elif role == "system":
+                        role_header = f"{time_prefix}[dim yellow]ℹ️ System:[/dim yellow] "
                     else:
-                        content.append(f"{msg_line}\n")
+                        role_header = f"{time_prefix}[dim]❓ {role}:[/dim] "
+                    
+                    # Add role header
+                    content.append(role_header)
+                    
+                    # For AI responses with markdown, render simplified text version
+                    if role == "assistant" and is_markdown:
+                        # Convert markdown to plain text for the panel (simplified)
+                        # Remove basic markdown formatting for panel display
+                        import re
+                        plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', msg_content)  # Bold
+                        plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)     # Italic
+                        plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)      # Code
+                        plain_content = re.sub(r'#{1,6}\s+(.*)', r'\1', plain_content)  # Headers
+                        plain_content = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', plain_content)  # Links
+                        msg_content = plain_content
+                    
+                    # Handle line wrapping for the message content
+                    msg_lines = msg_content.split('\n')
+                    for msg_line in msg_lines:
+                        if len(msg_line) > conversation_width:
+                            import textwrap
+                            wrapped_lines = textwrap.wrap(msg_line, width=conversation_width)
+                            for line in wrapped_lines:
+                                content.append(f"{line}\n")
+                        else:
+                            content.append(f"{msg_line}\n")
+                    
+                else:
+                    # Handle legacy string format for backward compatibility
+                    msg_lines = msg_data.split('\n')
+                    for msg_line in msg_lines:
+                        if len(msg_line) > conversation_width:
+                            import textwrap
+                            wrapped_lines = textwrap.wrap(msg_line, width=conversation_width)
+                            for line in wrapped_lines:
+                                content.append(f"{line}\n")
+                        else:
+                            content.append(f"{msg_line}\n")
+                
+                # Add separator between messages
+                content.append("\n")
         
         self.layout["conversation"].update(
             Panel(content, title="[bold white]Conversation", border_style="green", padding=(0, 1))
@@ -300,7 +346,7 @@ class RichTUIRenderer(UIRenderer):
             print(f"Message display error: {e}")
     
     def display_chat_message(self, role: str, content: str, timestamp: str = None) -> None:
-        """Display a chat message with appropriate formatting."""
+        """Display a chat message with appropriate formatting and markdown rendering."""
         try:
             if not self.console:
                 return
@@ -308,22 +354,36 @@ class RichTUIRenderer(UIRenderer):
             # Add timestamp prefix if provided
             time_prefix = f"{timestamp} " if timestamp else ""
             
-            # Format message for display
-            if role == "user":
-                formatted_msg = f"{time_prefix}👤 You: {content}"
-                display_msg = f"{time_prefix}[bold blue]👤 You:[/bold blue] {content}"
-            elif role == "assistant":
-                formatted_msg = f"{time_prefix}🤖 AI: {content}"
-                display_msg = f"{time_prefix}[bold green]🤖 AI:[/bold green] {content}"
-            elif role == "system":
-                formatted_msg = f"{time_prefix}ℹ️ System: {content}"
-                display_msg = f"{time_prefix}[dim yellow]ℹ️ System:[/dim yellow] {content}"
-            else:
-                formatted_msg = f"{time_prefix}❓ {role}: {content}"
-                display_msg = f"{time_prefix}[dim]❓ {role}:[/dim] {content}"
+            # Create structured message for conversation history
+            message_data = {
+                "role": role,
+                "content": content,
+                "timestamp": time_prefix,
+                "is_markdown": role == "assistant"  # Only render markdown for AI responses
+            }
             
             # Add to conversation history for Live display panels
-            self._conversation_history.append(formatted_msg)
+            self._conversation_history.append(message_data)
+            
+            # Format message for display with markdown support for AI responses
+            if role == "user":
+                display_msg = f"{time_prefix}[bold blue]👤 You:[/bold blue] {content}"
+            elif role == "assistant":
+                # For AI responses, use Rich Markdown rendering
+                from rich.markdown import Markdown
+                try:
+                    # Create markdown object for rich rendering
+                    markdown_content = Markdown(content)
+                    # Create display message with markdown
+                    display_msg = f"{time_prefix}[bold green]🤖 AI:[/bold green]"
+                except Exception:
+                    # Fallback to plain text if markdown parsing fails
+                    display_msg = f"{time_prefix}[bold green]🤖 AI:[/bold green] {content}"
+                    markdown_content = None
+            elif role == "system":
+                display_msg = f"{time_prefix}[dim yellow]ℹ️ System:[/dim yellow] {content}"
+            else:
+                display_msg = f"{time_prefix}[dim]❓ {role}:[/dim] {content}"
             
             # If Live display is active, ONLY update panels - no direct console.print
             if self.live and hasattr(self.live, '_started') and self.live._started:
@@ -332,7 +392,14 @@ class RichTUIRenderer(UIRenderer):
                 self._update_conversation_panel()
             else:
                 # Direct console print ONLY if Live display not active
-                self.console.print(display_msg)
+                if role == "assistant" and 'markdown_content' in locals() and markdown_content:
+                    # Print role header first
+                    self.console.print(display_msg)
+                    # Then print markdown content with proper indentation
+                    self.console.print(markdown_content, style="", crop=False)
+                else:
+                    # Standard console print for non-markdown content
+                    self.console.print(display_msg)
                 
         except Exception as e:
             print(f"Chat message display error: {e}")
