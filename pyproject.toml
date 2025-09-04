@@ -36,6 +36,11 @@ dev = [
 rag = [
     "sentence-transformers",
     "numpy",
+    # SECURITY: Pin PyTorch ecosystem to exclude vulnerable 2.5.1 (CVE-2025-32434 RCE)
+    # Use 2.5.0 as the safe version before the vulnerability was introduced
+    "torch>=2.5.0,<2.5.1",
+    "torchvision>=0.20.0,<0.21.0",  # Compatible with torch 2.5.0
+    "torchaudio>=2.5.0,<2.5.1",    # Match torch version for consistency
 ]
 ui = [
     # UI relies on rich (core); keep extra placeholder for clarity
