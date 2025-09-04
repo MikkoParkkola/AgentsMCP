@@ -78,7 +78,10 @@ class TUILauncher:
             self.progressive_renderer.register_renderer("plain", PlainCLIRenderer, priority=10)
             
             if self.capabilities.is_tty and self.capabilities.supports_rich:
-                # Console renderer available
+                # Rich TUI renderer available - import and register
+                from .rich_tui_renderer import RichTUIRenderer
+                self.progressive_renderer.register_renderer("rich_tui", RichTUIRenderer, priority=30)
+                # Console renderer as fallback
                 self.progressive_renderer.register_renderer("console", ConsoleRenderer, priority=20)
             else:
                 # Console renderer not available
@@ -105,6 +108,9 @@ class TUILauncher:
                 error_callback=self._on_error
             )
             
+            # Initialize progress display integration
+            self._setup_progress_display_integration()
+            
             return True
             
         except Exception as e:
@@ -113,6 +119,24 @@ class TUILauncher:
             print("🔍 V3: Full initialization error traceback:")
             traceback.print_exc()
             return False
+    
+    def _setup_progress_display_integration(self) -> None:
+        """Set up progress display integration for enhanced agent visibility."""
+        try:
+            # Connect task tracker's progress display to the Rich TUI renderer
+            if (self.chat_engine and hasattr(self.chat_engine, 'task_tracker') and
+                self.chat_engine.task_tracker and self.chat_engine.task_tracker.progress_display):
+                
+                # If using Rich TUI renderer, connect the progress display
+                if (self.current_renderer and hasattr(self.current_renderer, 'set_progress_display')):
+                    self.current_renderer.set_progress_display(self.chat_engine.task_tracker.progress_display)
+                    
+                    # Start Live display if it's a Rich TUI renderer
+                    if hasattr(self.current_renderer, 'start_live_display'):
+                        self.current_renderer.start_live_display()
+                        
+        except Exception as e:
+            print(f"Progress display integration warning: {e}")
     def _on_status_change(self, status: str) -> None:
         """Handle status change from chat engine, including streaming updates and orchestration visibility."""
         if status.startswith("streaming_update:"):
@@ -207,8 +231,15 @@ class TUILauncher:
             print(f"⏳ {status}")
     
     def _on_new_message(self, message: ChatMessage) -> None:
-        """Handle new message from chat engine."""
+        """Handle new message from chat engine - suppress user message echo to avoid duplication."""
         from datetime import datetime
+        
+        # SKIP displaying user messages to prevent echo duplication 
+        # (user already sees their input when typing)
+        if message.role.value == "user":
+            return
+        
+        # Only display assistant and system messages
         timestamp = datetime.now().strftime("[%H:%M:%S]")
         
         if self.current_renderer and hasattr(self.current_renderer, 'display_chat_message'):
@@ -216,7 +247,7 @@ class TUILauncher:
             self.current_renderer.display_chat_message(message.role.value, message.content, timestamp)
         else:
             # Plain renderer fallback with timestamp
-            role_symbols = {"user": "👤", "assistant": "🤖", "system": "ℹ️"}
+            role_symbols = {"assistant": "🤖", "system": "ℹ️"}
             symbol = role_symbols.get(message.role.value, "❓")
             print(f"{timestamp} {symbol} {message.role.value.title()}: {message.content}")
     
@@ -253,6 +284,10 @@ class TUILauncher:
             # Show welcome message using the renderer
             if self.current_renderer and hasattr(self.current_renderer, 'show_welcome'):
                 self.current_renderer.show_welcome()
+            
+            # Start Live display for Rich TUI renderer (if not already started)
+            if hasattr(self.current_renderer, 'start_live_display'):
+                self.current_renderer.start_live_display()
             
             if self.current_renderer and hasattr(self.current_renderer, 'show_ready'):
                 self.current_renderer.show_ready()

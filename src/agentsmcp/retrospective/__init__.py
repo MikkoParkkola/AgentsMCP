@@ -5,12 +5,16 @@ This package provides comprehensive retrospective capabilities including:
 - Agile coach comprehensive analysis and pattern recognition
 - Orchestrator enforcement system for action point implementation
 - Seamless integration with existing agent lifecycle
+- High-performance execution log capture infrastructure
 
 Main Components:
 - IndividualRetrospectiveFramework: Individual agent retrospectives
 - AgileCoachAnalyzer: Comprehensive multi-agent analysis
 - OrchestratorEnforcementSystem: Action point enforcement and validation
 - EnhancedRetrospectiveIntegration: Integration layer for existing systems
+- ExecutionLogCapture: High-performance agent execution logging
+- LogStore: Centralized log management and storage
+- PIISanitizer: Privacy-compliant data sanitization
 """
 
 from .individual_framework import IndividualRetrospectiveFramework
@@ -18,6 +22,15 @@ from .coach_analyzer import AgileCoachAnalyzer
 from .enforcement import OrchestratorEnforcementSystem
 from .integration_layer import EnhancedRetrospectiveIntegration
 from .self_assessment import AgentSelfAssessmentSystem
+
+# Execution logging infrastructure
+from .logging import (
+    ExecutionLogCapture, PIISanitizer, SanitizationLevel,
+    AgentEvent, EventType, EventSeverity,
+    LoggingConfig, RetentionPolicy,
+    StorageAdapter, FileStorageAdapter, DatabaseStorageAdapter, MemoryStorageAdapter
+)
+from .storage import LogStore, LogStoreStatus, LogStoreStats
 
 from .data_models import (
     # Core retrospective models
@@ -58,6 +71,27 @@ __all__ = [
     "OrchestratorEnforcementSystem",
     "EnhancedRetrospectiveIntegration",
     "AgentSelfAssessmentSystem",
+    
+    # Execution logging infrastructure
+    "ExecutionLogCapture",
+    "PIISanitizer",
+    "SanitizationLevel",
+    "LogStore",
+    "LogStoreStatus",
+    "LogStoreStats",
+    
+    # Event and logging schemas
+    "AgentEvent",
+    "EventType",
+    "EventSeverity", 
+    "LoggingConfig",
+    "RetentionPolicy",
+    
+    # Storage adapters
+    "StorageAdapter",
+    "FileStorageAdapter",
+    "DatabaseStorageAdapter", 
+    "MemoryStorageAdapter",
     
     # Data models
     "IndividualRetrospective",

@@ -120,9 +120,9 @@ class SelfImprovementAction:
 @dataclass
 class IndividualRetrospective:
     """Complete individual agent retrospective data."""
-    retrospective_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     agent_role: RoleName
     task_id: str
+    retrospective_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     retrospective_type: RetrospectiveType = RetrospectiveType.INDIVIDUAL
     
     # Core retrospective data
@@ -258,8 +258,8 @@ class ImplementationRoadmap:
 @dataclass
 class ComprehensiveRetrospectiveReport:
     """Complete comprehensive retrospective report from agile coach analysis."""
-    report_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     task_id: str
+    report_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     retrospective_type: RetrospectiveType = RetrospectiveType.COMPREHENSIVE
     
     # Input data summary
@@ -310,6 +310,18 @@ class IndividualRetrospectiveConfig:
 
 
 @dataclass
+class OrchestratorConfig:
+    """Configuration for orchestrator enforcement system."""
+    enforcement_enabled: bool = True
+    auto_implement_safe_actions: bool = False
+    max_concurrent_implementations: int = 3
+    implementation_timeout_seconds: int = 300
+    require_manual_approval_for_critical: bool = True
+    rollback_enabled: bool = True
+    validation_required: bool = True
+
+
+@dataclass
 class EnforcementPlan:
     """Plan for enforcing action point implementation."""
     plan_id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -323,8 +335,8 @@ class EnforcementPlan:
 @dataclass
 class ValidationCriterion:
     """Criteria for validating action point completion."""
-    criterion_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     action_id: str
+    criterion_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     description: str = ""
     validation_type: str = ""  # automated, manual, metric-based
     validation_script: Optional[str] = None

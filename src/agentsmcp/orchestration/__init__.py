@@ -50,6 +50,22 @@ from .resource_manager import ResourceManager, ResourceType
 # Execution engine
 from .execution_engine import ExecutionEngine, TeamExecution, ExecutionStatus, ExecutionProgress
 
+# Process Coach Orchestration System (Mandatory Leadership Components)
+from .process_coach import ProcessCoach, ProcessCoachConfig
+from .retrospective_orchestrator import RetrospectiveOrchestrator
+from .improvement_coordinator import ImprovementCoordinator, ActionPoint
+from .agent_feedback_system import AgentFeedbackSystem
+from .continuous_improvement_engine import ContinuousImprovementEngine
+from .coach_integration import (
+    CoachIntegrationManager,
+    SystemIntegration,
+    IntegrationEvent,
+    IntegrationType,
+    get_integration_manager,
+    initialize_coach_integration,
+    shutdown_coach_integration
+)
+
 # AGENTS.md v2 Two-Tier Architecture
 try:
     from .coordinator import MainCoordinator
@@ -89,6 +105,22 @@ __all__ = [
     "DynamicOrchestrator",
     "AgileCoachIntegration",
     "RetrospectiveEngine",
+    
+    # Process Coach Orchestration System (Mandatory Leadership Components)
+    "ProcessCoach",
+    "ProcessCoachConfig",
+    "RetrospectiveOrchestrator",
+    "ImprovementCoordinator",
+    "ActionPoint",
+    "AgentFeedbackSystem", 
+    "ContinuousImprovementEngine",
+    "CoachIntegrationManager",
+    "SystemIntegration",
+    "IntegrationEvent",
+    "IntegrationType",
+    "get_integration_manager",
+    "initialize_coach_integration",
+    "shutdown_coach_integration",
     
     # Data models and types
     "TaskClassification",
@@ -143,5 +175,7 @@ COMPATIBILITY_NOTES = {
     "run_team_legacy": "Original team runner API maintained for backward compatibility",
     "dynamic_orchestration": "New v3 API with intelligent task classification and team composition",
     "agile_integration": "Built-in agile coach for planning and retrospectives", 
-    "continuous_improvement": "Automated retrospectives and performance optimization"
+    "continuous_improvement": "Automated retrospectives and performance optimization",
+    "process_coach_orchestration": "Mandatory leadership system for self-improvement loops and agent enhancement",
+    "coach_integration": "Seamless integration with chat engine, UI components, and monitoring systems"
 }

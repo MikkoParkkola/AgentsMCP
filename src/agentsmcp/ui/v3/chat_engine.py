@@ -216,6 +216,11 @@ class ChatEngine:
             return "LLM client not available"
             
         try:
+            # Start overall task tracking
+            overall_task_id = f"preprocessed_{int(time.time())}"
+            if self.task_tracker:
+                self.task_tracker.start_task(overall_task_id, "Enhanced Processing", estimated_duration_ms=45000)
+            
             # Phase 1: Sequential thinking and planning
             self._notify_status("🧠 Analyzing request and planning approach...")
             
@@ -243,6 +248,11 @@ class ChatEngine:
                 # Create enhanced prompt with planning context and agent delegation results
                 enhanced_prompt = self._create_enhanced_prompt_with_agents(user_input, planning_result, agent_delegation_result, history_context, directory_context)
                 response = await self._llm_client.send_message(enhanced_prompt)
+                
+                # Complete the overall task
+                if self.task_tracker:
+                    self.task_tracker.complete_task()
+                
                 return response
             finally:
                 # Restore original preprocessing setting
@@ -386,6 +396,8 @@ class ChatEngine:
             if any(keyword in query_lower for keyword in ['security', 'vulnerability', 'authentication', 'authorization', 'encrypt']):
                 delegation_opportunities.append("security-engineer")
             
+            self._notify_status(f"🎯 Identified {len(delegation_opportunities)} potential specialist agents...")
+            
             # UI/UX related queries  
             if any(keyword in query_lower for keyword in ['ui', 'ux', 'interface', 'user experience', 'design', 'frontend']):
                 delegation_opportunities.append("ux-ui-designer")
@@ -410,12 +422,43 @@ class ChatEngine:
             if any(keyword in query_lower for keyword in ['process', 'agile', 'scrum', 'workflow', 'team', 'retrospective']):
                 delegation_opportunities.append("agile-coach")
             
-            # If delegation opportunities found, simulate specialist input
+            # If delegation opportunities found, simulate specialist input with progress tracking
             if delegation_opportunities:
                 self._notify_status(f"🤝 Consulting {len(delegation_opportunities)} specialist agent(s)...")
                 
+                # Add agents to task tracker
                 for agent_type in delegation_opportunities:
-                    agent_insights.append(f"[{agent_type}] Specialist perspective: Query relates to {agent_type.replace('-', ' ')} domain - will provide domain-specific expertise")
+                    if self.task_tracker:
+                        self.task_tracker.add_agent(agent_type, agent_type.replace('-', ' ').title(), estimated_duration_ms=8000)
+                        self.task_tracker.start_agent(agent_type, "Analyzing domain expertise")
+                
+                # Process each agent with progress updates
+                for i, agent_type in enumerate(delegation_opportunities):
+                    try:
+                        self._notify_status(f"🛠️ Agent-{agent_type.upper()}: Processing query...")
+                        
+                        # Update progress
+                        if self.task_tracker:
+                            self.task_tracker.update_agent_progress(agent_type, 30.0, "Analyzing query")
+                        
+                        # Simulate processing
+                        await asyncio.sleep(0.3)
+                        
+                        if self.task_tracker:
+                            self.task_tracker.update_agent_progress(agent_type, 70.0, "Generating insights")
+                        
+                        agent_insights.append(f"[{agent_type}] Specialist perspective: Query relates to {agent_type.replace('-', ' ')} domain - will provide domain-specific expertise")
+                        
+                        # Complete the agent
+                        if self.task_tracker:
+                            self.task_tracker.complete_agent(agent_type)
+                        
+                        await asyncio.sleep(0.2)
+                        
+                    except Exception as e:
+                        self.logger.error(f"Error with agent {agent_type}: {e}")
+                        if self.task_tracker:
+                            self.task_tracker.set_agent_error(agent_type, f"Error: {str(e)[:30]}")
                 
                 return f"Agent delegation analysis: {len(delegation_opportunities)} specialists consulted.\n" + "\n".join(agent_insights)
             else:

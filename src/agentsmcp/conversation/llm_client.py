@@ -702,6 +702,16 @@ class LLMClient:
             return os.getenv(env_var)
         return None
 
+    def _get_api_key_env_name(self, provider: str) -> str:
+        """Get the correct environment variable name for API key error messages."""
+        env_map = {
+            "ollama-turbo": "OLLAMA_API_KEY",
+            "openai": "OPENAI_API_KEY", 
+            "openrouter": "OPENROUTER_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+        }
+        return env_map.get(provider, f"{provider.upper()}_API_KEY")
+
     def _get_timeout(self, key: str, default: float) -> float:
         """Get per-endpoint timeout seconds from config.timeouts, or default."""
         try:
@@ -1087,7 +1097,7 @@ Remember: Be truthful about the system's current state rather than creating fals
                         if self.provider == "ollama":
                             return "❌ Ollama not running. Start it with: ollama serve"
                         else:
-                            return f"❌ {self.provider.upper()} API key not configured. Set {self.provider.upper()}_API_KEY environment variable"
+                            return f"❌ {self.provider.upper()} API key not configured. Set {self._get_api_key_env_name(self.provider)} environment variable"
                     else:
                         return f"❌ Failed to connect to {self.provider}. Check your network connection and try again."
                 

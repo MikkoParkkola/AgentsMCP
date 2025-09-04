@@ -8,7 +8,10 @@ from rich.layout import Layout
 from rich.panel import Panel
 from rich.text import Text
 from rich.table import Table
+from rich.markdown import Markdown
+from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn, TimeElapsedColumn
 from .ui_renderer_base import UIRenderer
+from .progress_display import ProgressDisplay, AgentStatus, AgentProgress
 
 
 class RichTUIRenderer(UIRenderer):
@@ -25,6 +28,9 @@ class RichTUIRenderer(UIRenderer):
         # Input history management
         self._input_history = []
         self._max_history = 1000  # Track current status
+        # Progress display integration
+        self._progress_display = None
+        self._agent_progress = {}  # Store agent progress information
         
     def initialize(self) -> bool:
         """PHASE 3: Initialize Rich TUI with Live display panels."""
@@ -150,28 +156,42 @@ class RichTUIRenderer(UIRenderer):
                     # Add role header
                     content.append(role_header)
                     
-                    # For AI responses with markdown, render simplified text version
+                    # For AI responses with markdown, preserve markdown for rendering
                     if role == "assistant" and is_markdown:
-                        # Convert markdown to plain text for the panel (simplified)
-                        # Remove basic markdown formatting for panel display
-                        import re
-                        plain_content = re.sub(r'\*\*(.*?)\*\*', r'\1', msg_content)  # Bold
-                        plain_content = re.sub(r'\*(.*?)\*', r'\1', plain_content)     # Italic
-                        plain_content = re.sub(r'`(.*?)`', r'\1', plain_content)      # Code
-                        plain_content = re.sub(r'#{1,6}\s+(.*)', r'\1', plain_content)  # Headers
-                        plain_content = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', plain_content)  # Links
-                        msg_content = plain_content
+                        # Keep markdown content for Rich rendering
+                        # We'll render it properly in the display below
+                        pass
                     
-                    # Handle line wrapping for the message content
-                    msg_lines = msg_content.split('\n')
-                    for msg_line in msg_lines:
-                        if len(msg_line) > conversation_width:
-                            import textwrap
-                            wrapped_lines = textwrap.wrap(msg_line, width=conversation_width)
-                            for line in wrapped_lines:
-                                content.append(f"{line}\n")
-                        else:
-                            content.append(f"{msg_line}\n")
+                    # Handle markdown content vs plain text content
+                    if role == "assistant" and is_markdown:
+                        try:
+                            # Create markdown object for Rich rendering with width constraints
+                            markdown_obj = Markdown(msg_content)
+                            # Add the markdown object directly to content
+                            content.append(markdown_obj)
+                            content.append("\n")
+                        except Exception:
+                            # Fallback to plain text if markdown parsing fails
+                            msg_lines = msg_content.split('\n')
+                            for msg_line in msg_lines:
+                                if len(msg_line) > conversation_width:
+                                    import textwrap
+                                    wrapped_lines = textwrap.wrap(msg_line, width=conversation_width)
+                                    for line in wrapped_lines:
+                                        content.append(f"{line}\n")
+                                else:
+                                    content.append(f"{msg_line}\n")
+                    else:
+                        # Handle regular text content with line wrapping
+                        msg_lines = msg_content.split('\n')
+                        for msg_line in msg_lines:
+                            if len(msg_line) > conversation_width:
+                                import textwrap
+                                wrapped_lines = textwrap.wrap(msg_line, width=conversation_width)
+                                for line in wrapped_lines:
+                                    content.append(f"{line}\n")
+                            else:
+                                content.append(f"{msg_line}\n")
                     
                 else:
                     # Handle legacy string format for backward compatibility
@@ -193,19 +213,99 @@ class RichTUIRenderer(UIRenderer):
         )
     
     def _update_status_panel(self) -> None:
-        """Update the status panel with current information."""
-        # Create a simple status table
-        table = Table.grid(padding=(0, 1))
-        table.add_column("Label", style="bold cyan")
-        table.add_column("Value", style="white")
-        
-        table.add_row("Status:", self._current_status)
-        table.add_row("Messages:", str(len(self._conversation_history)))
-        table.add_row("Time:", Text.from_markup("[dim]Live[/dim]"))
-        
-        self.layout["status"].update(
-            Panel(table, title="[bold white]Status", border_style="yellow", padding=(0, 1))
-        )
+        """Update the status panel with comprehensive progress information."""
+        try:
+            # Create a comprehensive status display with progress information
+            from rich.console import Group
+            from datetime import datetime
+            
+            elements = []
+            
+            # Basic status information
+            status_table = Table.grid(padding=(0, 0))
+            status_table.add_column("Label", style="bold cyan")
+            status_table.add_column("Value", style="white")
+            
+            status_table.add_row("Status:", self._current_status)
+            status_table.add_row("Messages:", str(len(self._conversation_history)))
+            status_table.add_row("Time:", datetime.now().strftime("%H:%M:%S"))
+            
+            elements.append(status_table)
+            
+            # Agent progress section if we have progress data
+            if self._agent_progress:
+                elements.append(Text("\n"))  # Separator
+                elements.append(Text("🤖 Agents:", style="bold yellow"))
+                
+                for agent_id, progress_info in self._agent_progress.items():
+                    agent_name = progress_info.get("name", agent_id)[:12]  # Truncate long names
+                    status = progress_info.get("status", "unknown")
+                    percentage = progress_info.get("progress", 0.0)
+                    current_step = progress_info.get("step", "")
+                    elapsed_ms = progress_info.get("elapsed_ms", 0)
+                    
+                    # Status icon
+                    status_icons = {
+                        "idle": "⏸️", "planning": "🎯", "in_progress": "🟢",
+                        "waiting": "🟡", "blocked": "🔴", "completed": "✅", "error": "❌"
+                    }
+                    icon = status_icons.get(status, "❓")
+                    
+                    # Progress bar (simplified for small space)
+                    bar_width = 8
+                    filled = int((percentage / 100) * bar_width)
+                    bar = "█" * filled + "░" * (bar_width - filled)
+                    
+                    # Time formatting
+                    time_str = ""
+                    if elapsed_ms > 0:
+                        if elapsed_ms < 1000:
+                            time_str = f"({elapsed_ms}ms)"
+                        elif elapsed_ms < 60000:
+                            time_str = f"({elapsed_ms/1000:.1f}s)"
+                        else:
+                            time_str = f"({elapsed_ms//60000}m{(elapsed_ms%60000)//1000}s)"
+                    
+                    # Agent line
+                    agent_line = f"{icon} {agent_name:<8} [{bar}] {percentage:3.0f}% {time_str}"
+                    elements.append(Text(agent_line, style="dim" if status == "completed" else "white"))
+                    
+                    # Current step (if any and space allows)
+                    if current_step and len(current_step) > 0:
+                        step_text = current_step[:20] + "..." if len(current_step) > 20 else current_step
+                        elements.append(Text(f"    └─ {step_text}", style="dim cyan"))
+            
+            # Task timing information from progress display
+            if self._progress_display:
+                try:
+                    status_line = self._progress_display.format_status_line()
+                    if status_line and status_line.strip():
+                        elements.append(Text("\n"))  # Separator
+                        elements.append(Text("⏱️ Task Status:", style="bold green"))
+                        elements.append(Text(status_line, style="dim white"))
+                except Exception:
+                    pass  # Ignore progress display errors
+            
+            # Combine all elements into a group
+            status_content = Group(*elements)
+            
+            self.layout["status"].update(
+                Panel(status_content, title="[bold white]System Status", border_style="yellow", padding=(0, 1))
+            )
+            
+        except Exception as e:
+            # Fallback to simple status panel
+            table = Table.grid(padding=(0, 1))
+            table.add_column("Label", style="bold cyan")
+            table.add_column("Value", style="white")
+            
+            table.add_row("Status:", self._current_status)
+            table.add_row("Messages:", str(len(self._conversation_history)))
+            table.add_row("Error:", f"Status update failed: {str(e)[:20]}")
+            
+            self.layout["status"].update(
+                Panel(table, title="[bold white]Status", border_style="red", padding=(0, 1))
+            )
     
     def _update_footer(self) -> None:
         """Update the footer panel with help text."""
@@ -370,7 +470,6 @@ class RichTUIRenderer(UIRenderer):
                 display_msg = f"{time_prefix}[bold blue]👤 You:[/bold blue] {content}"
             elif role == "assistant":
                 # For AI responses, use Rich Markdown rendering
-                from rich.markdown import Markdown
                 try:
                     # Create markdown object for rich rendering
                     markdown_content = Markdown(content)
@@ -405,10 +504,13 @@ class RichTUIRenderer(UIRenderer):
             print(f"Chat message display error: {e}")
     
     def show_status(self, status: str) -> None:
-        """Show status message and update Live display."""
+        """Show status message and update Live display with enhanced agent tracking."""
         try:
             # Update internal status
             self._current_status = status
+            
+            # Parse status for agent progress information
+            self._parse_agent_status_update(status)
             
             # Update Live display panels if active
             if self.live and self.layout:
@@ -422,6 +524,74 @@ class RichTUIRenderer(UIRenderer):
         except Exception as e:
             print(f"Status display error: {e}")
     
+    def _parse_agent_status_update(self, status: str) -> None:
+        """Parse status messages for agent progress information."""
+        try:
+            # Extract agent information from enhanced status messages
+            if "Agent-" in status or "🛠️" in status or "🔍" in status or "✨" in status:
+                # Try to extract agent name and progress info
+                import re
+                
+                # Look for agent names in status
+                agent_match = re.search(r'Agent-([A-Z]+)', status)
+                if agent_match:
+                    agent_name = agent_match.group(1).lower()
+                    
+                    # Update or create agent progress entry
+                    if agent_name not in self._agent_progress:
+                        self._agent_progress[agent_name] = {
+                            "name": agent_name,
+                            "status": "in_progress",
+                            "progress": 10.0,
+                            "step": "",
+                            "elapsed_ms": 0
+                        }
+                    
+                    # Update progress based on status content
+                    progress_info = self._agent_progress[agent_name]
+                    
+                    if "executing" in status.lower():
+                        progress_info["progress"] = min(progress_info["progress"] + 20, 90)
+                        progress_info["step"] = "Executing"
+                    elif "analyzing" in status.lower():
+                        progress_info["progress"] = min(progress_info["progress"] + 15, 70)
+                        progress_info["step"] = "Analyzing"
+                    elif "completed" in status.lower() or "done" in status.lower():
+                        progress_info["progress"] = 100.0
+                        progress_info["status"] = "completed"
+                        progress_info["step"] = "Completed"
+                    elif "error" in status.lower() or "failed" in status.lower():
+                        progress_info["status"] = "error"
+                        progress_info["step"] = "Error"
+            
+            # Clean up old completed agents after some time
+            self._cleanup_old_agent_progress()
+            
+        except Exception:
+            pass  # Ignore parsing errors
+    
+    def _cleanup_old_agent_progress(self) -> None:
+        """Clean up old completed agent progress entries."""
+        try:
+            import time
+            current_time = time.time()
+            
+            # Remove completed agents after 30 seconds
+            agents_to_remove = []
+            for agent_id, progress_info in self._agent_progress.items():
+                if progress_info.get("status") == "completed":
+                    # Add cleanup timestamp if not present
+                    if "cleanup_time" not in progress_info:
+                        progress_info["cleanup_time"] = current_time
+                    elif current_time - progress_info["cleanup_time"] > 30:
+                        agents_to_remove.append(agent_id)
+            
+            for agent_id in agents_to_remove:
+                del self._agent_progress[agent_id]
+                
+        except Exception:
+            pass  # Ignore cleanup errors
+    
     def show_thinking(self) -> None:
         """Show thinking indicator."""
         try:
@@ -434,5 +604,44 @@ class RichTUIRenderer(UIRenderer):
         """Show an error in Rich TUI."""
         self.show_message(error, "error")
     
-    # PHASE 2: Remove all complex layout and message rendering
-    # We're using simple console.print() instead
+    def set_progress_display(self, progress_display: ProgressDisplay) -> None:
+        """Set the progress display system for enhanced agent status tracking."""
+        self._progress_display = progress_display
+        
+        # Set up callback for progress updates
+        if progress_display:
+            progress_display.update_callback = self._on_progress_update
+    
+    def _on_progress_update(self, progress_text: str) -> None:
+        """Handle progress updates from the progress display system."""
+        try:
+            # Update status panel when progress changes
+            if self.live and self.layout:
+                self._update_status_panel()
+        except Exception:
+            pass  # Ignore progress update errors
+    
+    def update_agent_progress(self, agent_id: str, progress: float, step: str = None, status: str = "in_progress") -> None:
+        """Update progress for a specific agent."""
+        try:
+            if agent_id not in self._agent_progress:
+                self._agent_progress[agent_id] = {
+                    "name": agent_id,
+                    "status": status,
+                    "progress": 0.0,
+                    "step": "",
+                    "elapsed_ms": 0
+                }
+            
+            progress_info = self._agent_progress[agent_id]
+            progress_info["progress"] = min(100.0, max(0.0, progress))
+            progress_info["status"] = status
+            if step:
+                progress_info["step"] = step
+            
+            # Update the status panel
+            if self.live and self.layout:
+                self._update_status_panel()
+                
+        except Exception as e:
+            print(f"Agent progress update error: {e}")

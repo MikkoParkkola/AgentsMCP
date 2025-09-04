@@ -58,6 +58,16 @@ def get_version():
     """Get version lazily."""
     return agentsmcp_module.__version__
 
+# Global variables for server management
+PID_FILE = None
+
+def get_pid_file_lazy():
+    """Get PID file lazily."""
+    global PID_FILE
+    if PID_FILE is None:
+        PID_FILE = get_pid_file()
+    return PID_FILE
+
 
 class EnhancedAgentsMCPCLI(click.Group):
     """Enhanced Click group with friendly error handling and suggestions."""
@@ -146,14 +156,17 @@ def handle_common_errors(func):
         try:
             return func(*args, **kwargs)
         except FileNotFoundError as e:
+            from .errors import ResourceNotFoundError
             raise ResourceNotFoundError(f"file {e.filename}")
         except OSError as e:
             if e.errno == 13:  # Permission denied
                 raise PermissionError(str(e.filename or "resource"))
             raise
         except ConnectionError as e:
+            from .errors import NetworkError
             raise NetworkError(str(e))
         except ImportError as e:
+            from .errors import ConfigError
             if "cost" in str(e).lower():
                 raise ConfigError("Cost tracking features not available. Install with: pip install agentsmcp[cost]")
             elif "rag" in str(e).lower():
@@ -228,10 +241,12 @@ def with_intelligent_suggestions(func):
 def validate_task_input(task: str) -> str:
     """Validate and clean task input."""
     if not task or not task.strip():
+        from .errors import MissingParameterError
         raise MissingParameterError("task", "run simple")
     
     task = task.strip()
     if len(task) > 1000:
+        from .errors import TaskExecutionError
         raise TaskExecutionError("Task description too long (max 1000 characters)")
     
     return task
@@ -246,6 +261,7 @@ def check_config_exists(config_path: Optional[str] = None) -> Path:
         path = default_user_config_path()
     
     if not path.exists():
+        from .errors import ConfigError
         raise ConfigError(
             f"Configuration file not found at {path}. "
             "Run 'agentsmcp init setup' to create one."
@@ -539,10 +555,13 @@ def run_simple(ctx, task: str, complexity: str, cost_sensitive: bool, timeout: i
         except Exception as e:
             await orchestrator.cleanup()
             if "authentication" in str(e).lower() or "api" in str(e).lower():
+                from .errors import AuthenticationError
                 raise AuthenticationError("AI service")
             elif "rate" in str(e).lower() or "limit" in str(e).lower():
+                from .errors import RateLimitError
                 raise RateLimitError("AI service")
             else:
+                from .errors import TaskExecutionError
                 raise TaskExecutionError(str(e), task)
         
         print(f"\n✅ Status: {result['status']}")
@@ -552,6 +571,7 @@ def run_simple(ctx, task: str, complexity: str, cost_sensitive: bool, timeout: i
         else:
             error_msg = result.get('error', 'Unknown error')
             await orchestrator.cleanup()
+            from .errors import TaskExecutionError
             raise TaskExecutionError(error_msg, task)
         
         await orchestrator.cleanup()
@@ -688,18 +708,19 @@ def monitor_dashboard(port: int, bind: str, open_browser: bool, advanced: bool =
             webbrowser.open(f"http://{bind}:{port}")
         return
     
-    if PID_FILE.exists():
+    pid_file = get_pid_file_lazy()
+    if pid_file.exists():
         click.echo("🔄 Stopping existing server...")
         try:
-            with open(PID_FILE) as f:
+            with open(pid_file) as f:
                 pid = int(f.read().strip())
             os.kill(pid, signal.SIGTERM)
             time.sleep(1)  # Allow graceful shutdown
         except (OSError, ValueError, ProcessLookupError):
             pass
         
-        if PID_FILE.exists():
-            PID_FILE.unlink()
+        if pid_file.exists():
+            pid_file.unlink()
     
     # Start server
     click.echo(f"🚀 Starting dashboard server on {bind}:{port}")
@@ -711,7 +732,8 @@ def monitor_dashboard(port: int, bind: str, open_browser: bool, advanced: bool =
         import uvicorn
         
         # Store PID for management
-        with open(PID_FILE, 'w') as f:
+        pid_file = get_pid_file_lazy()
+        with open(pid_file, 'w') as f:
             f.write(str(os.getpid()))
         
         # Open browser after a delay if requested
@@ -732,8 +754,9 @@ def monitor_dashboard(port: int, bind: str, open_browser: bool, advanced: bool =
     except Exception as e:
         click.echo(f"❌ Failed to start dashboard: {e}")
     finally:
-        if PID_FILE.exists():
-            PID_FILE.unlink()
+        pid_file = get_pid_file_lazy()
+        if pid_file.exists():
+            pid_file.unlink()
 
 @monitor_group.command("budget")
 @click.argument("amount", type=float, required=False)
@@ -910,7 +933,255 @@ def knowledge_optimize(cost_target: Optional[float], performance_min: Optional[i
         click.echo(f"   🎯 Cost-effectiveness: {ratio:.1f}")
 
 # =====================================================================
-# 5️⃣ SERVER GROUP - Infrastructure & Integration
+# 5️⃣ RETROSPECTIVE GROUP - Self-Improvement & Learning
+# =====================================================================
+
+@main.group(name="retrospective")
+def retrospective_group():
+    """Retrospective analysis and self-improvement workflows."""
+    pass
+
+@retrospective_group.command("analyze")
+@click.option("--approval-mode", type=click.Choice(["auto", "manual", "interactive", "batch_approve", "batch_reject"]),
+              default="auto", help="Approval mode for improvements (default: auto)")
+@click.option("--approval-interface", type=click.Choice(["cli", "tui", "auto"]),
+              default="auto", help="Interface type for approvals (default: auto)")
+@click.option("--approval-timeout", type=int, default=300,
+              help="Timeout for approval decisions in seconds (default: 300)")
+@click.option("--safety-validation", is_flag=True,
+              help="Enable safety framework validation")
+@click.option("--config", help="Path to approval configuration file")
+@click.pass_context
+@with_intelligent_suggestions
+def retrospective_analyze(ctx, approval_mode: str, approval_interface: str, approval_timeout: int,
+                         safety_validation: bool, config: Optional[str]):
+    """Run retrospective analysis and generate improvement recommendations."""
+    
+    # Import approval system modules
+    from agentsmcp.retrospective.approval import (
+        update_config_from_cli_args, ApprovalOrchestrator, ApprovalMode, ApprovalInterfaceType
+    )
+    
+    try:
+        # Update approval configuration with CLI arguments
+        approval_config = update_config_from_cli_args(
+            approval_mode=approval_mode,
+            approval_interface=approval_interface,
+            approval_timeout=approval_timeout,
+            safety_validation=safety_validation
+        )
+        
+        if config:
+            # Load custom config file if provided
+            from pathlib import Path
+            config_path = Path(config)
+            if not config_path.exists():
+                raise click.ClickException(f"Configuration file not found: {config}")
+            approval_config = approval_config.load_from_file(config_path)
+        
+        # Create approval orchestrator
+        orchestrator = ApprovalOrchestrator(approval_config=approval_config)
+        
+        click.echo("🔍 Starting retrospective analysis...")
+        click.echo(f"📋 Approval mode: {approval_config.approval_mode.value}")
+        click.echo(f"🖥️  Interface: {approval_config.interface_type.value}")
+        click.echo(f"⏱️  Timeout: {approval_config.timeouts.approval_timeout}s")
+        click.echo(f"🔒 Safety validation: {'enabled' if approval_config.require_safety_validation else 'disabled'}")
+        
+        async def run_analysis():
+            # TODO: Integrate with existing retrospective engine
+            # For now, create mock improvements for demonstration
+            from agentsmcp.retrospective.approval import ApprovalStatus
+            from dataclasses import dataclass
+            from typing import List
+            from enum import Enum
+            
+            # Mock improvement structure (replace with actual retrospective engine integration)
+            @dataclass
+            class MockImprovement:
+                id: str
+                title: str
+                description: str
+                category: str
+                priority: str
+                estimated_impact: str
+                
+            mock_improvements = [
+                MockImprovement("1", "Optimize query performance", "Improve database query efficiency", "performance", "high", "significant"),
+                MockImprovement("2", "Add input validation", "Strengthen input validation for API endpoints", "security", "medium", "moderate"),
+                MockImprovement("3", "Update documentation", "Refresh API documentation with latest changes", "documentation", "low", "minor")
+            ]
+            
+            # Run orchestration process
+            try:
+                result = await orchestrator.orchestrate_approval_process(mock_improvements)
+                
+                click.echo(f"\n✅ Analysis complete!")
+                click.echo(f"📊 Phase: {result.current_phase}")
+                click.echo(f"🎯 Processed: {len(result.improvements_processed)} improvements")
+                click.echo(f"👍 Approved: {len(result.approved_improvements)} improvements")
+                click.echo(f"👎 Rejected: {len(result.rejected_improvements)} improvements")
+                
+                if result.approved_improvements:
+                    click.echo("\n✅ Approved improvements:")
+                    for improvement in result.approved_improvements:
+                        click.echo(f"  • {improvement.title}")
+                
+                if result.rejected_improvements:
+                    click.echo("\n❌ Rejected improvements:")
+                    for improvement in result.rejected_improvements:
+                        click.echo(f"  • {improvement.title}")
+                
+                click.echo(f"\n⏱️  Processing time: {result.processing_time_ms}ms")
+                
+            except Exception as e:
+                click.echo(f"\n❌ Analysis failed: {e}")
+                raise click.ClickException(str(e))
+        
+        # Run the analysis
+        asyncio.run(run_analysis())
+        
+    except ImportError as e:
+        click.echo(f"❌ Approval system not available: {e}")
+        click.echo("💡 Please ensure the retrospective.approval module is properly installed.")
+        raise click.ClickException("Approval system unavailable")
+    except Exception as e:
+        click.echo(f"❌ Retrospective analysis failed: {e}")
+        raise click.ClickException(str(e))
+
+@retrospective_group.command("config")
+@click.option("--show", is_flag=True, help="Show current approval configuration")
+@click.option("--edit", is_flag=True, help="Edit approval configuration interactively")
+@click.option("--set-mode", type=click.Choice(["auto", "manual", "interactive", "batch_approve", "batch_reject"]),
+              help="Set default approval mode")
+@click.option("--set-interface", type=click.Choice(["cli", "tui", "auto"]),
+              help="Set default approval interface")
+@click.option("--set-timeout", type=int, help="Set default approval timeout in seconds")
+@click.option("--export", help="Export configuration to file")
+@click.option("--import", "import_config", help="Import configuration from file")
+def retrospective_config(show: bool, edit: bool, set_mode: Optional[str], set_interface: Optional[str],
+                        set_timeout: Optional[int], export: Optional[str], import_config: Optional[str]):
+    """Manage retrospective approval configuration."""
+    
+    from agentsmcp.retrospective.approval import load_approval_config, get_default_config_path
+    from pathlib import Path
+    
+    config_path = get_default_config_path()
+    
+    if import_config:
+        # Import configuration from file
+        import_path = Path(import_config)
+        if not import_path.exists():
+            raise click.ClickException(f"Import file not found: {import_config}")
+        
+        try:
+            config = load_approval_config(str(import_path))
+            config.save_to_file(config_path)
+            click.echo(f"✅ Configuration imported from {import_config}")
+            return
+        except Exception as e:
+            raise click.ClickException(f"Failed to import configuration: {e}")
+    
+    # Load current configuration
+    try:
+        config = load_approval_config()
+    except Exception as e:
+        click.echo(f"⚠️  Could not load configuration: {e}")
+        click.echo("Creating default configuration...")
+        from agentsmcp.retrospective.approval import ApprovalConfig
+        config = ApprovalConfig()
+    
+    # Update configuration with CLI options
+    config_changed = False
+    if set_mode:
+        from agentsmcp.retrospective.approval import ApprovalMode
+        config.approval_mode = ApprovalMode(set_mode.upper())
+        config_changed = True
+    
+    if set_interface:
+        from agentsmcp.retrospective.approval import ApprovalInterfaceType
+        config.interface_type = ApprovalInterfaceType(set_interface.upper())
+        config_changed = True
+    
+    if set_timeout:
+        config.timeouts.approval_timeout = set_timeout
+        config_changed = True
+    
+    # Save changes if any
+    if config_changed:
+        config.save_to_file(config_path)
+        click.echo("✅ Configuration updated")
+    
+    # Show configuration if requested or if no other action
+    if show or (not edit and not export and not config_changed):
+        click.echo("📋 Current Approval Configuration:")
+        click.echo("=" * 40)
+        click.echo(f"Approval Mode: {config.approval_mode.value}")
+        click.echo(f"Interface Type: {config.interface_type.value}")
+        click.echo(f"Approval Timeout: {config.timeouts.approval_timeout}s")
+        click.echo(f"Batch Timeout: {config.timeouts.batch_timeout}s")
+        click.echo(f"Interactive Timeout: {config.timeouts.interactive_timeout}s")
+        click.echo(f"Safety Validation: {'enabled' if config.require_safety_validation else 'disabled'}")
+        click.echo(f"Config File: {config_path}")
+    
+    if edit:
+        # Interactive configuration editing
+        click.echo("\n✏️  Interactive Configuration Editor")
+        click.echo("Press Enter to keep current values")
+        
+        # Approval Mode
+        current_mode = config.approval_mode.value
+        new_mode = click.prompt(f"Approval mode [{current_mode}]", 
+                               type=click.Choice(["auto", "manual", "interactive", "batch_approve", "batch_reject"], case_sensitive=False),
+                               default=current_mode, show_default=False)
+        if new_mode != current_mode:
+            from agentsmcp.retrospective.approval import ApprovalMode
+            config.approval_mode = ApprovalMode(new_mode.upper())
+            config_changed = True
+        
+        # Interface Type  
+        current_interface = config.interface_type.value
+        new_interface = click.prompt(f"Interface type [{current_interface}]",
+                                    type=click.Choice(["cli", "tui", "auto"], case_sensitive=False),
+                                    default=current_interface, show_default=False)
+        if new_interface != current_interface:
+            from agentsmcp.retrospective.approval import ApprovalInterfaceType
+            config.interface_type = ApprovalInterfaceType(new_interface.upper())
+            config_changed = True
+        
+        # Timeout
+        current_timeout = config.timeouts.approval_timeout
+        new_timeout = click.prompt(f"Approval timeout (seconds) [{current_timeout}]",
+                                  type=int, default=current_timeout, show_default=False)
+        if new_timeout != current_timeout:
+            config.timeouts.approval_timeout = new_timeout
+            config_changed = True
+        
+        # Safety Validation
+        current_safety = config.require_safety_validation
+        new_safety = click.prompt(f"Enable safety validation [{'yes' if current_safety else 'no'}]",
+                                 type=bool, default=current_safety, show_default=False)
+        if new_safety != current_safety:
+            config.require_safety_validation = new_safety
+            config_changed = True
+        
+        if config_changed:
+            config.save_to_file(config_path)
+            click.echo("\n✅ Configuration saved")
+        else:
+            click.echo("\n📋 No changes made")
+    
+    if export:
+        # Export configuration to file
+        export_path = Path(export)
+        try:
+            config.save_to_file(export_path)
+            click.echo(f"✅ Configuration exported to {export}")
+        except Exception as e:
+            raise click.ClickException(f"Failed to export configuration: {e}")
+
+# =====================================================================
+# 6️⃣ SERVER GROUP - Infrastructure & Integration
 # =====================================================================
 
 @main.group(name="server")
@@ -951,7 +1222,7 @@ def server_roles(ctx):
     ctx.forward(roles_group)
 
 # =====================================================================
-# 6️⃣ CONFIG GROUP - Advanced Configuration
+# 7️⃣ CONFIG GROUP - Advanced Configuration
 # =====================================================================
 
 @main.group(name="config")
@@ -1136,6 +1407,12 @@ def mcp_alias(ctx):
 def roles_alias(ctx):
     """[ALIAS] Role-based orchestration commands."""
     ctx.forward(server_roles)
+
+@main.command("retrospective", hidden=True)
+@click.pass_context
+def retrospective_alias(ctx):
+    """[ALIAS] Retrospective analysis and self-improvement workflows."""
+    ctx.forward(retrospective_group)
 
 @main.command("tui", hidden=False)
 @click.pass_context
