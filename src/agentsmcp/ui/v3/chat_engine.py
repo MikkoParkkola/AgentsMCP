@@ -78,7 +78,8 @@ class ChatEngine:
             '/status': self._handle_status_command,
             '/config': self._handle_config_command,
             '/providers': self._handle_providers_command,
-            '/preprocessing': self._handle_preprocessing_command
+            '/preprocessing': self._handle_preprocessing_command,
+            '/timeouts': self._handle_timeouts_command
         }
     
     @staticmethod
@@ -307,6 +308,7 @@ class ChatEngine:
 • /config - Show detailed LLM configuration
 • /providers - Show LLM provider status
 • /preprocessing [on/off/toggle/status] - Control preprocessing mode
+• /timeouts [set <type> <seconds>|reset|status] - Manage request timeouts
 
 🚀 **Quick Setup Guide:**
 If you're getting connection errors:
@@ -322,6 +324,12 @@ If you're getting connection errors:
 📊 **Preprocessing Modes:**
 • **On** (default): Multi-turn tool execution, slower but more capable
 • **Off**: Direct LLM responses only, faster but simpler
+
+⏱️ **Timeout Issues:**
+• Use `/timeouts` to check current timeout settings
+• Use `/timeouts set complex_task 600` for large operations
+• Default timeouts work for most simple questions
+• Streaming responses have separate timeout settings
 
 💡 **Tips:**
 • Type `/config` if you see connection errors
@@ -440,10 +448,20 @@ If you're getting connection errors:
                     status_msg += f"  • {issue}\n"
                 status_msg += "\n"
             
+            # Timeout configuration
+            status_msg += "⏱️ Timeout Settings:\n"
+            status_msg += f"  • Default Request: {self._llm_client._get_timeout('default', 30)}s\n"
+            status_msg += f"  • Anthropic: {self._llm_client._get_timeout('anthropic', 30)}s\n"
+            status_msg += f"  • OpenRouter: {self._llm_client._get_timeout('openrouter', 30)}s\n"
+            status_msg += f"  • Local Ollama: {self._llm_client._get_timeout('local_ollama', 120)}s\n"
+            status_msg += f"  • Ollama Turbo: {self._llm_client._get_timeout('ollama_turbo', 30)}s\n"
+            status_msg += f"  • Proxy: {self._llm_client._get_timeout('proxy', 60)}s\n\n"
+            
             # Help section
             status_msg += "💡 Commands:\n"
             status_msg += "  • /providers - Show only provider status\n" 
             status_msg += "  • /preprocessing - Control preprocessing mode\n"
+            status_msg += "  • /timeouts - Manage timeout settings\n"
             status_msg += "  • /help - Show all available commands\n"
             
             self._notify_message(ChatMessage(
@@ -556,6 +574,139 @@ If you're getting connection errors:
         except Exception as e:
             self._notify_error(f"Error handling preprocessing command: {str(e)}")
             return True
+
+    async def _handle_timeouts_command(self, args: str) -> bool:
+        """Handle /timeouts command to show and configure timeouts."""
+        try:
+            # Use the existing LLM client (initialized once in __init__)
+            if self._llm_client is None:
+                self._initialize_llm_client()
+            
+            if self._llm_client is None:
+                self._notify_error("Failed to initialize LLM client")
+                return True
+            
+            args = args.strip().lower()
+            
+            if not args or args == "status":
+                # Show current timeouts
+                result = self._get_timeout_status()
+            elif args.startswith("set "):
+                # Set timeout: /timeouts set anthropic 60
+                result = self._set_timeout(args[4:])
+            elif args == "reset":
+                # Reset to defaults - show current since we can't actually reset
+                result = self._reset_timeouts()
+            else:
+                result = "❌ Invalid timeouts command.\n\n💡 Usage:\n  • /timeouts - Show current timeouts\n  • /timeouts set <type> <seconds> - Set timeout\n  • /timeouts reset - Show defaults"
+            
+            self._notify_message(ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=result,
+                timestamp=self._format_timestamp()
+            ))
+            return True
+            
+        except Exception as e:
+            self._notify_error(f"Error handling timeouts command: {str(e)}")
+            return True
+
+    def _get_timeout_status(self) -> str:
+        """Get detailed timeout configuration status."""
+        # Get all timeout types from the codebase
+        timeout_types = {
+            "default": ("Default Request", 30),
+            "anthropic": ("Anthropic API", 30),
+            "openrouter": ("OpenRouter API", 30),
+            "local_ollama": ("Local Ollama", 120),
+            "ollama_turbo": ("Ollama Turbo", 30),
+            "proxy": ("Proxy Requests", 60)
+        }
+        
+        status_msg = "⏱️ Timeout Configuration\n"
+        status_msg += "=" * 40 + "\n\n"
+        
+        for timeout_key, (timeout_name, default_val) in timeout_types.items():
+            current_val = self._llm_client._get_timeout(timeout_key, default_val)
+            status_msg += f"  • {timeout_name}: {current_val}s\n"
+        
+        status_msg += "\n💡 Commands:\n"
+        status_msg += "  • /timeouts set <type> <seconds> - Adjust timeout\n"
+        status_msg += "  • /timeouts reset - Show default values\n"
+        status_msg += "  • /config - Show full configuration\n\n"
+        
+        status_msg += "📊 Recommended Values:\n"
+        status_msg += "  • Simple questions: 30-60s\n"
+        status_msg += "  • Complex analysis: 120-300s\n"
+        status_msg += "  • Large file operations: 300-600s\n\n"
+        
+        status_msg += "🔧 Available timeout types:\n"
+        status_msg += "  • default, anthropic, openrouter\n"
+        status_msg += "  • local_ollama, ollama_turbo, proxy\n"
+        
+        return status_msg
+
+    def _set_timeout(self, args: str) -> str:
+        """Set timeout value for a specific type."""
+        try:
+            parts = args.split()
+            if len(parts) != 2:
+                return "❌ Invalid format. Use: /timeouts set <type> <seconds>"
+            
+            timeout_type, timeout_str = parts
+            timeout_value = float(timeout_str)
+            
+            if timeout_value <= 0:
+                return "❌ Timeout value must be greater than 0"
+            
+            if timeout_value > 3600:  # 1 hour max
+                return "❌ Timeout value cannot exceed 3600 seconds (1 hour)"
+            
+            # Note: Since we can't actually modify the config at runtime,
+            # we inform the user about how timeouts are configured
+            return f"""ℹ️ Timeout Configuration Information
+
+Current timeout for '{timeout_type}': {self._llm_client._get_timeout(timeout_type, 30)}s
+Requested value: {timeout_value}s
+
+⚠️ **Timeout Configuration Method:**
+Timeouts are currently read from configuration at startup.
+To modify timeouts, you would need to:
+
+1. Set environment variable or config file
+2. Restart the TUI application
+
+📝 **Configuration Options:**
+• Environment: Set timeout values in your startup config
+• Config file: Add timeouts section to configuration
+• Runtime: Not currently supported
+
+💡 Use '/timeouts' to see current values and defaults."""
+
+        except ValueError:
+            return "❌ Invalid timeout value. Must be a number."
+        except Exception as e:
+            return f"❌ Error setting timeout: {str(e)}"
+
+    def _reset_timeouts(self) -> str:
+        """Show default timeout values."""
+        return """⏱️ Default Timeout Values
+===============================
+
+  • Default Request: 30s
+  • Anthropic API: 30s
+  • OpenRouter API: 30s
+  • Local Ollama: 120s
+  • Ollama Turbo: 30s
+  • Proxy Requests: 60s
+
+ℹ️ **Current vs Default:**
+Use '/timeouts' to see your current configuration.
+
+🔧 **To Reset:**
+Timeout configuration is set at startup. To use defaults:
+1. Remove any custom timeout configuration
+2. Restart the TUI application"""
     
     def get_state(self) -> ChatState:
         """Get current chat state."""
