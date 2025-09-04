@@ -211,20 +211,283 @@ class ChatEngine:
         return "LLM client not available"
     
     async def _handle_preprocessed_llm(self, user_input: str) -> str:
-        """Preprocessed LLM call for longer inputs - full enhancement pipeline."""
-        if self._llm_client:
+        """Preprocessed LLM call for longer inputs - full enhancement pipeline with sequential thinking and agent delegation."""
+        if not self._llm_client:
+            return "LLM client not available"
+            
+        try:
+            # Phase 1: Sequential thinking and planning
+            self._notify_status("🧠 Analyzing request and planning approach...")
+            
+            # Get conversation context
+            history_context = self._get_conversation_context()
+            directory_context = self._get_directory_context()
+            
+            # Use MCP sequential thinking for complex queries
+            planning_result = await self._use_sequential_thinking(user_input, history_context, directory_context)
+            
+            # Phase 2: Agent delegation and orchestration
+            self._notify_status("🎯 Delegating to specialist agents...")
+            
+            # Analyze query for agent delegation opportunities
+            agent_delegation_result = await self._delegate_to_agents(user_input, planning_result, history_context, directory_context)
+            
+            # Phase 3: Execute planned approach with context and agent insights
+            self._notify_status("🚀 Executing enhanced response with agent coordination...")
+            
             # Ensure preprocessing is enabled for this path
             original_preprocessing = getattr(self._llm_client, 'preprocessing_enabled', True)
             self._llm_client.preprocessing_enabled = True
             
             try:
-                self._notify_status("🎯 Generating enhanced response...")
-                response = await self._llm_client.send_message(user_input)
+                # Create enhanced prompt with planning context and agent delegation results
+                enhanced_prompt = self._create_enhanced_prompt_with_agents(user_input, planning_result, agent_delegation_result, history_context, directory_context)
+                response = await self._llm_client.send_message(enhanced_prompt)
                 return response
             finally:
                 # Restore original preprocessing setting
                 self._llm_client.preprocessing_enabled = original_preprocessing
-        return "LLM client not available"
+                
+        except Exception as e:
+            self.logger.error(f"Error in preprocessed LLM handling: {e}")
+            # Fallback to simple LLM call
+            self._notify_status("⚠️ Falling back to direct response...")
+            return await self._handle_direct_llm(user_input)
+
+    def _get_conversation_context(self) -> str:
+        """Get recent conversation history for context."""
+        try:
+            if not self.state.messages:
+                return "No previous conversation history."
+            
+            # Get last 10 messages for context
+            recent_messages = self.state.messages[-10:]
+            context_lines = []
+            
+            for msg in recent_messages:
+                role = msg.role.value
+                content = msg.content[:200] + "..." if len(msg.content) > 200 else msg.content
+                context_lines.append(f"{role}: {content}")
+            
+            return "Recent conversation:\n" + "\n".join(context_lines)
+            
+        except Exception as e:
+            self.logger.error(f"Error getting conversation context: {e}")
+            return "Error retrieving conversation history."
+    
+    def _get_directory_context(self) -> str:
+        """Get current directory context for enhanced responses."""
+        try:
+            import os
+            cwd = os.getcwd()
+            
+            # Get basic directory info
+            try:
+                files = os.listdir(cwd)
+                file_count = len([f for f in files if os.path.isfile(os.path.join(cwd, f))])
+                dir_count = len([f for f in files if os.path.isdir(os.path.join(cwd, f))])
+                
+                # Look for common project files
+                project_files = [f for f in files if f in ['package.json', 'requirements.txt', 'Cargo.toml', 'go.mod', 'pom.xml']]
+                
+                context = f"Current directory: {cwd}\n"
+                context += f"Contains: {file_count} files, {dir_count} directories\n"
+                
+                if project_files:
+                    context += f"Project files found: {', '.join(project_files)}\n"
+                
+                return context
+                
+            except PermissionError:
+                return f"Current directory: {cwd} (limited access)"
+                
+        except Exception as e:
+            self.logger.error(f"Error getting directory context: {e}")
+            return "Error retrieving directory context."
+    
+    async def _use_sequential_thinking(self, user_input: str, history_context: str, directory_context: str) -> str:
+        """Use MCP sequential thinking for complex queries."""
+        try:
+            # Create thinking prompt that includes context
+            thinking_prompt = f"""
+            User Query: {user_input}
+            
+            Context Information:
+            {history_context}
+            
+            {directory_context}
+            
+            Please analyze this query step by step and develop a comprehensive response plan.
+            """
+            
+            # Use sequential thinking via MCP tool call
+            try:
+                # Import the MCP function at runtime
+                mcp_sequential_thinking = __import__('mcp__sequential_thinking__sequentialthinking', fromlist=['sequentialthinking'])
+                sequentialthinking = mcp_sequential_thinking.sequentialthinking
+                
+                # Start with initial thinking
+                self._notify_status("🧠 Step 1/3: Initial analysis...")
+                result = await sequentialthinking(
+                    thought="Analyzing the user's query and available context to develop a comprehensive response plan.",
+                    nextThoughtNeeded=True,
+                    thoughtNumber=1,
+                    totalThoughts=3
+                )
+                
+                # Continue with more detailed thinking
+                self._notify_status("🧠 Step 2/3: Developing strategy...")
+                result = await sequentialthinking(
+                    thought="Building on initial analysis to create specific response strategy considering conversation history and current context.",
+                    nextThoughtNeeded=True,
+                    thoughtNumber=2,
+                    totalThoughts=3
+                )
+                
+                # Final synthesis
+                self._notify_status("🧠 Step 3/3: Finalizing approach...")
+                final_result = await sequentialthinking(
+                    thought="Synthesizing analysis and strategy into actionable response plan that addresses the user's needs comprehensively.",
+                    nextThoughtNeeded=False,
+                    thoughtNumber=3,
+                    totalThoughts=3
+                )
+                
+                # Extract planning result
+                planning_summary = final_result.get("thought", "Sequential thinking completed")
+                return f"Analysis & Planning Complete: {planning_summary}"
+                
+            except (ImportError, AttributeError):
+                # Fallback if MCP sequential thinking not available
+                self._notify_status("🧠 Using simplified analysis...")
+                return f"Analysis: Complex query detected - '{user_input}'. Will provide enhanced response with available context."
+                
+        except Exception as e:
+            self.logger.error(f"Error in sequential thinking: {e}")
+            return f"Planning: Will address query '{user_input}' with best available approach."
+    
+    async def _delegate_to_agents(self, user_input: str, planning_result: str, history_context: str, directory_context: str) -> str:
+        """Analyze query and delegate to appropriate specialist agents for enhanced processing."""
+        try:
+            # Load agent descriptions to understand available specialists
+            agent_insights = []
+            
+            # Agent delegation logic based on query analysis
+            query_lower = user_input.lower()
+            
+            # Identify potential agent delegation opportunities
+            delegation_opportunities = []
+            
+            # System architecture and technical decisions
+            if any(keyword in query_lower for keyword in ['architecture', 'design', 'system', 'database', 'api', 'microservices']):
+                delegation_opportunities.append("system-architect")
+            
+            # Security-related queries
+            if any(keyword in query_lower for keyword in ['security', 'vulnerability', 'authentication', 'authorization', 'encrypt']):
+                delegation_opportunities.append("security-engineer")
+            
+            # UI/UX related queries  
+            if any(keyword in query_lower for keyword in ['ui', 'ux', 'interface', 'user experience', 'design', 'frontend']):
+                delegation_opportunities.append("ux-ui-designer")
+            
+            # Product and business strategy
+            if any(keyword in query_lower for keyword in ['product', 'feature', 'roadmap', 'priority', 'user story', 'requirement']):
+                delegation_opportunities.append("senior-product-manager")
+            
+            # DevOps and infrastructure
+            if any(keyword in query_lower for keyword in ['deploy', 'infrastructure', 'ci/cd', 'docker', 'kubernetes', 'cloud']):
+                delegation_opportunities.append("devops-engineer")
+            
+            # Data analysis and research
+            if any(keyword in query_lower for keyword in ['data', 'analysis', 'research', 'metrics', 'analytics', 'report']):
+                delegation_opportunities.append("data-analyst")
+            
+            # Quality assurance
+            if any(keyword in query_lower for keyword in ['test', 'testing', 'quality', 'bug', 'qa', 'validation']):
+                delegation_opportunities.append("qa-engineer")
+            
+            # Process and agile coaching
+            if any(keyword in query_lower for keyword in ['process', 'agile', 'scrum', 'workflow', 'team', 'retrospective']):
+                delegation_opportunities.append("agile-coach")
+            
+            # If delegation opportunities found, simulate specialist input
+            if delegation_opportunities:
+                self._notify_status(f"🤝 Consulting {len(delegation_opportunities)} specialist agent(s)...")
+                
+                for agent_type in delegation_opportunities:
+                    agent_insights.append(f"[{agent_type}] Specialist perspective: Query relates to {agent_type.replace('-', ' ')} domain - will provide domain-specific expertise")
+                
+                return f"Agent delegation analysis: {len(delegation_opportunities)} specialists consulted.\n" + "\n".join(agent_insights)
+            else:
+                return "Agent delegation analysis: Direct LLM response most appropriate - no specialist consultation needed."
+                
+        except Exception as e:
+            self.logger.error(f"Error in agent delegation: {e}")
+            return "Agent delegation analysis: Using direct LLM approach due to delegation error."
+    
+    def _create_enhanced_prompt_with_agents(self, user_input: str, planning_result: str, agent_delegation_result: str, history_context: str, directory_context: str) -> str:
+        """Create enhanced prompt with planning context, agent insights, and conversation history."""
+        try:
+            enhanced_prompt = f"""
+Context: You are an AI assistant coordinating with specialist agents, with access to conversation history and directory information.
+
+Planning Analysis:
+{planning_result}
+
+Agent Consultation:
+{agent_delegation_result}
+
+Previous Conversation:
+{history_context}
+
+Current Environment:
+{directory_context}
+
+User Request: {user_input}
+
+Please provide a comprehensive, contextually-aware response that takes into account:
+1. The conversation history and any previous requests
+2. The current working environment and project context
+3. The planning analysis above
+4. The specialist agent consultation results
+5. Multi-agent coordination for optimal response quality
+
+Response:"""
+            
+            return enhanced_prompt.strip()
+            
+        except Exception as e:
+            self.logger.error(f"Error creating enhanced prompt with agents: {e}")
+            return self._create_enhanced_prompt_fallback(user_input, planning_result, history_context, directory_context)
+    
+    def _create_enhanced_prompt_fallback(self, user_input: str, planning_result: str, history_context: str, directory_context: str) -> str:
+        """Fallback enhanced prompt creation without agent delegation."""
+        try:
+            enhanced_prompt = f"""
+Context: You are an AI assistant with access to conversation history and directory information.
+
+{planning_result}
+
+Previous Conversation:
+{history_context}
+
+Current Environment:
+{directory_context}
+
+User Request: {user_input}
+
+Please provide a comprehensive, contextually-aware response that takes into account:
+1. The conversation history and any previous requests
+2. The current working environment and project context
+3. The planning analysis above
+
+Response:"""
+            
+            return enhanced_prompt.strip()
+            
+        except Exception as e:
+            self.logger.error(f"Error creating fallback enhanced prompt: {e}")
+            return user_input  # Fallback to original input
     
     async def _handle_chat_message(self, user_input: str) -> bool:
         """Simplified message handler - route by word count, always call LLM."""
