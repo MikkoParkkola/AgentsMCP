@@ -112,11 +112,40 @@ class TUILauncher:
             traceback.print_exc()
             return False
     def _on_status_change(self, status: str) -> None:
-        """Handle status change from chat engine."""
-        if self.current_renderer and hasattr(self.current_renderer, 'show_status'):
-            # Rich renderer - use Rich status display
+        """Handle status change from chat engine, including streaming updates and detailed progress."""
+        if status.startswith("streaming_update:"):
+            # Handle streaming response update
+            content = status[17:]  # Remove "streaming_update:" prefix
+            self._handle_streaming_update(content)
+        elif self.current_renderer and hasattr(self.current_renderer, 'show_status'):
+            # Rich renderer - use Rich status display with enhanced formatting
             self.current_renderer.show_status(status)
         elif status and status != "Ready":  # Avoid spamming "Ready" status
+            # Enhanced status display for plain renderer
+            self._display_enhanced_status(status)
+    
+    def _display_enhanced_status(self, status: str) -> None:
+        """Display enhanced status for plain renderer with better formatting."""
+        try:
+            # Parse different types of status messages for better display
+            if "[" in status and "]" in status:
+                # Status with timing information
+                parts = status.rsplit(" [", 1)
+                if len(parts) == 2:
+                    message = parts[0]
+                    timing = "[" + parts[1]
+                    print(f"⏳ {message} {timing}")
+                else:
+                    print(f"⏳ {status}")
+            elif status.startswith("🔍") or status.startswith("🛠️") or status.startswith("📊"):
+                # Already has emoji, just display
+                print(f"  {status}")
+            else:
+                # Basic status, add icon
+                print(f"⏳ {status}")
+                
+        except Exception:
+            # Fallback to simple display
             print(f"⏳ {status}")
     
     def _on_new_message(self, message: ChatMessage) -> None:
@@ -132,6 +161,18 @@ class TUILauncher:
             role_symbols = {"user": "👤", "assistant": "🤖", "system": "ℹ️"}
             symbol = role_symbols.get(message.role.value, "❓")
             print(f"{timestamp} {symbol} {message.role.value.title()}: {message.content}")
+    
+    def _handle_streaming_update(self, content: str) -> None:
+        """Handle streaming response update."""
+        try:
+            if self.current_renderer and hasattr(self.current_renderer, 'handle_streaming_update'):
+                self.current_renderer.handle_streaming_update(content)
+            else:
+                # Fallback for renderers without streaming support
+                # Clear current line and show updated content
+                print(f"\r🤖 AI: {content[:100]}{'...' if len(content) > 100 else ''}", end="", flush=True)
+        except Exception as e:
+            print(f"\nStreaming update error: {e}")
     
     def _on_error(self, error: str) -> None:
         """Handle error from chat engine."""

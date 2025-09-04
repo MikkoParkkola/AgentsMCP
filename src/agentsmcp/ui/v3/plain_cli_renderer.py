@@ -13,6 +13,8 @@ class PlainCLIRenderer(UIRenderer):
         super().__init__(capabilities)
         self._input_lock = threading.Lock()
         self._last_prompt_shown = False
+        self._streaming_active = False  # Track if currently streaming
+        self._current_streaming_content = ""  # Current streaming message
         
     def initialize(self) -> bool:
         """Initialize plain CLI renderer."""
@@ -93,9 +95,43 @@ class PlainCLIRenderer(UIRenderer):
         """Show an error message in plain text."""
         self.show_message(error, "error")
     
+    def handle_streaming_update(self, content: str) -> None:
+        """Handle real-time streaming updates in plain text."""
+        try:
+            # First streaming update - initialize
+            if not self._streaming_active:
+                self._streaming_active = True
+                self._current_streaming_content = ""
+                print("🤖 AI (streaming): ", end="", flush=True)
+            
+            # Update content
+            self._current_streaming_content = content
+            
+            # For plain CLI, we'll show a truncated version during streaming
+            if len(content) > 100:
+                display_content = content[:97] + "..."
+            else:
+                display_content = content
+            
+            # Use carriage return to overwrite the line
+            print(f"\r🤖 AI (streaming): {display_content}", end="", flush=True)
+            
+        except Exception as e:
+            print(f"\nStreaming update error: {e}")
+    
     def display_chat_message(self, role: str, content: str, timestamp: str = None) -> None:
         """Display a chat message with plain text formatting."""
         try:
+            # If we were streaming and this is the final assistant message
+            if self._streaming_active and role == "assistant":
+                # Finalize the streaming display
+                print()  # New line to finish streaming
+                self._streaming_active = False
+                self._current_streaming_content = ""
+                
+                # Don't display the message again - it's already been shown during streaming
+                return
+            
             # Format messages based on role with emojis and timestamp
             role_symbols = {
                 "user": "👤",

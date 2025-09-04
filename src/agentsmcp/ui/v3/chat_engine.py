@@ -111,6 +111,11 @@ class ChatEngine:
         if self._error_callback:
             self._error_callback(error)
     
+    def _notify_streaming_update(self, content: str) -> None:
+        """Notify UI of streaming response update."""
+        if self._status_callback:
+            self._status_callback(f"streaming_update:{content}")
+    
     def _initialize_llm_client(self) -> None:
         """Initialize LLM client once and preserve it throughout the session."""
         try:
@@ -159,7 +164,7 @@ class ChatEngine:
             return True
     
     async def _handle_chat_message(self, user_input: str) -> bool:
-        """Handle regular chat message."""
+        """Handle regular chat message with streaming support."""
         try:
             # Add user message to history
             user_message = self.state.add_message(MessageRole.USER, user_input)
@@ -169,12 +174,14 @@ class ChatEngine:
             self.state.is_processing = True
             self._notify_status("Processing your message...")
             
-            # Simulate AI processing (replace with actual AI call)
-            response = await self._get_ai_response(user_input)
-            
-            # Add AI response to history
-            ai_message = self.state.add_message(MessageRole.ASSISTANT, response)
-            self._notify_message(ai_message)
+            # Check if streaming is available and enabled
+            if await self._should_use_streaming():
+                await self._handle_streaming_response(user_input)
+            else:
+                # Fallback to batch processing
+                response = await self._get_ai_response(user_input)
+                ai_message = self.state.add_message(MessageRole.ASSISTANT, response)
+                self._notify_message(ai_message)
             
             # Clear processing state
             self.state.is_processing = False
@@ -187,9 +194,77 @@ class ChatEngine:
             self._notify_error(f"Error getting AI response: {str(e)}")
             return True
     
+    async def _should_use_streaming(self) -> bool:
+        """Check if streaming should be used for responses."""
+        try:
+            if self._llm_client is None:
+                self._initialize_llm_client()
+            
+            if self._llm_client is None:
+                return False
+            
+            return self._llm_client.supports_streaming()
+        except Exception:
+            return False
+    
+    async def _handle_streaming_response(self, user_input: str) -> None:
+        """Handle streaming AI response with real-time updates."""
+        try:
+            # Create AI message placeholder
+            ai_message = self.state.add_message(MessageRole.ASSISTANT, "")
+            self._notify_message(ai_message)
+            
+            # Stream response chunks
+            full_response = ""
+            async for chunk in self._get_ai_response_streaming(user_input):
+                if chunk:  # Only process non-empty chunks
+                    full_response += chunk
+                    ai_message.content = full_response
+                    # Notify UI of streaming update
+                    self._notify_streaming_update(full_response)
+            
+            # Final update to ensure complete message is displayed
+            ai_message.content = full_response
+            
+        except Exception as e:
+            # Handle streaming errors
+            error_msg = f"❌ Streaming error: {str(e)}"
+            ai_message = self.state.add_message(MessageRole.ASSISTANT, error_msg)
+            self._notify_message(ai_message)
+    
+    async def _get_ai_response_streaming(self, user_input: str):
+        """Stream AI response in real-time chunks with progress tracking."""
+        try:
+            if self._llm_client is None:
+                self._initialize_llm_client()
+            
+            if self._llm_client is None:
+                yield "❌ Failed to initialize LLM client. Please check your configuration with /config command."
+                return
+            
+            # Create progress callback to forward to UI
+            async def progress_callback(status: str):
+                """Forward progress updates to TUI."""
+                if self._status_callback:
+                    self._status_callback(status)
+            
+            # Use streaming if supported, otherwise fallback to batch
+            if self._llm_client.supports_streaming():
+                async for chunk in self._llm_client.send_message_streaming(user_input, progress_callback=progress_callback):
+                    yield chunk
+            else:
+                # Fallback to batch processing with progress tracking
+                response = await self._llm_client.send_message(user_input, progress_callback=progress_callback)
+                yield response
+                
+        except Exception as e:
+            import logging
+            logging.error(f"Error in streaming response: {e}")
+            yield f"❌ Streaming error: {str(e)}"
+    
     async def _get_ai_response(self, user_input: str) -> str:
         """
-        Get AI response to user input using the real LLMClient with detailed error reporting.
+        Get AI response to user input using the real LLMClient with detailed error reporting and progress tracking.
         """
         try:
             # Use the existing LLM client (initialized once in __init__)
@@ -199,8 +274,14 @@ class ChatEngine:
             if self._llm_client is None:
                 return "❌ Failed to initialize LLM client. Please check your configuration with /config command."
             
-            # Get response from real LLM - it now handles its own error reporting
-            response = await self._llm_client.send_message(user_input)
+            # Create progress callback to forward to UI
+            async def progress_callback(status: str):
+                """Forward progress updates to TUI."""
+                if self._status_callback:
+                    self._status_callback(status)
+            
+            # Get response from real LLM with progress tracking
+            response = await self._llm_client.send_message(user_input, progress_callback=progress_callback)
             return response
             
         except Exception as e:

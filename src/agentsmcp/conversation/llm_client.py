@@ -24,7 +24,7 @@ import asyncio
 import json
 import logging
 import os
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -574,9 +574,16 @@ Remember: Be truthful about the system's current state rather than creating fals
                 fallback_text += "\n\n# PROJECT INSTRUCTIONS\n\n" + "\n\n".join(supplemental)
             return fallback_text
 
-    async def send_message(self, message: str, context: Optional[Dict[str, Any]] = None) -> str:
-        """Send message to LLM and get response with enhanced error reporting."""
+    async def send_message(self, message: str, context: Optional[Dict[str, Any]] = None, 
+                          progress_callback: Optional[Callable[[str], None]] = None) -> str:
+        """Send message to LLM and get response with enhanced error reporting and progress tracking."""
         try:
+            # Initialize progress tracker
+            from ..ui.v3.progress_tracker import ProgressTracker, ProcessingPhase, ToolExecutionInfo
+            progress_tracker = ProgressTracker(progress_callback)
+            
+            await progress_tracker.update_phase(ProcessingPhase.ANALYZING)
+            
             # Check configuration before attempting to send
             config_status = self.get_configuration_status()
             if config_status["configuration_issues"]:
@@ -599,9 +606,11 @@ Remember: Be truthful about the system's current state rather than creating fals
             # Handle simple mode (no preprocessing) vs full mode
             preprocessing_enabled = getattr(self, 'preprocessing_enabled', True)
             if not preprocessing_enabled:
-                return await self._send_simple_message(message)
+                await progress_tracker.update_custom_status("Direct LLM processing", "🚀")
+                return await self._send_simple_message(message, progress_callback)
             
             # Multi-turn tool execution loop (preprocessing mode)
+            await progress_tracker.update_custom_status("Multi-turn processing active", "🛠️")
             max_tool_turns = 3  # Prevent infinite loops
             turn = 0
             
@@ -609,10 +618,13 @@ Remember: Be truthful about the system's current state rather than creating fals
                 turn += 1
                 logger.debug(f"Tool execution turn {turn}/{max_tool_turns}")
                 
+                await progress_tracker.update_multi_turn(turn, max_tool_turns, "analyzing request")
+                
                 # Prepare messages for LLM with auto-detected capabilities
                 messages = await self._prepare_messages()
                 
                 # Use real MCP ollama client based on provider
+                await progress_tracker.update_phase(ProcessingPhase.PROCESSING_RESULTS)
                 response = await self._call_llm_via_mcp(messages)
                 if not response:
                     # More specific error message based on configuration
@@ -632,6 +644,7 @@ Remember: Be truthful about the system's current state rather than creating fals
                 
                 if not tool_calls:
                     # No tool calls - extract final response and return
+                    await progress_tracker.update_phase(ProcessingPhase.FINALIZING)
                     assistant_content = self._extract_response_content(response)
                     if not assistant_content:
                         # Robust fallback when provider returns empty content
@@ -657,10 +670,29 @@ Remember: Be truthful about the system's current state rather than creating fals
                     self.conversation_history.append(assistant_msg)
                 
                 # Execute tool calls and add results as separate messages
-                for tool_call in tool_calls:
+                for i, tool_call in enumerate(tool_calls):
                     try:
                         tool_name = tool_call.get('function', {}).get('name', '')
                         parameters = tool_call.get('function', {}).get('arguments', {})
+                        
+                        # Create tool execution info for progress tracking
+                        tool_description = ""
+                        if isinstance(parameters, dict):
+                            # Extract description from common parameter names
+                            tool_description = (parameters.get('description', '') or 
+                                              parameters.get('path', '') or 
+                                              parameters.get('query', '') or 
+                                              parameters.get('command', ''))
+                            if isinstance(tool_description, str) and len(tool_description) > 50:
+                                tool_description = tool_description[:47] + "..."
+                        
+                        tool_info = ToolExecutionInfo(
+                            name=tool_name, 
+                            description=tool_description,
+                            index=i, 
+                            total=len(tool_calls)
+                        )
+                        await progress_tracker.update_tool_execution(tool_info)
                         
                         # Parse arguments if they're a JSON string
                         if isinstance(parameters, str):
@@ -698,6 +730,7 @@ Remember: Be truthful about the system's current state rather than creating fals
             
             # If we hit max tool turns, ask for final analysis without tools
             logger.debug("Max tool turns reached, requesting final analysis")
+            await progress_tracker.update_phase(ProcessingPhase.GENERATING_RESPONSE)
             
             # Add a message asking for final analysis
             analysis_timestamp = datetime.now().isoformat()
@@ -714,6 +747,7 @@ Remember: Be truthful about the system's current state rather than creating fals
             
             if response:
                 # Extract final analysis content
+                await progress_tracker.update_phase(ProcessingPhase.FINALIZING)
                 assistant_content = self._extract_response_content(response)
                 if assistant_content:
                     # Add final assistant response to history
@@ -740,9 +774,15 @@ Remember: Be truthful about the system's current state rather than creating fals
                 return f"❌ Unexpected error with {self.provider}: {str(e)}\n\n💡 Try /config to check your configuration or /help for available commands."
 
     
-    async def _send_simple_message(self, message: str) -> str:
+    async def _send_simple_message(self, message: str, progress_callback: Optional[Callable[[str], None]] = None) -> str:
         """Send a simple message without preprocessing/tool execution."""
         try:
+            # Optional progress tracking for simple mode
+            if progress_callback:
+                from ..ui.v3.progress_tracker import SimpleProgressTracker
+                progress_tracker = SimpleProgressTracker(progress_callback)
+                await progress_tracker.update("Processing direct request", "🚀")
+            
             # Prepare simple conversation for direct LLM call
             messages = [
                 {"role": "system", "content": "You are a helpful AI assistant. Respond directly and concisely."},
@@ -753,6 +793,8 @@ Remember: Be truthful about the system's current state rather than creating fals
             if response:
                 content = self._extract_response_content(response)
                 if content:
+                    if progress_callback:
+                        await progress_tracker.update("Response received", "✅")
                     return content
             
             return "❌ No response received from LLM. Check your configuration with /config"
@@ -767,15 +809,22 @@ Remember: Be truthful about the system's current state rather than creating fals
         streaming_providers = ["ollama-turbo", "ollama", "openai", "anthropic"]
         return self.provider in streaming_providers
     
-    async def send_message_streaming(self, message: str, context: Optional[Dict[str, Any]] = None):
+    async def send_message_streaming(self, message: str, context: Optional[Dict[str, Any]] = None,
+                                   progress_callback: Optional[Callable[[str], None]] = None):
         """Send a message and yield streaming response chunks.
         
         Yields:
             str: Response chunks as they arrive from the LLM
         """
+        # Initialize progress tracker for streaming
+        if progress_callback:
+            from ..ui.v3.progress_tracker import ProgressTracker, ProcessingPhase
+            progress_tracker = ProgressTracker(progress_callback)
+            await progress_tracker.update_phase(ProcessingPhase.STREAMING)
+        
         if not self.supports_streaming():
             # Fallback to non-streaming for unsupported providers
-            response = await self.send_message(message, context)
+            response = await self.send_message(message, context, progress_callback)
             yield response
             return
         
@@ -788,22 +837,39 @@ Remember: Be truthful about the system's current state rather than creating fals
             # Prepare messages for API call
             messages = await self._prepare_messages()
             
+            # Track streaming progress
+            chunk_count = 0
+            if progress_callback:
+                await progress_tracker.update_streaming(chunk_count)
+            
             # Call appropriate streaming method based on provider
             if self.provider == "ollama-turbo":
                 async for chunk in self._call_ollama_turbo_streaming(messages):
+                    chunk_count += 1
+                    if progress_callback and chunk_count % 10 == 0:  # Update every 10 chunks
+                        await progress_tracker.update_streaming(chunk_count)
                     yield chunk
             elif self.provider == "ollama":
                 async for chunk in self._call_ollama_streaming(messages):
+                    chunk_count += 1
+                    if progress_callback and chunk_count % 10 == 0:
+                        await progress_tracker.update_streaming(chunk_count)
                     yield chunk
             elif self.provider == "openai":
                 async for chunk in self._call_openai_streaming(messages):
+                    chunk_count += 1
+                    if progress_callback and chunk_count % 10 == 0:
+                        await progress_tracker.update_streaming(chunk_count)
                     yield chunk
             elif self.provider == "anthropic":
                 async for chunk in self._call_anthropic_streaming(messages):
+                    chunk_count += 1
+                    if progress_callback and chunk_count % 10 == 0:
+                        await progress_tracker.update_streaming(chunk_count)
                     yield chunk
             else:
                 # Fallback to non-streaming
-                response = await self.send_message(message, context)
+                response = await self.send_message(message, context, progress_callback)
                 yield response
         
         except Exception as e:
