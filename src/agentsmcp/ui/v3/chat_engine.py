@@ -59,7 +59,7 @@ class ChatState:
 class ChatEngine:
     """Core chat engine handling AI conversation logic."""
     
-    def __init__(self):
+    def __init__(self, launch_directory: Optional[str] = None):
         self.state = ChatState()
         self._status_callback: Optional[Callable[[str], None]] = None
         self._message_callback: Optional[Callable[[ChatMessage], None]] = None
@@ -68,6 +68,21 @@ class ChatEngine:
         # Initialize LLMClient once to preserve conversation history
         self._llm_client = None
         self._initialize_llm_client()
+        
+        # Initialize context and history managers
+        from ...conversation.context_manager import ContextManager
+        from ...conversation.history_manager import HistoryManager
+        from ...orchestration.task_tracker import TaskTracker
+        
+        self.context_manager = ContextManager()
+        self.history_manager = HistoryManager(launch_directory)
+        
+        # Initialize task tracker for sequential thinking and progress display
+        self.task_tracker = TaskTracker(progress_update_callback=self._notify_status)
+        
+        # Track current provider/model for context calculations
+        self._current_provider = "openai"
+        self._current_model = "gpt-4o"
         
         # Built-in commands with new diagnostic and control commands
         self.commands = {
@@ -79,7 +94,10 @@ class ChatEngine:
             '/config': self._handle_config_command,
             '/providers': self._handle_providers_command,
             '/preprocessing': self._handle_preprocessing_command,
-            '/timeouts': self._handle_timeouts_command
+            '/timeouts': self._handle_timeouts_command,
+            '/context': self._handle_context_command,
+            '/progress': self._handle_progress_command,
+            '/timing': self._handle_timing_command,
         }
     
     @staticmethod
@@ -165,7 +183,7 @@ class ChatEngine:
             return True
     
     async def _handle_chat_message(self, user_input: str) -> bool:
-        """Handle regular chat message with streaming support."""
+        """Handle regular chat message with streaming support, context management, and history logging."""
         try:
             # Check if preprocessing is enabled and show optimized prompt
             preprocessing_enabled = getattr(self._llm_client, 'preprocessing_enabled', True) if self._llm_client else True
@@ -174,6 +192,19 @@ class ChatEngine:
                 # Add original user message to history
                 user_message = self.state.add_message(MessageRole.USER, user_input)
                 self._notify_message(user_message)
+                
+                # Log to persistent history
+                usage = self.context_manager.calculate_usage(
+                    self.state.messages, self._current_provider, self._current_model
+                )
+                self.history_manager.add_message(
+                    role="user",
+                    content=user_input,
+                    context_usage={
+                        "tokens": usage.current_tokens,
+                        "percentage": usage.percentage
+                    }
+                )
                 
                 # Show status while optimizing
                 self._notify_status("📝 Optimizing prompt...")
@@ -199,24 +230,119 @@ class ChatEngine:
                 # Preprocessing disabled - just show user message with timestamp
                 user_message = self.state.add_message(MessageRole.USER, user_input)
                 self._notify_message(user_message)
+                
+                # Log to persistent history
+                usage = self.context_manager.calculate_usage(
+                    self.state.messages, self._current_provider, self._current_model
+                )
+                self.history_manager.add_message(
+                    role="user",
+                    content=user_input,
+                    context_usage={
+                        "tokens": usage.current_tokens,
+                        "percentage": usage.percentage
+                    }
+                )
+                
                 actual_prompt = user_input
+            
+            # Check for automatic context compaction before processing
+            current_usage = self.context_manager.calculate_usage(
+                self.state.messages, self._current_provider, self._current_model
+            )
+            
+            if self.context_manager.should_compact(current_usage):
+                self._notify_status("🗜️ Compacting context to save space...")
+                try:
+                    compacted_messages, compaction_event = self.context_manager.compact_context(
+                        self.state.messages, current_usage
+                    )
+                    
+                    # Update state messages
+                    self.state.messages = compacted_messages
+                    
+                    # Record in history
+                    self.history_manager.add_compaction_event(
+                        compaction_event.messages_summarized,
+                        compaction_event.tokens_saved,
+                        compaction_event.summary,
+                        compaction_event.trigger_percentage
+                    )
+                    
+                    # Update LLM client conversation history
+                    if self._llm_client is not None:
+                        history_dicts = [msg.to_dict() for msg in self.state.messages]
+                        self._llm_client.conversation_history = history_dicts
+                    
+                    # Show compaction notification
+                    compaction_msg = ChatMessage(
+                        role=MessageRole.SYSTEM,
+                        content=f"🗜️ Context automatically compacted: {compaction_event.messages_summarized} messages summarized, {compaction_event.tokens_saved:,} tokens saved",
+                        timestamp=self._format_timestamp()
+                    )
+                    self._notify_message(compaction_msg)
+                    
+                except Exception as e:
+                    import logging
+                    logging.warning(f"Auto-compaction failed: {e}")
+                    # Continue processing even if compaction fails
             
             # Set processing state
             self.state.is_processing = True
-            self._notify_status("Processing your message...")
             
-            # Check if streaming is available and enabled
-            if await self._should_use_streaming():
-                await self._handle_streaming_response(actual_prompt)
-            else:
-                # Fallback to batch processing
-                response = await self._get_ai_response(actual_prompt)
-                ai_message = self.state.add_message(MessageRole.ASSISTANT, response)
-                self._notify_message(ai_message)
+            # Show current context usage in status
+            updated_usage = self.context_manager.calculate_usage(
+                self.state.messages, self._current_provider, self._current_model
+            )
+            self._notify_status(f"Processing... {updated_usage.format_usage()}")
+            
+            # Start task with sequential thinking before LLM processing
+            task_id = await self.task_tracker.start_task(
+                user_input=actual_prompt,
+                context={"complexity": "medium", "task_type": "chat_response"},
+                estimated_duration_ms=30000  # 30 seconds estimate
+            )
+            
+            # Execute task with sequential thinking integration
+            try:
+                # Check if streaming is available and enabled
+                if await self._should_use_streaming():
+                    await self._handle_streaming_response(actual_prompt)
+                else:
+                    # Fallback to batch processing
+                    response = await self._get_ai_response(actual_prompt)
+                    ai_message = self.state.add_message(MessageRole.ASSISTANT, response)
+                    self._notify_message(ai_message)
+                    
+                    # Log assistant response to persistent history
+                    final_usage = self.context_manager.calculate_usage(
+                        self.state.messages, self._current_provider, self._current_model
+                    )
+                    self.history_manager.add_message(
+                        role="assistant",
+                        content=response,
+                        context_usage={
+                            "tokens": final_usage.current_tokens,
+                            "percentage": final_usage.percentage
+                        }
+                    )
+                
+                # Task tracking happens within start_task/execute_task cycle
+                # The task will be marked as completed when the chat response is done
+                
+            except Exception as task_error:
+                # Handle task execution error
+                self._notify_error(f"Task execution error: {str(task_error)}")
+                raise task_error
             
             # Clear processing state
             self.state.is_processing = False
-            self._notify_status("Ready")
+            
+            # Show final context usage status
+            final_usage = self.context_manager.calculate_usage(
+                self.state.messages, self._current_provider, self._current_model
+            )
+            self._notify_status(f"Ready - {final_usage.format_usage()}")
             
             return True
             
@@ -239,7 +365,7 @@ class ChatEngine:
             return False
     
     async def _handle_streaming_response(self, user_input: str) -> None:
-        """Handle streaming AI response with real-time updates."""
+        """Handle streaming AI response with real-time updates and history logging."""
         try:
             # Stream response chunks directly without creating placeholder message
             full_response = ""
@@ -253,11 +379,38 @@ class ChatEngine:
             ai_message = self.state.add_message(MessageRole.ASSISTANT, full_response)
             self._notify_message(ai_message)
             
+            # Log assistant response to persistent history
+            final_usage = self.context_manager.calculate_usage(
+                self.state.messages, self._current_provider, self._current_model
+            )
+            self.history_manager.add_message(
+                role="assistant",
+                content=full_response,
+                context_usage={
+                    "tokens": final_usage.current_tokens,
+                    "percentage": final_usage.percentage
+                }
+            )
+            
         except Exception as e:
             # Handle streaming errors
             error_msg = f"❌ Streaming error: {str(e)}"
             ai_message = self.state.add_message(MessageRole.ASSISTANT, error_msg)
             self._notify_message(ai_message)
+            
+            # Log error to persistent history
+            final_usage = self.context_manager.calculate_usage(
+                self.state.messages, self._current_provider, self._current_model
+            )
+            self.history_manager.add_message(
+                role="assistant",
+                content=error_msg,
+                context_usage={
+                    "tokens": final_usage.current_tokens,
+                    "percentage": final_usage.percentage
+                },
+                metadata={"error": True, "error_details": str(e)}
+            )
     
     async def _get_ai_response_streaming(self, user_input: str):
         """Stream AI response in real-time chunks with progress tracking."""
@@ -335,6 +488,15 @@ class ChatEngine:
 • /providers - Show LLM provider status
 • /timeouts [set <type> <seconds>|reset|status] - Manage request timeouts
 
+📊 **Context & History Commands:**
+• /context - Show current context window usage
+• /context limits - Show all provider context limits
+• /context compact - Force context compaction
+• /history export - Export session to file
+• /history stats - Show detailed session statistics
+• /history search <text> - Search conversation history
+• /history clear - Clear conversation history
+
 🛠️ **Preprocessing Commands:**
 • /preprocessing on/off/toggle - Control preprocessing mode
 • /preprocessing status - Show current preprocessing status
@@ -352,6 +514,18 @@ If you're getting connection errors:
    • Anthropic: `export ANTHROPIC_API_KEY=your_key` 
    • Ollama: `ollama serve` (free, runs locally)
    • OpenRouter: `export OPENROUTER_API_KEY=your_key`
+
+📊 **Context Window Management:**
+• **Automatic**: Context compacted at 80% usage to prevent overflow
+• **Manual**: Use `/context compact` to force compaction
+• **Monitoring**: Context usage shown in status bar and `/context` command
+• **History**: All compaction events logged for audit trail
+
+📈 **Persistent History Features:**
+• **Auto-save**: Conversation saved to `.agentsmcp.log` in launch directory
+• **Export**: Use `/history export` to create portable session files
+• **Search**: Use `/history search <text>` to find specific messages
+• **Statistics**: Use `/history stats` for detailed session analytics
 
 📊 **Preprocessing Modes:**
 • **On** (default): Multi-turn tool execution + prompt optimization
@@ -371,11 +545,19 @@ If you're getting connection errors:
 • Default timeouts work for most simple questions
 • Streaming responses have separate timeout settings
 
-💡 **Tips:**
+🔧 **Context Window Limits:**
+• **Claude 3.5 Sonnet**: 200K tokens (best for large contexts)
+• **GPT-4o**: 128K tokens (excellent for complex reasoning)
+• **Ollama Models**: 4K-16K tokens (free, local processing)
+• Check limits with `/context limits` command
+
+💡 **Pro Tips:**
 • Type `/config` if you see connection errors
 • Use `/preprocessing off` for faster responses
-• Use `/preprocessing config` to see optimization setup
+• Use `/context` to monitor token usage
 • Mix providers: fast local preprocessing + powerful cloud responses
+• Export important sessions with `/history export`
+• Search old conversations with `/history search <query>`
 • All environment variables should be set before starting TUI"""
         
         self._notify_message(ChatMessage(
@@ -407,23 +589,147 @@ If you're getting connection errors:
         return True
     
     async def _handle_history_command(self, args: str) -> bool:
-        """Handle /history command."""
-        if not self.state.messages:
-            history_msg = self.state.add_message(
-                MessageRole.SYSTEM,
-                "No conversation history available."
-            )
-        else:
-            history_text = f"Conversation History ({len(self.state.messages)} messages):\n"
-            for i, msg in enumerate(self.state.messages[-10:], 1):  # Show last 10
-                role_symbol = {"user": "👤", "assistant": "🤖", "system": "ℹ️"}
-                symbol = role_symbol.get(msg.role.value, "❓")
-                history_text += f"{i}. {symbol} {msg.content}\n"  # Show full content
+        """Handle /history command with enhanced features."""
+        try:
+            args = args.strip().lower()
             
-            history_msg = self.state.add_message(MessageRole.SYSTEM, history_text.strip())
-        
-        self._notify_message(history_msg)
-        return True
+            if not args or args == "show":
+                # Show recent conversation history
+                if not self.state.messages:
+                    result = "No conversation history available."
+                else:
+                    result = f"Conversation History ({len(self.state.messages)} messages):\n"
+                    for i, msg in enumerate(self.state.messages[-10:], 1):  # Show last 10
+                        role_symbol = {"user": "👤", "assistant": "🤖", "system": "ℹ️"}
+                        symbol = role_symbol.get(msg.role.value, "❓")
+                        # Truncate long messages for display
+                        content = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
+                        result += f"{i}. {symbol} {content}\n"
+                
+            elif args == "export":
+                # Export session history
+                try:
+                    output_file = self.history_manager.export_session()
+                    result = f"✅ Session exported successfully!\n\n"
+                    result += f"📁 File: {output_file}\n"
+                    result += f"📊 Contains: {len(self.state.messages)} messages\n"
+                    
+                    session_stats = self.history_manager.get_session_stats()
+                    result += f"🗓️ Session started: {session_stats.get('started_at', 'Unknown')}\n"
+                    result += f"💾 Total compactions: {session_stats.get('total_compactions', 0)}\n"
+                    
+                except Exception as e:
+                    result = f"❌ Export failed: {str(e)}"
+                    
+            elif args == "stats":
+                # Show detailed session statistics
+                session_stats = self.history_manager.get_session_stats()
+                
+                result = f"📊 Session Statistics\n"
+                result += "=" * 25 + "\n\n"
+                result += f"🆔 Session ID: {session_stats.get('session_id', 'N/A')}\n"
+                result += f"⏰ Started: {session_stats.get('started_at', 'Unknown')}\n"
+                result += f"📁 Directory: {session_stats.get('launch_directory', 'N/A')}\n"
+                result += f"💬 Total messages: {session_stats.get('total_messages', 0)}\n"
+                result += f"🗜️ Compactions: {session_stats.get('total_compactions', 0)}\n"
+                result += f"💾 Tokens saved: {session_stats.get('total_tokens_saved', 0):,}\n"
+                result += f"🔌 Provider: {session_stats.get('provider', 'N/A')}\n"
+                result += f"🤖 Model: {session_stats.get('model', 'N/A')}\n\n"
+                
+                # Show compaction history if available
+                compactions = self.history_manager.get_compaction_history()
+                if compactions:
+                    result += f"📈 Recent Compactions:\n"
+                    for comp in compactions[-3:]:  # Show last 3
+                        result += f"  • {comp.messages_summarized} messages → {comp.tokens_saved:,} tokens saved\n"
+                    result += "\n"
+                
+                result += "💡 Commands:\n"
+                result += "  • /history export - Export full session\n"
+                result += "  • /history clear - Clear session history\n"
+                result += "  • /context - Show context window usage\n"
+                
+            elif args == "clear":
+                # Clear history with confirmation
+                try:
+                    message_count = len(self.state.messages)
+                    
+                    # Clear state
+                    self.state.clear_history()
+                    
+                    # Clear LLM client history
+                    if self._llm_client is not None:
+                        self._llm_client.conversation_history.clear()
+                    
+                    # Clear persistent history
+                    self.history_manager.clear_history(confirm=True)
+                    
+                    result = f"✅ History cleared successfully!\n\n"
+                    result += f"📊 Cleared {message_count} messages\n"
+                    result += f"💾 Persistent history reset\n"
+                    result += f"🔄 LLM conversation history cleared\n"
+                    
+                except Exception as e:
+                    result = f"❌ Clear failed: {str(e)}"
+                    
+            elif args.startswith("search "):
+                # Search messages
+                query = args[7:]  # Remove "search " prefix
+                if not query:
+                    result = "❌ Search query required\n💡 Usage: /history search <text>"
+                else:
+                    matches = self.history_manager.search_messages(query)
+                    if matches:
+                        result = f"🔍 Found {len(matches)} messages matching '{query}':\n\n"
+                        for i, msg in enumerate(matches[-5:], 1):  # Show last 5 matches
+                            role_symbol = {"user": "👤", "assistant": "🤖", "system": "ℹ️"}
+                            symbol = role_symbol.get(msg.role, "❓")
+                            # Show context around match
+                            content = msg.content
+                            if len(content) > 150:
+                                # Try to show context around the match
+                                query_pos = content.lower().find(query.lower())
+                                if query_pos >= 0:
+                                    start = max(0, query_pos - 50)
+                                    end = min(len(content), query_pos + len(query) + 50)
+                                    content = content[start:end]
+                                    if start > 0:
+                                        content = "..." + content
+                                    if end < len(msg.content):
+                                        content = content + "..."
+                                else:
+                                    content = content[:150] + "..."
+                            result += f"{i}. {symbol} {content}\n\n"
+                    else:
+                        result = f"🔍 No messages found matching '{query}'"
+                        
+            else:
+                result = """❌ Invalid history command.
+
+💡 Usage:
+  • /history - Show recent conversation history
+  • /history show - Same as above
+  • /history export - Export session to file
+  • /history stats - Show detailed session statistics
+  • /history clear - Clear all conversation history
+  • /history search <text> - Search messages for text
+
+📊 Features:
+  • Persistent history saved to .agentsmcp.log
+  • Automatic backup and rotation
+  • Full-text search capability
+  • Export to portable JSON format"""
+            
+            self._notify_message(ChatMessage(
+                role=MessageRole.SYSTEM,
+                content=result,
+                timestamp=self._format_timestamp()
+            ))
+            return True
+            
+        except Exception as e:
+            self._notify_error(f"Error handling history command: {str(e)}")
+            return True
     
     async def _handle_status_command(self, args: str) -> bool:
         """Handle /status command."""
@@ -682,6 +988,151 @@ If you're getting connection errors:
             self._notify_error(f"Error handling timeouts command: {str(e)}")
             return True
 
+    async def _handle_context_command(self, args: str) -> bool:
+        """Handle /context command for context window management."""
+        try:
+            args = args.strip().lower()
+            
+            if not args or args == "status":
+                # Show current context usage
+                usage = self.context_manager.calculate_usage(
+                    self.state.messages, 
+                    self._current_provider, 
+                    self._current_model
+                )
+                
+                result = f"📊 Context Window Usage\n"
+                result += "=" * 30 + "\n\n"
+                result += f"{usage.format_detailed()}\n\n"
+                
+                # Show recommendations
+                recommendations = self.context_manager.get_context_recommendations(usage)
+                if recommendations:
+                    result += "💡 Recommendations:\n"
+                    for rec in recommendations:
+                        result += f"  {rec}\n"
+                    result += "\n"
+                
+                # Show session stats
+                session_stats = self.history_manager.get_session_stats()
+                result += f"📈 Session Statistics:\n"
+                result += f"  • Total messages: {session_stats.get('total_messages', 0)}\n"
+                result += f"  • Compactions: {session_stats.get('total_compactions', 0)}\n"
+                result += f"  • Tokens saved: {session_stats.get('total_tokens_saved', 0):,}\n"
+                result += f"  • Session ID: {session_stats.get('session_id', 'N/A')}\n\n"
+                
+                result += "🔧 Commands:\n"
+                result += "  • /context limits - Show all provider limits\n"
+                result += "  • /context compact - Force context compaction\n"
+                result += "  • /history export - Export session history\n"
+                
+            elif args == "limits":
+                # Show all provider context limits
+                limits = self.context_manager.get_all_provider_limits()
+                
+                result = f"📏 Provider Context Window Limits\n"
+                result += "=" * 40 + "\n\n"
+                
+                # Group by provider
+                providers = {}
+                for key, limit in limits.items():
+                    provider = key.split('/')[0]
+                    if provider not in providers:
+                        providers[provider] = []
+                    providers[provider].append((key, limit))
+                
+                for provider, models in providers.items():
+                    result += f"🔌 {provider.upper()}:\n"
+                    for model_key, limit in sorted(models, key=lambda x: x[1], reverse=True):
+                        model_name = model_key.split('/', 1)[1] if '/' in model_key else model_key
+                        result += f"  • {model_name}: {limit:,} tokens\n"
+                    result += "\n"
+                
+                # Show current selection
+                current_limit = self.context_manager.detect_context_limit(
+                    self._current_provider, self._current_model
+                )
+                result += f"🎯 Current Model ({self._current_provider}/{self._current_model}): {current_limit:,} tokens\n"
+                
+            elif args == "compact":
+                # Force context compaction
+                usage = self.context_manager.calculate_usage(
+                    self.state.messages, 
+                    self._current_provider, 
+                    self._current_model
+                )
+                
+                if len(self.state.messages) <= self.context_manager.preserve_recent_messages:
+                    result = f"❌ Cannot compact: Only {len(self.state.messages)} messages available.\n"
+                    result += f"Need at least {self.context_manager.preserve_recent_messages + 1} messages for compaction."
+                else:
+                    try:
+                        # Perform compaction
+                        compacted_messages, compaction_event = self.context_manager.compact_context(
+                            self.state.messages, usage
+                        )
+                        
+                        # Update state messages
+                        self.state.messages = compacted_messages
+                        
+                        # Record in history
+                        self.history_manager.add_compaction_event(
+                            compaction_event.messages_summarized,
+                            compaction_event.tokens_saved,
+                            compaction_event.summary,
+                            compaction_event.trigger_percentage
+                        )
+                        
+                        # Update LLM client conversation history if needed
+                        if self._llm_client is not None:
+                            # Convert messages to format expected by LLM client
+                            history_dicts = [msg.to_dict() for msg in self.state.messages]
+                            self._llm_client.conversation_history = history_dicts
+                        
+                        result = f"✅ Context Compacted Successfully\n\n"
+                        result += f"📊 Compaction Results:\n"
+                        result += f"  • Messages summarized: {compaction_event.messages_summarized}\n"
+                        result += f"  • Tokens saved: {compaction_event.tokens_saved:,}\n"
+                        result += f"  • Trigger percentage: {compaction_event.trigger_percentage:.1f}%\n"
+                        result += f"  • New message count: {len(compacted_messages)}\n\n"
+                        
+                        # Show new usage
+                        new_usage = self.context_manager.calculate_usage(
+                            self.state.messages, 
+                            self._current_provider, 
+                            self._current_model
+                        )
+                        result += f"📈 New Usage: {new_usage.format_usage()}\n"
+                        
+                    except Exception as e:
+                        result = f"❌ Compaction failed: {str(e)}"
+                        
+            else:
+                result = """❌ Invalid context command.
+
+💡 Usage:
+  • /context - Show current context usage
+  • /context status - Show detailed context status  
+  • /context limits - Show all provider context limits
+  • /context compact - Force context compaction
+
+📊 Context Management:
+  • Automatic compaction at 80% usage
+  • Recent messages are always preserved
+  • Older messages get summarized to save space
+  • All events are logged to persistent history"""
+            
+            self._notify_message(ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=result,
+                timestamp=self._format_timestamp()
+            ))
+            return True
+            
+        except Exception as e:
+            self._notify_error(f"Error handling context command: {str(e)}")
+            return True
+
     def _get_timeout_status(self) -> str:
         """Get detailed timeout configuration status."""
         # Get all timeout types from the codebase
@@ -813,6 +1264,77 @@ Timeout configuration is set at startup. To use defaults:
             # Log cleanup errors but don't raise them
             import logging
             logging.warning(f"ChatEngine cleanup warning: {e}")
+    
+    async def _handle_progress_command(self, args: str) -> bool:
+        """Handle /progress command for viewing current progress and agent status."""
+        try:
+            if hasattr(self, 'task_tracker') and self.task_tracker and self.task_tracker.progress_display:
+                progress_display = self.task_tracker.progress_display.format_progress_display(include_timing=True)
+                
+                if progress_display and progress_display.strip():
+                    response_message = ChatMessage(
+                        role=MessageRole.SYSTEM,
+                        content=f"🔄 **Current Progress Status**\n\n{progress_display}",
+                        timestamp=self._format_timestamp()
+                    )
+                else:
+                    response_message = ChatMessage(
+                        role=MessageRole.SYSTEM,
+                        content="📋 No active tasks or agents currently running.",
+                        timestamp=self._format_timestamp()
+                    )
+            else:
+                response_message = ChatMessage(
+                    role=MessageRole.SYSTEM,
+                    content="⚠️ Progress tracking system not available.",
+                    timestamp=self._format_timestamp()
+                )
+            
+            self._notify_message(response_message)
+            return True
+            
+        except Exception as e:
+            self._notify_error(f"Failed to get progress information: {e}")
+            return True
+    
+    async def _handle_timing_command(self, args: str) -> bool:
+        """Handle /timing command for performance analysis and timing reports."""
+        try:
+            if hasattr(self, 'task_tracker') and self.task_tracker and self.task_tracker.progress_display:
+                # Get comprehensive timing analysis
+                stats = self.task_tracker.progress_display.get_performance_stats()
+                timing_report = self.task_tracker.progress_display.get_timing_analysis_report()
+                
+                # Create detailed response with both summary and full report
+                content_parts = [
+                    "⏱️ **Performance & Timing Analysis**",
+                    "",
+                    "**Quick Stats:**",
+                    f"• Tasks Completed: {stats['completed_tasks']}/{stats['total_tasks']}",
+                    f"• Active Agents: {stats['active_agents']}",
+                    f"• Success Rate: {stats['success_rate']:.1f}%",
+                    "",
+                    timing_report
+                ]
+                
+                response_message = ChatMessage(
+                    role=MessageRole.SYSTEM,
+                    content="\n".join(content_parts),
+                    timestamp=self._format_timestamp()
+                )
+            else:
+                response_message = ChatMessage(
+                    role=MessageRole.SYSTEM,
+                    content="⚠️ Timing analysis system not available.",
+                    timestamp=self._format_timestamp()
+                )
+            
+            self._notify_message(response_message)
+            return True
+            
+        except Exception as e:
+            self._notify_error(f"Failed to get timing analysis: {e}")
+            return True
 
 
 class MockAIProvider:
