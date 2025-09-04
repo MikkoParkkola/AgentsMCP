@@ -65,13 +65,16 @@ class ChatEngine:
         self._message_callback: Optional[Callable[[ChatMessage], None]] = None
         self._error_callback: Optional[Callable[[str], None]] = None
         
-        # Built-in commands
+        # Built-in commands with new diagnostic and control commands
         self.commands = {
             '/help': self._handle_help_command,
             '/quit': self._handle_quit_command,
             '/clear': self._handle_clear_command,
             '/history': self._handle_history_command,
-            '/status': self._handle_status_command
+            '/status': self._handle_status_command,
+            '/config': self._handle_config_command,
+            '/providers': self._handle_providers_command,
+            '/preprocessing': self._handle_preprocessing_command
         }
     
     @staticmethod
@@ -167,7 +170,7 @@ class ChatEngine:
     
     async def _get_ai_response(self, user_input: str) -> str:
         """
-        Get AI response to user input using the real LLMClient.
+        Get AI response to user input using the real LLMClient with detailed error reporting.
         """
         try:
             # Import and initialize the real LLM client
@@ -180,38 +183,59 @@ class ChatEngine:
                 os.environ['AGENTSMCP_TUI_MODE'] = '1'
                 self._llm_client = LLMClient()
             
-            # Get response from real LLM
+            # Get response from real LLM - it now handles its own error reporting
             response = await self._llm_client.send_message(user_input)
             return response
             
         except Exception as e:
-            # Fallback to simple response if LLM fails
+            # This should rarely happen now since LLMClient handles most errors internally
             import logging
-            logging.error(f"LLM client failed: {e}")
+            logging.error(f"Unexpected error in chat engine: {e}")
             
-            # Provide helpful fallback responses
-            if "hello" in user_input.lower():
-                return "Hello! How can I help you today?"
-            elif any(word in user_input.lower() for word in ["help", "commands"]):
-                return "I'm an AI assistant. You can ask me questions or have a conversation. Type /help for available commands."
-            elif any(word in user_input.lower() for word in ["agent", "role"]):
-                return "I have access to various specialized agents including coding agents, QA engineers, and other roles. What would you like me to help you with?"
-            else:
-                return f"I understand you're asking about: \"{user_input}\". I'm having trouble connecting to the full AI system right now, but I can still help with basic commands. Try typing /help for available options."
+            return f"❌ Unexpected system error: {str(e)}\n\n💡 This may indicate a system-level issue. Try:\n  • Restarting the TUI\n  • Checking your terminal environment\n  • Running with debug mode enabled"
     
     async def _handle_help_command(self, args: str) -> bool:
         """Handle /help command."""
-        help_message = """Commands:
+        help_message = """🤖 AI Command Composer - Help
+==================================
+
+💬 **Chat Commands:**
 • /help - Show this help message
-• /quit - Exit the application
+• /quit - Exit the application  
 • /clear - Clear conversation history
 • /history - Show conversation history
-• /status - Show current status
 
-Just type your message and press Enter to chat with the AI!"""
+🔧 **Diagnostic Commands:**
+• /status - Show basic system status
+• /config - Show detailed LLM configuration
+• /providers - Show LLM provider status
+• /preprocessing [on/off/toggle/status] - Control preprocessing mode
+
+🚀 **Quick Setup Guide:**
+If you're getting connection errors:
+
+1. **Check Configuration**: `/config`
+2. **See Available Providers**: `/providers`
+3. **Set up a Provider**:
+   • OpenAI: `export OPENAI_API_KEY=your_key`
+   • Anthropic: `export ANTHROPIC_API_KEY=your_key` 
+   • Ollama: `ollama serve` (free, runs locally)
+   • OpenRouter: `export OPENROUTER_API_KEY=your_key`
+
+📊 **Preprocessing Modes:**
+• **On** (default): Multi-turn tool execution, slower but more capable
+• **Off**: Direct LLM responses only, faster but simpler
+
+💡 **Tips:**
+• Type `/config` if you see connection errors
+• Use `/preprocessing off` for faster responses
+• All environment variables should be set before starting TUI"""
         
-        help_msg = self.state.add_message(MessageRole.SYSTEM, help_message)
-        self._notify_message(help_msg)
+        self._notify_message(ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content=help_message,
+            timestamp=self._format_timestamp()
+        ))
         return True
     
     async def _handle_quit_command(self, args: str) -> bool:
@@ -261,6 +285,176 @@ Just type your message and press Enter to chat with the AI!"""
         status_msg = self.state.add_message(MessageRole.SYSTEM, status_info)
         self._notify_message(status_msg)
         return True
+
+    async def _handle_config_command(self, args: str) -> bool:
+        """Handle /config command to show detailed configuration status."""
+        try:
+            from ...conversation.llm_client import LLMClient
+            
+            # Initialize LLM client if not already done
+            if not hasattr(self, '_llm_client'):
+                import os
+                os.environ['AGENTSMCP_TUI_MODE'] = '1'
+                self._llm_client = LLMClient()
+            
+            # Get configuration status
+            config_status = self._llm_client.get_configuration_status()
+            
+            # Build detailed status message
+            status_msg = "🔧 LLM Configuration Status\n"
+            status_msg += "=" * 40 + "\n\n"
+            
+            # Current settings
+            status_msg += f"📊 Current Settings:\n"
+            status_msg += f"  • Provider: {config_status['current_provider']}\n"
+            status_msg += f"  • Model: {config_status['current_model']}\n"
+            status_msg += f"  • Preprocessing: {'✅ Enabled' if config_status['preprocessing_enabled'] else '❌ Disabled'}\n"
+            status_msg += f"  • MCP Tools: {'✅ Available' if config_status['mcp_tools_available'] else '❌ Not Available'}\n\n"
+            
+            # Provider status
+            status_msg += "🔌 Provider Status:\n"
+            for provider, pstatus in config_status['providers'].items():
+                icon = "✅" if pstatus['configured'] else "❌"
+                status_msg += f"  {icon} {provider.upper()}:\n"
+                
+                if provider == "ollama":
+                    service_icon = "✅" if pstatus['service_available'] else "❌"
+                    status_msg += f"      Service: {service_icon} {'Running' if pstatus['service_available'] else 'Not Running'}\n"
+                    if not pstatus['service_available']:
+                        status_msg += f"      💡 Start with: ollama serve\n"
+                else:
+                    key_icon = "✅" if pstatus['api_key_present'] else "❌"
+                    status_msg += f"      API Key: {key_icon} {'Configured' if pstatus['api_key_present'] else 'Missing'}\n"
+                    if not pstatus['api_key_present']:
+                        status_msg += f"      💡 Set: {provider.upper()}_API_KEY environment variable\n"
+                
+                if pstatus['last_error']:
+                    status_msg += f"      ⚠️ Last Error: {pstatus['last_error']}\n"
+                status_msg += "\n"
+            
+            # Configuration issues
+            if config_status['configuration_issues']:
+                status_msg += "⚠️ Configuration Issues:\n"
+                for issue in config_status['configuration_issues']:
+                    status_msg += f"  • {issue}\n"
+                status_msg += "\n"
+            
+            # Help section
+            status_msg += "💡 Commands:\n"
+            status_msg += "  • /providers - Show only provider status\n" 
+            status_msg += "  • /preprocessing - Control preprocessing mode\n"
+            status_msg += "  • /help - Show all available commands\n"
+            
+            self._notify_message(ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=status_msg,
+                timestamp=self._format_timestamp()
+            ))
+            return True
+            
+        except Exception as e:
+            self._notify_error(f"Error getting configuration status: {str(e)}")
+            return True
+
+    async def _handle_providers_command(self, args: str) -> bool:
+        """Handle /providers command to show provider status."""
+        try:
+            from ...conversation.llm_client import LLMClient
+            
+            # Initialize LLM client if not already done
+            if not hasattr(self, '_llm_client'):
+                import os
+                os.environ['AGENTSMCP_TUI_MODE'] = '1'
+                self._llm_client = LLMClient()
+            
+            # Get configuration status
+            config_status = self._llm_client.get_configuration_status()
+            
+            # Build providers status message
+            status_msg = "🔌 LLM Provider Status\n"
+            status_msg += "=" * 30 + "\n\n"
+            
+            # Count configured providers
+            configured_count = sum(1 for p in config_status['providers'].values() if p['configured'])
+            status_msg += f"📊 Summary: {configured_count}/{len(config_status['providers'])} providers configured\n\n"
+            
+            # Provider details
+            for provider, pstatus in config_status['providers'].items():
+                icon = "🟢" if pstatus['configured'] else "🔴"
+                status_msg += f"{icon} **{provider.upper()}**\n"
+                
+                if provider == "ollama":
+                    if pstatus['service_available']:
+                        status_msg += "   ✅ Service running locally\n"
+                    else:
+                        status_msg += "   ❌ Service not running\n"
+                        status_msg += "   💡 Start with: `ollama serve`\n"
+                else:
+                    if pstatus['api_key_present']:
+                        status_msg += "   ✅ API key configured\n"
+                    else:
+                        status_msg += "   ❌ API key missing\n"
+                        status_msg += f"   💡 Set: `{provider.upper()}_API_KEY` environment variable\n"
+                
+                if pstatus['last_error']:
+                    status_msg += f"   ⚠️ Error: {pstatus['last_error']}\n"
+                status_msg += "\n"
+            
+            # Current selection
+            status_msg += f"🎯 Current: **{config_status['current_provider']}** ({config_status['current_model']})\n\n"
+            
+            # Quick setup guide
+            status_msg += "🚀 Quick Setup:\n"
+            status_msg += "  • **OpenAI**: `export OPENAI_API_KEY=your_key`\n"
+            status_msg += "  • **Anthropic**: `export ANTHROPIC_API_KEY=your_key`\n"
+            status_msg += "  • **Ollama**: `ollama serve` (free, local)\n"
+            status_msg += "  • **OpenRouter**: `export OPENROUTER_API_KEY=your_key`\n"
+            
+            self._notify_message(ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=status_msg,
+                timestamp=self._format_timestamp()
+            ))
+            return True
+            
+        except Exception as e:
+            self._notify_error(f"Error getting provider status: {str(e)}")
+            return True
+
+    async def _handle_preprocessing_command(self, args: str) -> bool:
+        """Handle /preprocessing command to control preprocessing mode."""
+        try:
+            from ...conversation.llm_client import LLMClient
+            
+            # Initialize LLM client if not already done
+            if not hasattr(self, '_llm_client'):
+                import os
+                os.environ['AGENTSMCP_TUI_MODE'] = '1'
+                self._llm_client = LLMClient()
+            
+            args = args.strip().lower()
+            
+            if args == "on":
+                result = self._llm_client.toggle_preprocessing(True)
+            elif args == "off":
+                result = self._llm_client.toggle_preprocessing(False)
+            elif args == "toggle":
+                result = self._llm_client.toggle_preprocessing()
+            elif args == "status" or args == "":
+                result = self._llm_client.get_preprocessing_status()
+            else:
+                result = "❌ Invalid preprocessing command.\n\n💡 Usage:\n  • /preprocessing on - Enable preprocessing\n  • /preprocessing off - Disable preprocessing\n  • /preprocessing toggle - Switch mode\n  • /preprocessing status - Show current mode"
+            
+            self._notify_message(ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=result,
+                timestamp=self._format_timestamp()
+            ))
+            return True
+            
+        except Exception as e:
+            self._notify_error(f"Error handling preprocessing command: {str(e)}")
+            return True
     
     def get_state(self) -> ChatState:
         """Get current chat state."""

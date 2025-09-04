@@ -140,9 +140,43 @@ class Orchestrator:
         self.response_synthesizer = ResponseSynthesizer()
         self.communication_interceptor = CommunicationInterceptor()
         
-        # Agent management
+        # Agent management with enhanced capabilities
         self.active_agents = {}
         self.agent_status = {}
+        
+        # Enhanced agent management system
+        from ..agents.agent_loader import AgentLoader
+        from .memory_manager import AgentMemoryManager
+        from .agent_health_monitor import AgentHealthMonitor, HealthThresholds
+        
+        self.agent_loader = AgentLoader()
+        self.memory_manager = AgentMemoryManager()
+        self.specialist_agents = {}  # Cache for on-demand specialist agents
+        
+        # Initialize health monitoring system
+        health_thresholds = HealthThresholds(
+            max_response_time_ms=8000.0,  # Generous for AI agents
+            min_success_rate=0.7,
+            max_consecutive_failures=3,
+            heartbeat_timeout_seconds=45,
+            unhealthy_threshold_score=60.0,
+            failed_threshold_score=30.0
+        )
+        
+        self.health_monitor = AgentHealthMonitor(
+            thresholds=health_thresholds,
+            metrics_storage_path=".agentsmcp/health_metrics",
+            auto_restart=True,
+            monitoring_interval=15.0
+        )
+        
+        # Set up health monitoring callbacks
+        self.health_monitor.add_health_change_listener(self._on_agent_health_change)
+        self.health_monitor.add_restart_listener(self._on_agent_restart)
+        
+        # Load all available agent descriptions
+        self.available_agent_types = self.agent_loader.load_all_descriptions()
+        self.logger.info(f"Loaded {len(self.available_agent_types)} specialist agent types")
         
         # Statistics
         self.total_requests = 0
@@ -168,7 +202,13 @@ class Orchestrator:
             }
             self.continuous_optimizer = ContinuousOptimizer(optimizer_config)
         
-        self.logger.info(f"Orchestrator initialized in {self.config.mode.value} mode")
+        # Planning system state
+        self.active_plans = {}
+        self.planning_enabled = True
+        
+        self.logger.info(f"Orchestrator initialized in {self.config.mode.value} mode with "
+                        f"{len(self.available_agent_types)} specialist agents available and "
+                        f"health monitoring enabled")
         
     def _setup_monitoring_listeners(self):
         """Setup event listeners for monitoring system integration."""
@@ -224,8 +264,7 @@ class Orchestrator:
         This method is the ONLY way users should interact with agents.
         All responses are synthesized and sanitized before returning.
         
-        CRITICAL: This now routes ALL user input directly to the LLM agent,
-        bypassing task classification to ensure no template responses.
+        Enhanced with planning phase support to address agent swarm best practices.
         """
         start_time = time.time()
         self.total_requests += 1
@@ -253,11 +292,122 @@ class Orchestrator:
         try:
             self.logger.info(f"Processing user input: {user_input[:100]}...")
             
-            # BYPASS CLASSIFICATION: Route ALL input directly to LLM agent
-            # This ensures no template responses - everything goes to the connected LLM
-            self.logger.debug("Bypassing task classifier - routing directly to LLM agent")
+            # Check for planning commands first (addresses agent swarm best practice #1)
+            if user_input.strip().startswith('/'):
+                command_parts = user_input.strip().split(' ', 1)
+                command = command_parts[0].lower()
+                task_description = command_parts[1] if len(command_parts) > 1 else ""
+                
+                # Handle planning commands
+                if command in ['/plan', '/spike', '/tech-plan'] or command.startswith('/execute'):
+                    self.logger.info(f"Processing planning command: {command}")
+                    
+                    planning_response = await self.handle_planning_command(command, task_description)
+                    
+                    processing_time = int((time.time() - start_time) * 1000)
+                    task_success = True
+                    self.successful_responses += 1
+                    
+                    # Record success metrics
+                    self.metrics_collector.record_counter("orchestrator.requests.planning_command")
+                    self.metrics_collector.record_histogram("orchestrator.response_time_ms", processing_time)
+                    self.performance_monitor.record_request(processing_time / 1000.0, success=True)
+                    
+                    return OrchestratorResponse(
+                        content=planning_response,
+                        response_type="planning_command",
+                        processing_time_ms=processing_time,
+                        metadata={
+                            "command": command,
+                            "planning_enabled": True
+                        }
+                    )
+                
+                # Handle system commands
+                elif command in ['/health', '/status', '/agents']:
+                    self.logger.info(f"Processing system command: {command}")
+                    
+                    if command == '/health':
+                        health_summary = self.get_system_health()
+                        system_response = (
+                            f"🏥 **System Health Report**\n"
+                            f"**Overall Health Score:** {health_summary.get('overall_health_score', 0):.1f}/100\n"
+                            f"**Total Agents:** {health_summary.get('total_agents', 0)}\n"
+                            f"**Healthy:** {health_summary.get('healthy', 0)} | "
+                            f"**Degraded:** {health_summary.get('degraded', 0)} | "
+                            f"**Unhealthy:** {health_summary.get('unhealthy', 0)} | "
+                            f"**Failed:** {health_summary.get('failed', 0)}\n"
+                            f"**Monitoring Status:** {'Active' if hasattr(self, 'health_monitor') else 'Inactive'}"
+                        )
+                    elif command == '/status':
+                        planning_summary = self.get_planning_summary()
+                        system_response = (
+                            f"📊 **Orchestrator Status**\n"
+                            f"**Total Requests:** {self.total_requests}\n"
+                            f"**Success Rate:** {(self.successful_responses/self.total_requests*100):.1f}%\n"
+                            f"**Active Agents:** {len(self.active_agents)}\n"
+                            f"**Available Agent Types:** {len(self.available_agent_types)}\n"
+                            f"**Planning System:** {planning_summary.get('status', 'inactive')}\n"
+                            f"**Active Plans:** {planning_summary.get('active_plans', 0)}"
+                        )
+                    elif command == '/agents':
+                        agent_list = list(self.available_agent_types.keys())[:10]  # Show first 10
+                        system_response = (
+                            f"🤖 **Available Specialist Agents** ({len(self.available_agent_types)} total)\n"
+                            f"**Sample Types:** {', '.join(agent_list)}\n"
+                            f"**Active Specialists:** {len(self.specialist_agents)}\n"
+                            f"Use `/plan <task>` to create structured execution plans with automatic agent assignment."
+                        )
+                    
+                    processing_time = int((time.time() - start_time) * 1000)
+                    task_success = True
+                    self.successful_responses += 1
+                    
+                    return OrchestratorResponse(
+                        content=system_response,
+                        response_type="system_command",
+                        processing_time_ms=processing_time,
+                        metadata={"command": command}
+                    )
+            
+            # For complex tasks, suggest using planning phase (best practice implementation)
+            complexity_indicators = [
+                'implement', 'develop', 'create', 'build', 'design', 'integrate', 
+                'deploy', 'migrate', 'refactor', 'optimize', 'analyze', 'research'
+            ]
+            
+            user_lower = user_input.lower()
+            is_complex_task = any(indicator in user_lower for indicator in complexity_indicators)
+            
+            if is_complex_task and len(user_input.split()) > 10 and not user_input.startswith('/'):
+                # Suggest planning approach for complex tasks
+                suggestion = (
+                    f"🎯 **Complex Task Detected**\n\n"
+                    f"For best results with complex tasks, consider using the planning phase:\n"
+                    f"• `/plan {user_input}` - Create comprehensive execution plan\n"
+                    f"• `/tech-plan {user_input}` - Technical implementation plan\n"
+                    f"• `/spike {user_input}` - Research and investigation plan\n\n"
+                    f"Or I can proceed directly with immediate execution:"
+                )
+                
+                # Store the suggestion but continue with normal processing
+                await self.memory_manager.store_agent_memory(
+                    agent_type="orchestrator",
+                    category="user_interaction",
+                    content=f"Suggested planning approach for complex task: {user_input[:100]}",
+                    importance=4
+                )
+            
+            # Route to LLM agent for normal processing
+            self.logger.debug("Routing to LLM agent for processing")
             
             response = await self._route_to_llm_directly(user_input, context)
+            
+            # Add planning suggestion to response if applicable
+            if is_complex_task and len(user_input.split()) > 10 and not user_input.startswith('/'):
+                response.content = suggestion + "\n\n---\n\n" + response.content
+                response.metadata = response.metadata or {}
+                response.metadata['planning_suggested'] = True
             
             # Record that we successfully got an LLM response
             processing_time = int((time.time() - start_time) * 1000)
@@ -986,4 +1136,497 @@ class Orchestrator:
             "mode": self.config.mode.value,
             "interception_stats": self.communication_interceptor.get_interception_stats(),
             "self_improvement_enabled": self.config.enable_self_improvement
+        }
+
+    # ===== ENHANCED AGENT MANAGEMENT METHODS =====
+    
+    async def spawn_specialist_agent(self, agent_type: str, task_context: str = "") -> Optional[str]:
+        """Spawn a specialist agent on-demand based on task requirements.
+        
+        Args:
+            agent_type: Type of specialist agent to spawn
+            task_context: Context about the task for memory initialization
+            
+        Returns:
+            Agent ID if successful, None otherwise
+        """
+        if agent_type not in self.available_agent_types:
+            self.logger.warning(f"Unknown specialist agent type: {agent_type}")
+            return None
+            
+        try:
+            # Check if agent is already active
+            if agent_type in self.specialist_agents:
+                self.logger.info(f"Specialist agent {agent_type} already active")
+                return self.specialist_agents[agent_type]
+            
+            # Create agent configuration
+            agent_desc = self.available_agent_types[agent_type]
+            agent_config = self.agent_loader.create_agent_config(agent_desc)
+            
+            # Generate unique agent ID
+            agent_id = f"{agent_type}_{len(self.active_agents)}"
+            
+            # Store agent configuration and mark as active
+            self.active_agents[agent_id] = agent_config
+            self.agent_status[agent_id] = "active"
+            self.specialist_agents[agent_type] = agent_id
+            
+            # Initialize agent memory with task context
+            if task_context:
+                await self.memory_manager.store_agent_memory(
+                    agent_type=agent_type,
+                    category="initialization",
+                    content=f"Spawned for task: {task_context}",
+                    importance=6,
+                    tags=["spawn", "initialization"]
+                )
+            
+            self.logger.info(f"Successfully spawned specialist agent {agent_type} with ID {agent_id}")
+            return agent_id
+            
+        except Exception as e:
+            self.logger.error(f"Failed to spawn specialist agent {agent_type}: {e}")
+            return None
+    
+    async def get_agent_recommendations(self, task_description: str, current_agents: List[str] = None) -> List[str]:
+        """Get recommendations for specialist agents based on task description.
+        
+        Args:
+            task_description: Description of the task to be performed
+            current_agents: List of currently active agents
+            
+        Returns:
+            List of recommended agent types
+        """
+        current_agents = current_agents or []
+        recommendations = set()
+        
+        # Keyword-based agent recommendations
+        task_lower = task_description.lower()
+        
+        # Security-related keywords
+        if any(word in task_lower for word in ['security', 'vulnerability', 'encrypt', 'auth', 'hack', 'breach']):
+            recommendations.add('security-engineer')
+            
+        # Product management keywords
+        if any(word in task_lower for word in ['product', 'feature', 'roadmap', 'requirement', 'user story']):
+            recommendations.add('senior-product-manager')
+            
+        # Architecture keywords
+        if any(word in task_lower for word in ['architecture', 'design', 'system', 'scalability', 'performance']):
+            recommendations.add('principal-software-architect')
+            
+        # UX/UI keywords
+        if any(word in task_lower for word in ['ui', 'ux', 'design', 'interface', 'user experience']):
+            recommendations.add('ux-ui-designer')
+            
+        # Legal keywords
+        if any(word in task_lower for word in ['legal', 'compliance', 'gdpr', 'privacy', 'contract']):
+            recommendations.add('legal-counsel')
+            
+        # Data/analytics keywords
+        if any(word in task_lower for word in ['data', 'analytics', 'ml', 'ai', 'model', 'analysis']):
+            recommendations.add('data-scientist')
+            
+        # Marketing keywords
+        if any(word in task_lower for word in ['marketing', 'campaign', 'brand', 'customer', 'sales']):
+            recommendations.add('marketing-manager')
+        
+        # Remove already active agents
+        recommendations = [agent for agent in recommendations if agent not in current_agents]
+        
+        return list(recommendations)
+    
+    async def delegate_to_specialist(self, agent_type: str, task: str, context: Optional[Dict] = None) -> Optional[str]:
+        """Delegate a task to a specialist agent, spawning if necessary.
+        
+        Args:
+            agent_type: Type of specialist agent to delegate to
+            task: Task description to delegate
+            context: Optional context information
+            
+        Returns:
+            Response from specialist agent or None if failed
+        """
+        try:
+            # Spawn agent if not already active
+            agent_id = await self.spawn_specialist_agent(agent_type, task)
+            if not agent_id:
+                return None
+            
+            # Get contextual memories for the agent
+            relevant_memories = await self.memory_manager.get_contextual_memories(
+                task_description=task,
+                agent_type=agent_type,
+                limit=5
+            )
+            
+            # Prepare enhanced context with memories
+            enhanced_context = context or {}
+            if relevant_memories:
+                memory_context = "\n".join([
+                    f"Memory ({m.category}): {m.content[:200]}..." if len(m.content) > 200 else f"Memory ({m.category}): {m.content}"
+                    for m in relevant_memories
+                ])
+                enhanced_context["relevant_memories"] = memory_context
+            
+            # Delegate task to the specialist agent
+            response = await self._delegate_to_agent(agent_id, task, enhanced_context)
+            
+            # Store the interaction in memory
+            if response:
+                await self.memory_manager.store_agent_memory(
+                    agent_type=agent_type,
+                    category="interaction",
+                    content=f"Task: {task}\nResponse: {response[:500]}{'...' if len(response) > 500 else ''}",
+                    importance=7,
+                    tags=["delegation", "interaction"]
+                )
+            
+            return response
+            
+        except Exception as e:
+            self.logger.error(f"Failed to delegate to specialist {agent_type}: {e}")
+            return None
+    
+    async def cleanup_inactive_agents(self, max_idle_minutes: int = 30):
+        """Clean up specialist agents that have been inactive for too long.
+        
+        Args:
+            max_idle_minutes: Maximum idle time before cleanup
+        """
+        # This would implement logic to track agent activity and cleanup
+        # For now, just log the intention
+        self.logger.info(f"Agent cleanup scheduled for agents idle > {max_idle_minutes} minutes")
+    
+    def get_available_specialist_types(self) -> List[str]:
+        """Get list of all available specialist agent types."""
+        return list(self.available_agent_types.keys())
+    
+    def get_active_specialists(self) -> Dict[str, str]:
+        """Get mapping of active specialist agent types to their IDs."""
+        return dict(self.specialist_agents)
+    
+    async def get_agent_memory_summary(self, agent_type: str) -> Optional[str]:
+        """Get a summary of memories for a specific agent type.
+        
+        Args:
+            agent_type: Type of agent to get memory summary for
+            
+        Returns:
+            Summary of agent memories or None if no memories found
+        """
+        try:
+            memories = await self.memory_manager.retrieve_agent_memories(
+                agent_type=agent_type,
+                limit=10
+            )
+            
+            if not memories:
+                return None
+            
+            summary_parts = []
+            for memory in memories:
+                summary_parts.append(f"- {memory.category.title()}: {memory.content[:100]}{'...' if len(memory.content) > 100 else ''}")
+            
+            return f"Memory Summary for {agent_type}:\n" + "\n".join(summary_parts)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get memory summary for {agent_type}: {e}")
+            return None
+
+    # Health monitoring callback methods
+    def _on_agent_health_change(self, agent_id: str, old_status, new_status):
+        """Handle agent health status changes"""
+        self.logger.info(f"Agent {agent_id} health changed: {old_status.value} -> {new_status.value}")
+        
+        # Update agent status tracking
+        if agent_id in self.agent_status:
+            self.agent_status[agent_id]['health_status'] = new_status.value
+            self.agent_status[agent_id]['last_health_change'] = time.time()
+        
+        # Store health change in memory for learning
+        asyncio.create_task(self.memory_manager.store_agent_memory(
+            agent_type="orchestrator",
+            category="health_monitoring",
+            content=f"Agent {agent_id} health changed from {old_status.value} to {new_status.value}",
+            importance=7 if new_status.value in ['failed', 'unhealthy'] else 5
+        ))
+    
+    async def _on_agent_restart(self, agent_id: str, restart_count: int):
+        """Handle agent restart events"""
+        self.logger.warning(f"Agent {agent_id} restarted (restart #{restart_count})")
+        
+        # Attempt to restart the agent if we have it cached
+        if agent_id in self.specialist_agents:
+            try:
+                # Clear the failed agent
+                del self.specialist_agents[agent_id]
+                
+                # Extract agent type from agent_id (assuming format: type_timestamp)
+                agent_type = agent_id.split('_')[0] if '_' in agent_id else agent_id
+                
+                # Respawn the agent
+                await self.spawn_specialist_agent(agent_type, "Agent restarted due to health issues")
+                
+                self.logger.info(f"Successfully respawned agent {agent_id}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to respawn agent {agent_id}: {e}")
+        
+        # Store restart event in memory
+        await self.memory_manager.store_agent_memory(
+            agent_type="orchestrator", 
+            category="agent_management",
+            content=f"Agent {agent_id} restarted {restart_count} times due to health issues",
+            importance=8
+        )
+    
+    async def start_health_monitoring(self):
+        """Start the health monitoring system"""
+        await self.health_monitor.start_monitoring()
+        self.logger.info("Health monitoring system started")
+    
+    async def stop_health_monitoring(self):
+        """Stop the health monitoring system"""
+        await self.health_monitor.stop_monitoring()
+        self.logger.info("Health monitoring system stopped")
+    
+    def get_system_health(self):
+        """Get overall system health summary"""
+        return self.health_monitor.get_system_health_summary()
+    
+    def get_unhealthy_agents(self):
+        """Get list of unhealthy agents"""
+        return self.health_monitor.get_unhealthy_agents()
+
+    
+    # Planning system integration
+    async def create_execution_plan(self, 
+                                   task_description: str,
+                                   objective: str,
+                                   task_type: Optional[str] = None,
+                                   context: Optional[Dict[str, Any]] = None):
+        """Create a structured execution plan before task execution"""
+        from .planning_system import PlanningSystem
+        
+        if not hasattr(self, 'planning_system'):
+            self.planning_system = PlanningSystem(
+                auto_approve_threshold="medium",
+                plans_storage_path=".agentsmcp/execution_plans"
+            )
+        
+        plan = await self.planning_system.create_plan(
+            task_description=task_description,
+            objective=objective, 
+            task_type=task_type,
+            context=context
+        )
+        
+        # Store plan reference for execution
+        self.active_plans[plan.plan_id] = plan
+        
+        # Log plan creation
+        await self.memory_manager.store_agent_memory(
+            agent_type="orchestrator",
+            category="planning",
+            content=f"Created execution plan {plan.plan_id}: {len(plan.steps)} steps, risk level {plan.risk_level}",
+            importance=6
+        )
+        
+        return plan
+    
+    async def execute_with_plan(self, plan_id: str) -> bool:
+        """Execute a task using a structured plan"""
+        if not hasattr(self, 'planning_system'):
+            logger.error("Planning system not initialized")
+            return False
+        
+        plan = self.planning_system.get_plan(plan_id)
+        if not plan:
+            logger.error(f"Plan {plan_id} not found")
+            return False
+        
+        # Auto-approve if within threshold
+        if not await self.planning_system.approve_plan(plan_id):
+            logger.warning(f"Plan {plan_id} requires manual approval")
+            return False
+        
+        # Execute plan with step-by-step agent delegation
+        async def step_executor(step, plan):
+            try:
+                # Determine best agent for this step
+                if step.assigned_agent:
+                    agent_type = step.assigned_agent
+                else:
+                    # Auto-assign based on step description
+                    agent_type = self._determine_step_agent(step.description)
+                
+                # Record step start in health monitor
+                step_agent_id = f"{agent_type}_{int(time.time())}"
+                self.health_monitor.register_agent(step_agent_id, agent_type)
+                
+                # Delegate step to appropriate agent
+                start_time = time.time()
+                
+                if agent_type in self.available_agent_types:
+                    result = await self.delegate_to_specialist(agent_type, step.description)
+                else:
+                    # Fallback to direct LLM execution
+                    result = await self._route_to_llm_directly(step.description)
+                
+                response_time = (time.time() - start_time) * 1000
+                
+                # Record step completion in health monitor
+                self.health_monitor.record_task_completion(
+                    step_agent_id, 
+                    success=True, 
+                    response_time_ms=response_time
+                )
+                
+                return True, str(result)
+                
+            except Exception as e:
+                logger.error(f"Step execution failed: {e}")
+                if 'step_agent_id' in locals():
+                    self.health_monitor.record_task_completion(
+                        step_agent_id,
+                        success=False,
+                        response_time_ms=(time.time() - start_time) * 1000,
+                        error_details={'error': str(e), 'step': step.description}
+                    )
+                return False, str(e)
+        
+        success = await self.planning_system.execute_plan(plan_id, step_executor)
+        
+        if success:
+            await self.memory_manager.store_agent_memory(
+                agent_type="orchestrator",
+                category="planning",
+                content=f"Successfully executed plan {plan_id}",
+                importance=7
+            )
+        
+        return success
+    
+    def _determine_step_agent(self, step_description: str) -> str:
+        """Determine the best agent type for a plan step"""
+        step_lower = step_description.lower()
+        
+        # Agent selection based on step keywords
+        if any(keyword in step_lower for keyword in ['code', 'implement', 'develop', 'program']):
+            return 'senior-software-engineer'
+        elif any(keyword in step_lower for keyword in ['test', 'qa', 'quality', 'verify']):
+            return 'qa-engineer' 
+        elif any(keyword in step_lower for keyword in ['design', 'architecture', 'system']):
+            return 'principal-software-architect'
+        elif any(keyword in step_lower for keyword in ['security', 'scan', 'vulnerability']):
+            return 'security-engineer'
+        elif any(keyword in step_lower for keyword in ['deploy', 'infrastructure', 'devops']):
+            return 'devops-engineer'
+        elif any(keyword in step_lower for keyword in ['analyze', 'data', 'metrics', 'report']):
+            return 'data-scientist'
+        elif any(keyword in step_lower for keyword in ['ui', 'ux', 'interface', 'user']):
+            return 'ux-ui-designer'
+        elif any(keyword in step_lower for keyword in ['document', 'specification', 'write']):
+            return 'technical-writer'
+        else:
+            return 'senior-software-engineer'  # Default fallback
+    
+    async def handle_planning_command(self, command: str, task_description: str) -> str:
+        """Handle planning-related commands (/plan, /spike, /tech-plan)"""
+        try:
+            if command == "/plan":
+                # Create comprehensive execution plan
+                plan = await self.create_execution_plan(
+                    task_description=task_description,
+                    objective=f"Complete task: {task_description}",
+                    context={'complexity': 'medium', 'user_facing': True}
+                )
+                
+                plan_summary = (
+                    f"📋 **Execution Plan Created: {plan.plan_id}**\n"
+                    f"**Objective:** {plan.objective}\n"
+                    f"**Risk Level:** {plan.risk_level}\n"
+                    f"**Estimated Duration:** {plan.estimated_total_duration_minutes} minutes\n"
+                    f"**Steps:** {len(plan.steps)}\n\n"
+                    f"**Plan Steps:**\n"
+                )
+                
+                for i, step in enumerate(plan.steps, 1):
+                    plan_summary += f"{i}. {step.description} ({step.estimated_duration_minutes}min)\n"
+                
+                if plan.identified_risks:
+                    plan_summary += f"\n**Identified Risks:** {', '.join(plan.identified_risks)}\n"
+                
+                if plan.required_agents:
+                    plan_summary += f"**Required Agents:** {', '.join(plan.required_agents)}\n"
+                
+                plan_summary += f"\n✅ Plan ready for execution with `/execute {plan.plan_id}`"
+                
+                return plan_summary
+                
+            elif command == "/spike":
+                # Create research/investigation plan
+                plan = await self.create_execution_plan(
+                    task_description=f"Research spike: {task_description}",
+                    objective=f"Investigate and document findings for: {task_description}",
+                    task_type="data_analysis",
+                    context={'complexity': 'low', 'research_focused': True}
+                )
+                
+                return (
+                    f"🔍 **Research Spike Plan: {plan.plan_id}**\n"
+                    f"Investigation plan created with {len(plan.steps)} research steps.\n"
+                    f"Estimated time: {plan.estimated_total_duration_minutes} minutes\n\n"
+                    f"Ready to execute with `/execute {plan.plan_id}`"
+                )
+                
+            elif command == "/tech-plan":
+                # Create technical implementation plan
+                plan = await self.create_execution_plan(
+                    task_description=f"Technical implementation: {task_description}",
+                    objective=f"Design and implement technical solution for: {task_description}",
+                    task_type="code_development",
+                    context={'complexity': 'high', 'technical_focus': True}
+                )
+                
+                return (
+                    f"⚙️ **Technical Implementation Plan: {plan.plan_id}**\n"
+                    f"Technical plan with {len(plan.steps)} implementation steps.\n"
+                    f"Risk level: {plan.risk_level}\n"
+                    f"Required agents: {', '.join(plan.required_agents)}\n\n"
+                    f"Ready to execute with `/execute {plan.plan_id}`"
+                )
+            
+            elif command.startswith("/execute"):
+                # Execute a specific plan
+                plan_id = command.split(" ")[1] if len(command.split(" ")) > 1 else None
+                if not plan_id:
+                    return "❌ Please specify plan ID: `/execute <plan_id>`"
+                
+                success = await self.execute_with_plan(plan_id)
+                
+                if success:
+                    return f"✅ **Plan {plan_id} executed successfully!**"
+                else:
+                    return f"❌ **Plan {plan_id} execution failed.** Check logs for details."
+            
+            else:
+                return f"❌ Unknown planning command: {command}"
+                
+        except Exception as e:
+            logger.error(f"Planning command error: {e}")
+            return f"❌ Planning command failed: {str(e)}"
+    
+    def get_planning_summary(self) -> Dict[str, Any]:
+        """Get summary of planning system status"""
+        if not hasattr(self, 'planning_system'):
+            return {'status': 'not_initialized'}
+        
+        return {
+            'status': 'active',
+            'summary': self.planning_system.get_plan_summary(),
+            'active_plans': len(self.active_plans)
         }

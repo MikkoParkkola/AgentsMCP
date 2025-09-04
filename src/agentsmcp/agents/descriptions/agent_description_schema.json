@@ -15,7 +15,17 @@
     },
     "category": {
       "type": "string",
-      "enum": ["engineering", "design", "research", "quality_assurance", "management", "legal", "marketing", "data"],
+      "enum": [
+        "executive",
+        "product_strategy", 
+        "design_ux",
+        "engineering_architecture",
+        "security_legal",
+        "data_analytics",
+        "marketing_sales",
+        "operations_support",
+        "specialized"
+      ],
       "description": "Category of the agent role"
     },
     "description": {
@@ -30,9 +40,22 @@
       "type": "array",
       "items": {
         "type": "string",
-        "enum": ["filesystem", "bash", "git", "web_search"]
+        "enum": [
+          "filesystem", 
+          "bash", 
+          "git",
+          "web_search",
+          "pieces",
+          "serena",
+          "sequential-thinking",
+          "semgrep",
+          "trivy",
+          "eslint",
+          "lsp-ts",
+          "lsp-py"
+        ]
       },
-      "description": "List of tools the agent has access to"
+      "description": "List of MCP and standard tools the agent has access to"
     },
     "capabilities": {
       "type": "array",
@@ -66,6 +89,20 @@
         }
       },
       "description": "Quality checks and gates this agent enforces"
+    },
+    "memory_specialization": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Types of information this agent specializes in remembering using pieces tool"
+    },
+    "interactions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Primary stakeholders and other agents this role interacts with"
     }
   }
 }

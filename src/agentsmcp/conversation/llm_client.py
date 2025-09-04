@@ -116,6 +116,102 @@ class LLMClient:
         except Exception:
             pass
         self.mcp_tools = self._get_mcp_tools()
+
+    def get_configuration_status(self) -> Dict[str, Any]:
+        """Get detailed configuration status for diagnostics."""
+        status = {
+            "providers": {},
+            "current_provider": self.provider,
+            "current_model": self.model,
+            "preprocessing_enabled": getattr(self, 'preprocessing_enabled', True),
+            "mcp_tools_available": len(self.mcp_tools) > 0,
+            "configuration_issues": []
+        }
+        
+        # Check each provider configuration
+        providers_to_check = ["openai", "anthropic", "ollama", "openrouter", "codex"]
+        
+        for provider in providers_to_check:
+            provider_status = {
+                "configured": False,
+                "api_key_present": False,
+                "service_available": False,
+                "last_error": None
+            }
+            
+            try:
+                if provider == "ollama":
+                    # Special case for Ollama - check if service is running
+                    import aiohttp
+                    import asyncio
+                    
+                    async def check_ollama():
+                        try:
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get("http://localhost:11434/api/tags", timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                                    return resp.status == 200
+                        except Exception as e:
+                            provider_status["last_error"] = str(e)
+                            return False
+                    
+                    # Run the check synchronously
+                    try:
+                        loop = asyncio.get_event_loop()
+                        provider_status["service_available"] = loop.run_until_complete(check_ollama())
+                    except:
+                        provider_status["service_available"] = False
+                    provider_status["configured"] = True
+                    provider_status["api_key_present"] = True  # Ollama doesn't need API keys
+                else:
+                    # Check for API keys
+                    api_key = self._get_api_key(provider)
+                    provider_status["api_key_present"] = bool(api_key)
+                    provider_status["configured"] = provider_status["api_key_present"]
+                    provider_status["service_available"] = provider_status["api_key_present"]  # Assume available if key exists
+                    
+            except Exception as e:
+                provider_status["last_error"] = str(e)
+            
+            status["providers"][provider] = provider_status
+            
+            # Add configuration issues
+            if provider == self.provider and not provider_status["configured"]:
+                if provider == "ollama":
+                    status["configuration_issues"].append(f"Current provider '{provider}' not available. Start Ollama with: ollama serve")
+                else:
+                    status["configuration_issues"].append(f"Current provider '{provider}' missing API key. Set {provider.upper()}_API_KEY environment variable")
+        
+        # Check if any provider is configured
+        configured_providers = [p for p, s in status["providers"].items() if s["configured"]]
+        if not configured_providers:
+            status["configuration_issues"].append("No LLM providers configured. Set at least one API key or start Ollama locally")
+        
+        return status
+
+    def toggle_preprocessing(self, enabled: Optional[bool] = None) -> str:
+        """Toggle or set preprocessing mode."""
+        if not hasattr(self, 'preprocessing_enabled'):
+            self.preprocessing_enabled = True
+            
+        if enabled is None:
+            self.preprocessing_enabled = not self.preprocessing_enabled
+        else:
+            self.preprocessing_enabled = enabled
+            
+        status = "enabled" if self.preprocessing_enabled else "disabled"
+        mode_desc = "Multi-turn tool execution" if self.preprocessing_enabled else "Direct LLM responses"
+        
+        return f"✅ Preprocessing {status}\n📝 Mode: {mode_desc}\n💡 Use '/preprocessing status' to check current mode"
+
+    def get_preprocessing_status(self) -> str:
+        """Get current preprocessing status."""
+        if not hasattr(self, 'preprocessing_enabled'):
+            self.preprocessing_enabled = True
+            
+        status = "enabled" if self.preprocessing_enabled else "disabled"
+        mode_desc = "Multi-turn tool execution with tool calling" if self.preprocessing_enabled else "Direct LLM responses only"
+        
+        return f"🔧 Preprocessing: {status}\n📝 Description: {mode_desc}\n\n💡 Commands:\n  • /preprocessing on - Enable preprocessing\n  • /preprocessing off - Disable preprocessing\n  • /preprocessing toggle - Switch mode"
         
     def _load_config(self, config_path: Optional[Path] = None) -> Dict[str, Any]:
         """Load LLM configuration from user's settings."""
@@ -479,15 +575,33 @@ Remember: Be truthful about the system's current state rather than creating fals
             return fallback_text
 
     async def send_message(self, message: str, context: Optional[Dict[str, Any]] = None) -> str:
-        """Send message to LLM and get response with multi-turn tool execution."""
+        """Send message to LLM and get response with enhanced error reporting."""
         try:
+            # Check configuration before attempting to send
+            config_status = self.get_configuration_status()
+            if config_status["configuration_issues"]:
+                error_msg = "❌ LLM Configuration Issues:\n"
+                for issue in config_status["configuration_issues"]:
+                    error_msg += f"  • {issue}\n"
+                error_msg += "\n💡 Solutions:\n"
+                error_msg += "  • Type /config to see detailed configuration status\n"
+                error_msg += "  • Type /help to see all available commands\n"
+                error_msg += "  • Set environment variables: OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.\n"
+                error_msg += "  • Or start Ollama locally: ollama serve"
+                return error_msg
+
             # Add user message to history with timestamp
             from datetime import datetime
             timestamp = datetime.now().isoformat()
             user_msg = ConversationMessage(role="user", content=message, timestamp=timestamp, context=context)
             self.conversation_history.append(user_msg)
             
-            # Multi-turn tool execution loop
+            # Handle simple mode (no preprocessing) vs full mode
+            preprocessing_enabled = getattr(self, 'preprocessing_enabled', True)
+            if not preprocessing_enabled:
+                return await self._send_simple_message(message)
+            
+            # Multi-turn tool execution loop (preprocessing mode)
             max_tool_turns = 3  # Prevent infinite loops
             turn = 0
             
@@ -501,7 +615,17 @@ Remember: Be truthful about the system's current state rather than creating fals
                 # Use real MCP ollama client based on provider
                 response = await self._call_llm_via_mcp(messages)
                 if not response:
-                    return "Sorry, I'm having trouble connecting to the LLM service. Please check your configuration in settings."
+                    # More specific error message based on configuration
+                    config_status = self.get_configuration_status()
+                    provider_status = config_status["providers"].get(self.provider, {})
+                    
+                    if not provider_status.get("configured"):
+                        if self.provider == "ollama":
+                            return "❌ Ollama not running. Start it with: ollama serve"
+                        else:
+                            return f"❌ {self.provider.upper()} API key not configured. Set {self.provider.upper()}_API_KEY environment variable"
+                    else:
+                        return f"❌ Failed to connect to {self.provider}. Check your network connection and try again."
                 
                 # Check for tool calls in response
                 tool_calls = self._extract_tool_calls(response)
@@ -604,7 +728,38 @@ Remember: Be truthful about the system's current state rather than creating fals
                 
         except Exception as e:
             logger.error(f"Error in LLM communication: {e}")
-            return f"Sorry, I encountered an error: {str(e)}"
+            # Provide more helpful error messages
+            error_str = str(e).lower()
+            if "api key" in error_str or "unauthorized" in error_str:
+                return f"❌ Authentication failed. Check your API key configuration for {self.provider}."
+            elif "connection" in error_str or "network" in error_str or "timeout" in error_str:
+                return f"❌ Network error connecting to {self.provider}. Check your internet connection."
+            elif "rate limit" in error_str:
+                return f"❌ Rate limit exceeded for {self.provider}. Please wait a moment and try again."
+            else:
+                return f"❌ Unexpected error with {self.provider}: {str(e)}\n\n💡 Try /config to check your configuration or /help for available commands."
+
+    
+    async def _send_simple_message(self, message: str) -> str:
+        """Send a simple message without preprocessing/tool execution."""
+        try:
+            # Prepare simple conversation for direct LLM call
+            messages = [
+                {"role": "system", "content": "You are a helpful AI assistant. Respond directly and concisely."},
+                {"role": "user", "content": message}
+            ]
+            
+            response = await self._call_llm_via_mcp(messages, enable_tools=False)
+            if response:
+                content = self._extract_response_content(response)
+                if content:
+                    return content
+            
+            return "❌ No response received from LLM. Check your configuration with /config"
+            
+        except Exception as e:
+            logger.error(f"Error in simple message mode: {e}")
+            return f"❌ Error in simple mode: {str(e)}"
     
     def supports_streaming(self) -> bool:
         """Check if the current provider supports streaming responses."""

@@ -1,0 +1,151 @@
+{
+  "mcpServers": {
+    "pieces": {
+      "command": "npx",
+      "args": [
+        "@pieces-app/pieces-os-server-mcp"
+      ],
+      "description": "Long-term memory and context management for all agents",
+      "capabilities": [
+        "memory_storage",
+        "context_retrieval", 
+        "knowledge_persistence"
+      ]
+    },
+    "serena": {
+      "command": "npx",
+      "args": [
+        "serena-mcp-server"
+      ],
+      "description": "Semantic code analysis and understanding",
+      "capabilities": [
+        "code_analysis",
+        "symbol_search",
+        "semantic_understanding"
+      ]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "description": "Complex problem-solving and multi-step reasoning",
+      "capabilities": [
+        "complex_reasoning",
+        "problem_decomposition",
+        "strategic_planning"
+      ]
+    },
+    "semgrep": {
+      "command": "npx",
+      "args": [
+        "@semgrep/mcp-server"
+      ],
+      "description": "Static security analysis and vulnerability detection",
+      "capabilities": [
+        "security_scanning",
+        "vulnerability_detection",
+        "code_quality_analysis"
+      ]
+    },
+    "trivy": {
+      "command": "npx",
+      "args": [
+        "@aquasec/trivy-mcp-server"
+      ],
+      "description": "Container and filesystem vulnerability scanning",
+      "capabilities": [
+        "container_scanning",
+        "filesystem_scanning",
+        "dependency_analysis"
+      ]
+    },
+    "eslint": {
+      "command": "npx",
+      "args": [
+        "@eslint/mcp-server"
+      ],
+      "description": "JavaScript/TypeScript code linting and quality analysis",
+      "capabilities": [
+        "code_linting",
+        "style_checking",
+        "best_practices_validation"
+      ]
+    },
+    "lsp-ts": {
+      "command": "npx",
+      "args": [
+        "@typescript-language-server/mcp-server"
+      ],
+      "description": "TypeScript language server protocol integration",
+      "capabilities": [
+        "typescript_analysis",
+        "code_completion",
+        "type_checking"
+      ]
+    },
+    "lsp-py": {
+      "command": "python",
+      "args": [
+        "-m",
+        "pylsp_mcp_server"
+      ],
+      "description": "Python language server protocol integration", 
+      "capabilities": [
+        "python_analysis",
+        "code_completion",
+        "static_analysis"
+      ]
+    },
+    "git": {
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-git"
+      ],
+      "description": "Advanced git operations and repository management",
+      "capabilities": [
+        "version_control",
+        "repository_management",
+        "branch_operations"
+      ]
+    },
+    "mcp-installer": {
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-installer"
+      ],
+      "description": "Dynamic MCP server installation and management",
+      "capabilities": [
+        "server_installation",
+        "dependency_management",
+        "dynamic_tool_loading"
+      ]
+    }
+  },
+  "defaultServerConfig": {
+    "timeout": 30000,
+    "retry": 3,
+    "autoRestart": true
+  },
+  "agentToolMapping": {
+    "executive": ["pieces", "sequential-thinking", "web_search", "git"],
+    "product_strategy": ["pieces", "sequential-thinking", "web_search"],
+    "engineering_architecture": ["serena", "pieces", "sequential-thinking", "git", "lsp-ts", "lsp-py"],
+    "security_legal": ["semgrep", "trivy", "pieces", "serena", "sequential-thinking", "git"],
+    "data_analytics": ["pieces", "sequential-thinking", "web_search", "git"],
+    "design_ux": ["pieces", "sequential-thinking", "web_search"],
+    "marketing_sales": ["pieces", "web_search", "sequential-thinking"],
+    "operations_support": ["pieces", "git", "serena", "trivy", "sequential-thinking"],
+    "quality_assurance": ["filesystem", "bash", "git", "web_search", "eslint", "semgrep"]
+  },
+  "installation_instructions": {
+    "setup_command": "npm install -g @pieces-app/pieces-os-server-mcp serena-mcp-server @modelcontextprotocol/server-sequential-thinking @semgrep/mcp-server @aquasec/trivy-mcp-server @eslint/mcp-server @typescript-language-server/mcp-server @modelcontextprotocol/server-git @modelcontextprotocol/server-installer",
+    "python_requirements": "pip install pylsp-mcp-server python-lsp-server",
+    "notes": [
+      "Ensure Node.js and npm are installed for NPM-based servers",
+      "Python servers require Python 3.8+ and pip",
+      "Some servers may require additional system dependencies",
+      "Configuration can be customized per environment"
+    ]
+  }
+}

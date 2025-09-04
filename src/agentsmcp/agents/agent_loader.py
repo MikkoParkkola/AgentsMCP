@@ -61,6 +61,7 @@ class AgentLoader:
             
         loaded_count = 0
         
+        # Load from main descriptions directory
         for json_file in self.descriptions_path.glob("*.json"):
             if json_file.name == "agent_description_schema.json":
                 continue  # Skip schema file
@@ -73,6 +74,19 @@ class AgentLoader:
                     
             except Exception as e:
                 logger.error(f"Failed to load agent description from {json_file}: {e}")
+        
+        # Load from roles subdirectory if it exists
+        roles_path = self.descriptions_path / "roles"
+        if roles_path.exists():
+            for json_file in roles_path.glob("*.json"):
+                try:
+                    agent_desc = self.load_description(json_file)
+                    if agent_desc:
+                        self.loaded_descriptions[agent_desc.type] = agent_desc
+                        loaded_count += 1
+                        
+                except Exception as e:
+                    logger.error(f"Failed to load agent description from {json_file}: {e}")
                 
         logger.info(f"Loaded {loaded_count} agent descriptions from {self.descriptions_path}")
         return self.loaded_descriptions

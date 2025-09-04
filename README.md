@@ -383,6 +383,7 @@ curl http://localhost:8000/workflows/<workflow-id>/artifacts
 - **[Tool Integration Reference](docs/TOOL_INTEGRATION.md)** - Development tool capabilities and examples
 
 ### Operations & Troubleshooting
+- **[Security Documentation](docs/SECURITY.md)** - Security features, insecure_mode, and production considerations
 - **[Performance & Troubleshooting](docs/TROUBLESHOOTING.md)** - Optimization tips and common issues
 - **[Configuration Guide](docs/configuration.md)** - Environment setup and customization
 - **[CLI Reference](docs/cli-client.md)** - Complete command-line interface guide
