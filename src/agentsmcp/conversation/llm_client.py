@@ -1289,8 +1289,9 @@ Remember: Be truthful about the system's current state rather than creating fals
             # Prepare messages for API call
             messages = await self._prepare_messages()
             
-            # Track streaming progress
+            # Track streaming progress and accumulate full response
             chunk_count = 0
+            full_response = ""
             if progress_callback:
                 await progress_tracker.update_streaming(chunk_count)
             
@@ -1298,31 +1299,51 @@ Remember: Be truthful about the system's current state rather than creating fals
             if self.provider == "ollama-turbo":
                 async for chunk in self._call_ollama_turbo_streaming(messages):
                     chunk_count += 1
+                    full_response += chunk
                     if progress_callback and chunk_count % 10 == 0:  # Update every 10 chunks
                         await progress_tracker.update_streaming(chunk_count)
                     yield chunk
             elif self.provider == "ollama":
                 async for chunk in self._call_ollama_streaming(messages):
                     chunk_count += 1
+                    full_response += chunk
                     if progress_callback and chunk_count % 10 == 0:
                         await progress_tracker.update_streaming(chunk_count)
                     yield chunk
             elif self.provider == "openai":
                 async for chunk in self._call_openai_streaming(messages):
                     chunk_count += 1
+                    full_response += chunk
                     if progress_callback and chunk_count % 10 == 0:
                         await progress_tracker.update_streaming(chunk_count)
                     yield chunk
             elif self.provider == "anthropic":
                 async for chunk in self._call_anthropic_streaming(messages):
                     chunk_count += 1
+                    full_response += chunk
                     if progress_callback and chunk_count % 10 == 0:
                         await progress_tracker.update_streaming(chunk_count)
                     yield chunk
             else:
                 # Fallback to non-streaming
                 response = await self.send_message(message, context, progress_callback)
+                full_response = response
                 yield response
+            
+            # After streaming completes, add assistant response to conversation history
+            # Only add if we have a non-empty response and it's not already added by the provider method
+            if full_response.strip():
+                from datetime import datetime
+                assistant_msg = ConversationMessage(
+                    role="assistant", 
+                    content=full_response,
+                    timestamp=datetime.now().isoformat()
+                )
+                
+                # Check if response is already in history (to avoid duplicates)
+                # The provider-specific methods may have already added it
+                if not self.conversation_history or self.conversation_history[-1].content != full_response:
+                    self.conversation_history.append(assistant_msg)
         
         except Exception as e:
             logger.error(f"Error in streaming LLM communication: {e}")

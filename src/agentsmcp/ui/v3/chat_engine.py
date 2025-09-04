@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional, Callable, AsyncGenerator
 from dataclasses import dataclass, field
 from enum import Enum
 import time
+import logging
 from datetime import datetime
 
 
@@ -64,6 +65,7 @@ class ChatEngine:
         self._status_callback: Optional[Callable[[str], None]] = None
         self._message_callback: Optional[Callable[[ChatMessage], None]] = None
         self._error_callback: Optional[Callable[[str], None]] = None
+        self.logger = logging.getLogger(__name__)
         
         # Initialize LLMClient once to preserve conversation history
         self._llm_client = None
@@ -377,6 +379,22 @@ class ChatEngine:
             
             # Execute task with sequential thinking integration
             try:
+                # For complex tasks that require execution
+                if task_id is not None:
+                    # Execute the planned task
+                    self._notify_status("🔄 Executing planned task...")
+                    try:
+                        execution_result = await self.task_tracker.execute_task(task_id)
+                        
+                        # Check if execution produced a specific response
+                        if execution_result and execution_result.get('success'):
+                            # If task execution was successful, still need to get AI response
+                            # The execution mainly tracks progress and planning
+                            pass
+                    except Exception as exec_error:
+                        self.logger.warning(f"Task execution error (continuing with normal flow): {exec_error}")
+                        # Continue with normal AI response flow even if task execution fails
+                
                 # Check if streaming is available and enabled
                 if await self._should_use_streaming():
                     await self._handle_streaming_response(actual_prompt, task_id)
