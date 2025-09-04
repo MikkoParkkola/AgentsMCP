@@ -33,8 +33,10 @@ class TerminalCapabilities:
 def detect_terminal_capabilities() -> TerminalCapabilities:
     """Detect current terminal capabilities for progressive enhancement."""
     
-    # Basic TTY detection
+    # Basic TTY detection with override
     is_tty = sys.stdout.isatty() and sys.stdin.isatty()
+    if os.environ.get('AGENTSMCP_FORCE_RICH'):
+        is_tty = True  # Force TTY for Rich mode
     
     # Terminal size detection with fallbacks
     try:
@@ -102,6 +104,10 @@ def _detect_unicode_support() -> bool:
 
 def _detect_rich_support(is_tty: bool, colors: bool, unicode: bool) -> bool:
     """Detect if Rich library should work well in this terminal."""
+    # Force Rich mode override - user explicitly wants Rich UI
+    if os.environ.get('AGENTSMCP_FORCE_RICH'):
+        return True
+    
     if not is_tty:
         return False
     
@@ -133,6 +139,10 @@ def _detect_terminal_performance() -> bool:
 
 def _should_force_plain() -> bool:
     """Check if we should force plain text mode."""
+    # Force Rich mode override - user explicitly wants Rich UI
+    if os.environ.get('AGENTSMCP_FORCE_RICH'):
+        return False
+    
     # Explicit environment variable
     if os.environ.get('AGENTSMCP_FORCE_PLAIN'):
         return True

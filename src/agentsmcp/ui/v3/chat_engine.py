@@ -100,6 +100,7 @@ class ChatEngine:
             '/context': self._handle_context_command,
             '/progress': self._handle_progress_command,
             '/timing': self._handle_timing_command,
+            '/rich': self._handle_rich_command,
         }
     
     @staticmethod
@@ -756,6 +757,7 @@ Response:"""
 • /quit - Exit the application  
 • /clear - Clear conversation history
 • /history - Show conversation history
+• /rich - Show Rich TUI access guide
 
 🔧 **Diagnostic Commands:**
 • /status - Show basic system status
@@ -1671,6 +1673,76 @@ Timeout configuration is set at startup. To use defaults:
             
         except Exception as e:
             self._notify_error(f"Failed to get timing analysis: {e}")
+            return True
+    
+    async def _handle_rich_command(self, args: str) -> bool:
+        """Handle /rich command to show Rich TUI access information."""
+        try:
+            import os
+            
+            # Check current environment
+            has_force_rich = bool(os.environ.get('AGENTSMCP_FORCE_RICH'))
+            is_tty = hasattr(self, '_terminal_capabilities') and getattr(self._terminal_capabilities, 'is_tty', False)
+            
+            rich_guide = [
+                "🎨 **Rich TUI Access Guide**",
+                "=" * 30,
+                "",
+                "**Current Status:**"
+            ]
+            
+            if has_force_rich:
+                rich_guide.extend([
+                    "✅ Rich mode is ACTIVE (AGENTSMCP_FORCE_RICH=1)",
+                    "   You should be seeing the advanced Rich interface!",
+                    ""
+                ])
+            else:
+                rich_guide.extend([
+                    "ℹ️  You're currently in Plain Text mode",
+                    "💡 Rich TUI is available with advanced features!",
+                    "",
+                    "**Rich TUI Features:**",
+                    "• 📊 Live progress bars and status displays",
+                    "• 🤖 Real-time agent status monitoring", 
+                    "• 🧠 Sequential thinking visualization",
+                    "• 🎯 Enhanced chat interface with syntax highlighting",
+                    "• ⚡ Faster visual feedback and updates",
+                    "",
+                    "**How to Access Rich TUI:**",
+                    "1. **Method 1** (Recommended): Run in a real terminal",
+                    "   ```",
+                    "   ./agentsmcp tui",
+                    "   ```",
+                    "",
+                    "2. **Method 2**: Force Rich mode (works anywhere)",
+                    "   ```",
+                    "   AGENTSMCP_FORCE_RICH=1 ./agentsmcp tui",
+                    "   ```",
+                    "",
+                    "3. **Method 3**: Persistent Rich mode",
+                    "   ```",
+                    "   export AGENTSMCP_FORCE_RICH=1",
+                    "   ./agentsmcp tui",
+                    "   ```",
+                    "",
+                    "**To Restart with Rich TUI:**",
+                    "1. Type `/quit` to exit this session",
+                    "2. Use one of the methods above to restart",
+                    ""
+                ])
+            
+            response_message = ChatMessage(
+                role=MessageRole.SYSTEM,
+                content="\n".join(rich_guide),
+                timestamp=self._format_timestamp()
+            )
+            
+            self._notify_message(response_message)
+            return True
+            
+        except Exception as e:
+            self._notify_error(f"Failed to show Rich TUI guide: {e}")
             return True
 
 
