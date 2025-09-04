@@ -65,6 +65,10 @@ class ChatEngine:
         self._message_callback: Optional[Callable[[ChatMessage], None]] = None
         self._error_callback: Optional[Callable[[str], None]] = None
         
+        # Initialize LLMClient once to preserve conversation history
+        self._llm_client = None
+        self._initialize_llm_client()
+        
         # Built-in commands with new diagnostic and control commands
         self.commands = {
             '/help': self._handle_help_command,
@@ -106,6 +110,21 @@ class ChatEngine:
         self.state.last_error = error
         if self._error_callback:
             self._error_callback(error)
+    
+    def _initialize_llm_client(self) -> None:
+        """Initialize LLM client once and preserve it throughout the session."""
+        try:
+            # Set TUI mode to prevent console contamination
+            import os
+            os.environ['AGENTSMCP_TUI_MODE'] = '1'
+            
+            # Import and create LLMClient only once
+            from ...conversation.llm_client import LLMClient
+            self._llm_client = LLMClient()
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to initialize LLM client: {e}")
+            self._llm_client = None
     
     async def process_input(self, user_input: str) -> bool:
         """
@@ -173,15 +192,12 @@ class ChatEngine:
         Get AI response to user input using the real LLMClient with detailed error reporting.
         """
         try:
-            # Import and initialize the real LLM client
-            from ...conversation.llm_client import LLMClient
+            # Use the existing LLM client (initialized once in __init__)
+            if self._llm_client is None:
+                self._initialize_llm_client()
             
-            # Initialize LLM client if not already done
-            if not hasattr(self, '_llm_client'):
-                # Set TUI mode to prevent console contamination
-                import os
-                os.environ['AGENTSMCP_TUI_MODE'] = '1'
-                self._llm_client = LLMClient()
+            if self._llm_client is None:
+                return "❌ Failed to initialize LLM client. Please check your configuration with /config command."
             
             # Get response from real LLM - it now handles its own error reporting
             response = await self._llm_client.send_message(user_input)
@@ -248,6 +264,10 @@ If you're getting connection errors:
         message_count = len(self.state.messages)
         self.state.clear_history()
         
+        # Also clear the LLMClient's conversation history to keep them in sync
+        if self._llm_client is not None:
+            self._llm_client.conversation_history.clear()
+        
         clear_msg = self.state.add_message(
             MessageRole.SYSTEM, 
             f"Cleared {message_count} messages from conversation history."
@@ -289,13 +309,13 @@ If you're getting connection errors:
     async def _handle_config_command(self, args: str) -> bool:
         """Handle /config command to show detailed configuration status."""
         try:
-            from ...conversation.llm_client import LLMClient
+            # Use the existing LLM client (initialized once in __init__)
+            if self._llm_client is None:
+                self._initialize_llm_client()
             
-            # Initialize LLM client if not already done
-            if not hasattr(self, '_llm_client'):
-                import os
-                os.environ['AGENTSMCP_TUI_MODE'] = '1'
-                self._llm_client = LLMClient()
+            if self._llm_client is None:
+                self._notify_error("Failed to initialize LLM client")
+                return True
             
             # Get configuration status
             config_status = self._llm_client.get_configuration_status()
@@ -359,13 +379,13 @@ If you're getting connection errors:
     async def _handle_providers_command(self, args: str) -> bool:
         """Handle /providers command to show provider status."""
         try:
-            from ...conversation.llm_client import LLMClient
+            # Use the existing LLM client (initialized once in __init__)
+            if self._llm_client is None:
+                self._initialize_llm_client()
             
-            # Initialize LLM client if not already done
-            if not hasattr(self, '_llm_client'):
-                import os
-                os.environ['AGENTSMCP_TUI_MODE'] = '1'
-                self._llm_client = LLMClient()
+            if self._llm_client is None:
+                self._notify_error("Failed to initialize LLM client")
+                return True
             
             # Get configuration status
             config_status = self._llm_client.get_configuration_status()
@@ -424,13 +444,13 @@ If you're getting connection errors:
     async def _handle_preprocessing_command(self, args: str) -> bool:
         """Handle /preprocessing command to control preprocessing mode."""
         try:
-            from ...conversation.llm_client import LLMClient
+            # Use the existing LLM client (initialized once in __init__)
+            if self._llm_client is None:
+                self._initialize_llm_client()
             
-            # Initialize LLM client if not already done
-            if not hasattr(self, '_llm_client'):
-                import os
-                os.environ['AGENTSMCP_TUI_MODE'] = '1'
-                self._llm_client = LLMClient()
+            if self._llm_client is None:
+                self._notify_error("Failed to initialize LLM client")
+                return True
             
             args = args.strip().lower()
             
