@@ -186,21 +186,36 @@ class ChatEngine:
     
     def _is_simple_input(self, user_input: str) -> bool:
         """Check if input is a simple greeting or basic query that doesn't need task tracking."""
-        input_lower = user_input.lower().strip()
+        input_lower = user_input.lower().strip().rstrip('?!.,')
         
         # First check: if input is too long, it's not simple (prevents misclassification)
         if len(input_lower) > 50:
             return False
         
-        # Enhanced simple patterns to prevent infinite loops on basic interactions
+        # Comprehensive simple patterns including conversational extensions
         simple_patterns = [
+            # Basic greetings
             "hello", "hi", "hey", "howdy", "greetings",
             "thanks", "thank you", "thx", "ty", 
             "bye", "goodbye", "see you", "cya", "farewell",
-            "ok", "okay", "yes", "no", "sure", "please", "help",
+            
+            # Status queries - base forms
             "how are you", "what's up", "whats up", "sup", "how's it going",
+            "how do you do", "how's everything", "how are things",
+            
+            # Status queries - extended forms (THIS IS THE KEY FIX)
+            "how are you today", "how are you doing", "how's your day",
+            "how are you feeling", "how's everything going",
+            "how are you holding up", "how have you been",
+            
+            # Time-based greetings
             "good morning", "good afternoon", "good evening", "good night",
+            
+            # Simple responses and confirmations
+            "ok", "okay", "yes", "no", "sure", "please", "help",
             "nice", "cool", "awesome", "great", "perfect",
+            
+            # Identity queries
             "who are you", "what are you", "are you there"
         ]
         
@@ -210,21 +225,48 @@ class ChatEngine:
         words = input_lower.split()
         
         # Check for exact matches with simple patterns
-        if any(pattern == input_lower.rstrip('?!.,') for pattern in simple_patterns):
+        if any(pattern == input_lower for pattern in simple_patterns):
+            self.logger.info(f"Simple input detected (exact match): '{user_input}' -> '{input_lower}'")
             return True
             
-        # Check for short patterns that are mostly simple (stricter matching)
-        if len(words) <= 3:
+        # EXTENDED WORD COUNT LOGIC - allow up to 5 words for conversational inputs
+        if len(words) <= 5:  # Increased from 3 to 5 words
             for pattern in simple_patterns:
-                if pattern in input_lower and len(input_lower) <= 25:
+                if pattern in input_lower and len(input_lower) <= 35:  # Slightly increased char limit
+                    self.logger.info(f"Simple input detected (pattern match): '{user_input}' -> '{pattern}'")
                     return True
+        
+        # Prefix matching for common greeting extensions (but exclude technical terms)
+        technical_keywords = [
+            "implement", "database", "schema", "api", "authentication", "handle", "error",
+            "code", "function", "class", "method", "variable", "algorithm", "deploy",
+            "server", "client", "framework", "library", "system", "architecture", 
+            "design", "pattern", "optimization", "performance", "security"
+        ]
+        
+        greeting_prefixes = ["how are you", "what's up", "how's it", "how do you"]
+        for prefix in greeting_prefixes:
+            if input_lower.startswith(prefix):
+                # Check if input contains technical keywords - if so, it's complex
+                if any(tech_word in input_lower for tech_word in technical_keywords):
+                    self.logger.info(f"Complex input detected (technical content): '{user_input}' -> contains technical keywords")
+                    return False
+                self.logger.info(f"Simple input detected (prefix match): '{user_input}' -> starts with '{prefix}'")
+                return True
             
         # Single question word queries (like "what?", "how?")
         if len(words) == 1 and any(word.rstrip('?!.,') in simple_question_words for word in words):
+            self.logger.info(f"Simple input detected (single question word): '{user_input}'")
             return True
             
         # Very short inputs are likely simple (but not too short to be empty)
-        return len(input_lower) <= 15 and len(input_lower.strip()) > 0
+        if len(input_lower) <= 15 and len(input_lower.strip()) > 0:
+            self.logger.info(f"Simple input detected (very short): '{user_input}'")
+            return True
+        
+        # Log when input is NOT considered simple for debugging
+        self.logger.info(f"Complex input detected: '{user_input}' ({len(words)} words, {len(input_lower)} chars)")
+        return False
     
     async def _handle_chat_message(self, user_input: str) -> bool:
         """Handle regular chat message with streaming support, context management, and history logging."""
