@@ -365,6 +365,39 @@
       },
       "agent_activities": [],
       "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T17:38:14.705224",
+      "role": "user",
+      "content": "hello",
+      "context_usage": {
+        "tokens": 1,
+        "percentage": 0.00078125
+      },
+      "agent_activities": [],
+      "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T17:38:16.946195",
+      "role": "assistant",
+      "content": "Hello! How can I help you today?",
+      "context_usage": {
+        "tokens": 9,
+        "percentage": 0.007031249999999999
+      },
+      "agent_activities": [],
+      "metadata": {}
+    },
+    {
+      "timestamp": "2025-09-04T17:38:37.848364",
+      "role": "user",
+      "content": "take a look of this project in this directory, and tell me why it is better than the competition",
+      "context_usage": {
+        "tokens": 33,
+        "percentage": 0.025781250000000002
+      },
+      "agent_activities": [],
+      "metadata": {}
     }
   ],
   "context_compactions": [],

@@ -233,63 +233,140 @@ class SequentialPlanner:
             )
     
     async def _call_sequential_thinking_tool(self, prompt: str) -> Dict[str, Any]:
-        """Call the MCP sequential thinking tool for planning analysis."""
+        """Call the actual MCP sequential thinking tool for planning analysis with timeout protection."""
         try:
-            # Import the MCP tool function
+            # Create an LLM client to use the MCP sequential thinking tool
             from agentsmcp.conversation.llm_client import LLMClient
+            llm_client = LLMClient()
             
-            # Create a planning-focused sequential thinking session
-            thought_count = 1
-            total_thoughts = 6  # Initial estimate for planning thoughts
-            all_thoughts = []
+            # Prepare the sequential thinking request
+            planning_prompt = f"""
+            I need to create a comprehensive execution plan for this user request using sequential thinking:
             
-            while thought_count <= total_thoughts:
-                # Determine the current thought content based on the phase
-                if thought_count == 1:
-                    thought = f"Let me analyze this user request: {prompt}. I need to understand what they really want and break this down into actionable steps."
-                elif thought_count == 2:
-                    thought = "Now I need to identify the main components and phases of this task. What are the key areas that need to be addressed?"
-                elif thought_count == 3:
-                    thought = "I should consider what agents or specialists would be best suited for different parts of this task."
-                elif thought_count == 4:
-                    thought = "Let me think about dependencies and sequencing. What needs to happen first, and what can be done in parallel?"
-                elif thought_count == 5:
-                    thought = "I need to consider potential risks, challenges, and edge cases that might arise during execution."
-                elif thought_count == 6:
-                    thought = "Finally, let me create realistic time estimates and finalize the step-by-step execution plan."
-                else:
-                    break
-                
-                # Store the thought for processing
-                all_thoughts.append({
-                    "thought_number": thought_count,
-                    "content": thought,
-                    "phase": self._get_phase_for_thought(thought_count)
-                })
-                
-                thought_count += 1
-                
-                # Break if we've covered all planning aspects
-                if thought_count > total_thoughts:
-                    break
+            "{prompt}"
+            
+            Please think through this step by step, considering:
+            1. What does the user actually want to achieve?
+            2. What are the main components/phases of this task?
+            3. What agents or specialists might be needed?
+            4. What are the dependencies between different parts?
+            5. What are potential risks or challenges?
+            6. How should this be broken down into executable steps?
+            7. What would be realistic time estimates for each part?
+            
+            Use the MCP sequential thinking tool to work through this systematically.
+            """
+            
+            # Call the LLM with timeout protection - critical fix for infinite loop
+            try:
+                response = await asyncio.wait_for(
+                    llm_client.send_message(planning_prompt),
+                    timeout=30.0  # 30-second timeout
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("MCP sequential thinking tool timed out after 30 seconds")
+                # Fall through to fallback below
+                raise Exception("Sequential thinking timeout")
+            
+            # Parse the response for planning insights
+            # The LLM should have used the MCP sequential thinking tool internally
+            # and provided a structured analysis
+            
+            # Extract thinking structure from the response
+            thoughts = self._parse_thinking_from_response(response, prompt)
             
             return {
-                "thoughts": all_thoughts,
-                "total_thoughts": len(all_thoughts),
-                "planning_complete": True
+                "thoughts": thoughts,
+                "total_thoughts": len(thoughts),
+                "planning_complete": True,
+                "llm_response": response
             }
             
         except Exception as e:
-            self.logger.error(f"Failed to call sequential thinking tool: {e}")
+            self.logger.error(f"Failed to call MCP sequential thinking tool: {e}")
+            # Fallback to basic planning if MCP tool fails
             return {
                 "thoughts": [{
                     "thought_number": 1,
-                    "content": f"Basic planning for: {prompt[:100]}...",
+                    "content": f"Basic planning analysis for: {prompt[:100]}...",
                     "phase": PlanningPhase.ANALYSIS
                 }],
                 "total_thoughts": 1,
-                "planning_complete": False
+                "planning_complete": False,
+                "error": str(e)
             }
+    
+    def _parse_thinking_from_response(self, response: str, original_prompt: str) -> List[Dict[str, Any]]:
+        """Parse structured thinking from LLM response that used sequential thinking tool."""
+        thoughts = []
+        
+        try:
+            # Look for sequential thinking patterns in the response
+            lines = response.split('\n')
+            thought_counter = 1
+            current_thought = ""
+            
+            for line in lines:
+                line = line.strip()
+                
+                # Look for thought indicators or numbered steps
+                if (line.startswith(('1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.')) or
+                    'step' in line.lower() or 
+                    'thought' in line.lower() and ':' in line):
+                    
+                    # Save previous thought if exists
+                    if current_thought:
+                        thoughts.append({
+                            "thought_number": thought_counter,
+                            "content": current_thought.strip(),
+                            "phase": self._get_phase_for_thought(thought_counter)
+                        })
+                        thought_counter += 1
+                    
+                    # Start new thought
+                    current_thought = line
+                elif line and current_thought:
+                    # Continue current thought
+                    current_thought += " " + line
+            
+            # Add the last thought
+            if current_thought:
+                thoughts.append({
+                    "thought_number": thought_counter,
+                    "content": current_thought.strip(),
+                    "phase": self._get_phase_for_thought(thought_counter)
+                })
+            
+            # If no structured thoughts found, create logical breakdown from response
+            if not thoughts:
+                thoughts = self._create_thoughts_from_response(response, original_prompt)
+                
+        except Exception as e:
+            self.logger.warning(f"Failed to parse structured thinking from response: {e}")
+            # Fallback to simple breakdown
+            thoughts = self._create_thoughts_from_response(response, original_prompt)
+        
+        return thoughts if thoughts else [{
+            "thought_number": 1,
+            "content": f"Analyze and process: {original_prompt[:100]}...",
+            "phase": PlanningPhase.ANALYSIS
+        }]
+    
+    def _create_thoughts_from_response(self, response: str, original_prompt: str) -> List[Dict[str, Any]]:
+        """Create structured thoughts from unstructured response."""
+        # Split response into logical sections
+        sections = response.split('\n\n')
+        thoughts = []
+        
+        for i, section in enumerate(sections[:6], 1):  # Limit to 6 thoughts
+            if section.strip():
+                thoughts.append({
+                    "thought_number": i,
+                    "content": section.strip()[:200],  # Limit length
+                    "phase": self._get_phase_for_thought(i)
+                })
+        
+        return thoughts
     
     def _get_phase_for_thought(self, thought_number: int) -> PlanningPhase:
         """Map thought number to planning phase."""

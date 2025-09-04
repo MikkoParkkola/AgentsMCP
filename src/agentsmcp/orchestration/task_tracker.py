@@ -124,19 +124,52 @@ class TaskTracker:
         self.progress_display.update_orchestrator_status("Starting sequential planning...")
         
         try:
-            # Phase 1: Sequential Planning
+            # Phase 1: Sequential Planning with timeout protection
             self._notify_status("🎯 Phase 1: Sequential thinking and planning...")
             
             planning_start = time.time()
-            plan = await self.sequential_planner.create_plan(
-                user_input=user_input,
-                context=context,
-                progress_callback=self._on_planning_progress
-            )
-            planning_duration = int((time.time() - planning_start) * 1000)
             
-            self.task_plans[task_id] = plan
-            self.logger.info(f"Created sequential plan for {task_id} with {len(plan.steps)} steps in {planning_duration}ms")
+            try:
+                # Add timeout protection to prevent infinite loops
+                plan = await asyncio.wait_for(
+                    self.sequential_planner.create_plan(
+                        user_input=user_input,
+                        context=context,
+                        progress_callback=self._on_planning_progress
+                    ),
+                    timeout=45.0  # 45-second timeout for planning
+                )
+                planning_duration = int((time.time() - planning_start) * 1000)
+                
+                self.task_plans[task_id] = plan
+                self.logger.info(f"Created sequential plan for {task_id} with {len(plan.steps)} steps in {planning_duration}ms")
+                
+            except asyncio.TimeoutError:
+                # Critical fallback: Create a basic execution plan when sequential thinking times out
+                planning_duration = int((time.time() - planning_start) * 1000)
+                self.logger.warning(f"Sequential planning timed out after {planning_duration}ms, creating fallback plan")
+                
+                from .sequential_planner import SequentialPlan, PlanningStep, PlanningPhase
+                
+                fallback_plan = SequentialPlan(
+                    plan_id=f"fallback_{task_id}",
+                    objective=user_input,
+                    user_input=user_input,
+                    steps=[
+                        PlanningStep(
+                            step_id="fallback_execution",
+                            description=f"Process request: {user_input}",
+                            phase=PlanningPhase.EXECUTION_PLANNING,
+                            estimated_duration_ms=30000  # 30 seconds
+                        )
+                    ],
+                    total_estimated_duration_ms=30000,
+                    progress_callback=self._on_planning_progress
+                )
+                
+                self.task_plans[task_id] = fallback_plan
+                self._notify_status("⚡ Using fallback execution plan (sequential thinking timed out)")
+                self.logger.info(f"Created fallback plan for {task_id} due to planning timeout")
             
             # Phase 2: Agent Assignment
             self._notify_status("🤖 Phase 2: Assigning agents and preparing execution...")

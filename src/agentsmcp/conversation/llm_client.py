@@ -174,12 +174,27 @@ class LLMClient:
                             provider_status["last_error"] = str(e)
                             return False
                     
-                    # Run the check synchronously
+                    # Run the check synchronously, handling different event loop scenarios
                     try:
-                        loop = asyncio.get_event_loop()
-                        provider_status["service_available"] = loop.run_until_complete(check_ollama())
-                    except:
+                        try:
+                            # Try to get the current event loop
+                            loop = asyncio.get_running_loop()
+                            # If we're already in an async context, create a task
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                future = executor.submit(asyncio.run, check_ollama())
+                                provider_status["service_available"] = future.result(timeout=3)
+                        except RuntimeError:
+                            # No running loop, safe to use run_until_complete
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            try:
+                                provider_status["service_available"] = loop.run_until_complete(check_ollama())
+                            finally:
+                                loop.close()
+                    except Exception as e:
                         provider_status["service_available"] = False
+                        provider_status["last_error"] = f"Connection check failed: {str(e)}"
                     provider_status["configured"] = True
                     provider_status["api_key_present"] = True  # Ollama doesn't need API keys
                 else:
@@ -840,6 +855,28 @@ Optimized prompt:"""
                     "name": "discard_staged_changes",
                     "description": "Discard all staged (pending) changes without applying",
                     "parameters": {"type": "object", "properties": {}, "required": []}
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "mcp__sequential-thinking__sequentialthinking",
+                    "description": "A detailed tool for dynamic and reflective problem-solving through thoughts. This tool helps analyze problems through a flexible thinking process that can adapt and evolve.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "thought": {"type": "string", "description": "Your current thinking step"},
+                            "nextThoughtNeeded": {"type": "boolean", "description": "Whether another thought step is needed"},
+                            "thoughtNumber": {"type": "integer", "description": "Current thought number", "minimum": 1},
+                            "totalThoughts": {"type": "integer", "description": "Estimated total thoughts needed", "minimum": 1},
+                            "isRevision": {"type": "boolean", "description": "Whether this revises previous thinking"},
+                            "revisesThought": {"type": "integer", "description": "Which thought is being reconsidered", "minimum": 1},
+                            "branchFromThought": {"type": "integer", "description": "Branching point thought number", "minimum": 1},
+                            "branchId": {"type": "string", "description": "Branch identifier"},
+                            "needsMoreThoughts": {"type": "boolean", "description": "If more thoughts are needed"}
+                        },
+                        "required": ["thought", "nextThoughtNeeded", "thoughtNumber", "totalThoughts"]
+                    }
                 }
             }
         ]
