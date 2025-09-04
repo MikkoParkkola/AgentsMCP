@@ -1285,13 +1285,15 @@ Remember: Be truthful about the system's current state rather than creating fals
             ConversationMessage(role="user", content=message, context=context)
         )
         
+        content_yielded = False
+        full_response = ""
+        
         try:
             # Prepare messages for API call
             messages = await self._prepare_messages()
             
             # Track streaming progress and accumulate full response
             chunk_count = 0
-            full_response = ""
             if progress_callback:
                 await progress_tracker.update_streaming(chunk_count)
             
@@ -1300,6 +1302,7 @@ Remember: Be truthful about the system's current state rather than creating fals
                 async for chunk in self._call_ollama_turbo_streaming(messages):
                     chunk_count += 1
                     full_response += chunk
+                    content_yielded = True
                     if progress_callback and chunk_count % 10 == 0:  # Update every 10 chunks
                         await progress_tracker.update_streaming(chunk_count)
                     yield chunk
@@ -1345,9 +1348,33 @@ Remember: Be truthful about the system's current state rather than creating fals
                 if not self.conversation_history or self.conversation_history[-1].content != full_response:
                     self.conversation_history.append(assistant_msg)
         
+            
+            # CRITICAL FIX: If no content was yielded from streaming, fall back to non-streaming
+            if not content_yielded or not full_response.strip():
+                logger.warning(f"Streaming failed for {self.provider}, falling back to non-streaming")
+                try:
+                    fallback_response = await self.send_message(message, context, progress_callback)
+                    if fallback_response and fallback_response.strip():
+                        full_response = fallback_response
+                        content_yielded = True
+                        yield fallback_response
+                except Exception as fallback_error:
+                    logger.error(f"Non-streaming fallback also failed: {fallback_error}")
+                    yield "I apologize, but I'm experiencing technical difficulties. Please try again in a moment."
+                    return
+        
         except Exception as e:
             logger.error(f"Error in streaming LLM communication: {e}")
-            yield f"Sorry, I encountered an error: {str(e)}"
+            # CRITICAL FIX: Try fallback if no content has been yielded yet
+            if not content_yielded:
+                try:
+                    fallback_response = await self.send_message(message, context, progress_callback)
+                    if fallback_response and fallback_response.strip():
+                        yield fallback_response
+                        return
+                except Exception:
+                    pass
+            yield f"I apologize, but I'm experiencing technical difficulties. Please try again in a moment."
     
     async def _call_ollama_turbo_streaming(self, messages: List[Dict[str, str]]):
         """Call ollama-turbo with streaming support."""
@@ -1404,11 +1431,20 @@ Remember: Be truthful about the system's current state rather than creating fals
         
         except Exception as e:
             logger.warning(f"Ollama turbo streaming failed: {e}")
-            # Fallback to non-streaming
+        
+        # CRITICAL FIX: Always try non-streaming fallback if streaming failed
+        try:
             response = await self._call_ollama_turbo(messages, enable_tools=False)
             if response and "choices" in response:
                 content = response["choices"][0]["message"]["content"]
-                yield content
+                if content and content.strip():
+                    yield content
+                    return
+        except Exception as fallback_error:
+            logger.warning(f"Ollama turbo non-streaming fallback failed: {fallback_error}")
+        
+        # CRITICAL FIX: If everything fails, provide a meaningful error message
+        yield "I apologize, but I'm having trouble connecting to the AI service right now. Please try again in a moment."
     
     async def _call_ollama_streaming(self, messages: List[Dict[str, str]]):
         """Call local ollama with streaming support."""
