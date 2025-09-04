@@ -5,6 +5,17 @@ __pycache__/
 *.egg-info/
 .venv/
 build/
+.build/
+dist/
+*.spec
 .coverage
 .aider*
 .agentsmcp_install_cache
+
+# PyInstaller build artifacts
+.build/
+build/
+dist/
+*.spec
+*.pkg
+*.pyz
