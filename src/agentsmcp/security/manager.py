@@ -179,7 +179,35 @@ class SecurityManager:
 
 
 # Default instance for convenience
-default_security_manager = SecurityManager(insecure_mode=True)
+# SECURITY: Default to secure mode - override only for development
+default_security_manager = SecurityManager(insecure_mode=False)
+
+
+def create_security_manager(insecure_mode: bool = False) -> SecurityManager:
+    """
+    Create a SecurityManager with explicit security mode configuration.
+    
+    Args:
+        insecure_mode: If True, disable authentication and authorization (DEVELOPMENT ONLY)
+        
+    Returns:
+        Configured SecurityManager instance
+        
+    Warning:
+        Setting insecure_mode=True disables ALL security controls.
+        This should NEVER be used in production.
+    """
+    if insecure_mode:
+        logger.critical(
+            "⚠️  SECURITY WARNING: Running in INSECURE mode! ⚠️\n"
+            "   • Authentication is DISABLED\n" 
+            "   • Authorization is DISABLED\n"
+            "   • ALL security controls are BYPASSED\n"
+            "   • This mode is for DEVELOPMENT ONLY\n"
+            "   • NEVER use this in production!"
+        )
+    
+    return SecurityManager(insecure_mode=insecure_mode)
 
 
 def get_security_manager() -> SecurityManager:
@@ -187,4 +215,4 @@ def get_security_manager() -> SecurityManager:
     return default_security_manager
 
 
-__all__ = ["SecurityManager", "SecurityLevel", "get_security_manager", "default_security_manager"]
+__all__ = ["SecurityManager", "SecurityLevel", "get_security_manager", "default_security_manager", "create_security_manager"]

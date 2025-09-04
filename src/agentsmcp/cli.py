@@ -319,9 +319,10 @@ class AgentsMCPProgressiveGroup(disclosure_module.ProgressiveDisclosureGroup, En
 @click.option("--config", "config_path", default=None, help="Path to YAML config")
 @click.option("--debug", is_flag=True, hidden=True, help="Enable debug mode")
 @click.option("--network/--no-network", default=True, help="Allow network access (default: on)")
+@click.option("--insecure-mode", is_flag=True, help="⚠️  DEVELOPMENT ONLY: Disable authentication (INSECURE)")
 def main(
     log_level: Optional[str], log_format: Optional[str], config_path: Optional[str], debug: bool,
-    network: bool
+    network: bool, insecure_mode: bool
 ) -> None:
     """AgentsMCP - Revolutionary Multi-Agent Orchestration with Cost Intelligence."""
     spinner = _Spinner("Initializing AgentsMCP")
@@ -334,6 +335,19 @@ def main(
             pass
         config = _load_config(config_path)
         logging_config_module.configure_logging(log_level or "INFO", log_format or "text")
+        
+        # Configure security mode - check environment variable if CLI option not set
+        import os as _os
+        env_insecure = _os.environ.get("AGENTSMCP_INSECURE", "").lower() in ("true", "1", "yes", "on")
+        final_insecure_mode = insecure_mode or env_insecure
+        
+        # Initialize security manager with configured mode
+        from agentsmcp.security.manager import create_security_manager
+        security_manager = create_security_manager(insecure_mode=final_insecure_mode)
+        
+        # Store security manager in click context for access by subcommands
+        click.get_current_context().obj = {"security_manager": security_manager}
+        
     finally:
         spinner.stop("Initialized")
 
