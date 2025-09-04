@@ -32,6 +32,8 @@ from pathlib import Path
 from ..tools.base_tools import tool_registry
 # Ensure default tools are registered only when client is instantiated
 from ..tools import ensure_default_tools_registered
+# Import project detection utilities for enhanced preprocessing
+from ..utils.project_detector import ProjectDetector, estimate_tokens, format_project_context
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +111,9 @@ class LLMClient:
         self.preprocessing_provider = self.config.get("preprocessing_provider", self.provider)
         self.preprocessing_model = self.config.get("preprocessing_model", self.model)
         
+        # Preprocessing threshold - minimum word count to trigger preprocessing (default: 4)
+        self.preprocessing_threshold = self.config.get("preprocessing_threshold", 4)
+        
         self.conversation_history: List[ConversationMessage] = []
         # Check if MCP orchestration is actually working
         orchestration_working = self._check_mcp_availability()
@@ -121,6 +126,16 @@ class LLMClient:
         except Exception:
             pass
         self.mcp_tools = self._get_mcp_tools()
+
+        
+        # Enhanced preprocessing configuration for context-aware optimization
+        self.preprocessing_context_enabled = self.config.get("preprocessing_context_enabled", True)
+        self.preprocessing_history_enabled = self.config.get("preprocessing_history_enabled", True)
+        self.preprocessing_max_history_messages = self.config.get("preprocessing_max_history_messages", 10)
+        self.preprocessing_directory_context_enabled = self.config.get("preprocessing_directory_context_enabled", True)
+        
+        # Working directory for project context detection
+        self.current_working_directory = self.config.get("working_directory", os.getcwd())
 
     def get_configuration_status(self) -> Dict[str, Any]:
         """Get detailed configuration status for diagnostics."""
@@ -215,9 +230,17 @@ class LLMClient:
             
         status = "enabled" if self.preprocessing_enabled else "disabled"
         mode_desc = "Multi-turn tool execution with tool calling" if self.preprocessing_enabled else "Direct LLM responses only"
+        threshold = getattr(self, 'preprocessing_threshold', 4)
         
-        return f"🔧 Preprocessing: {status}\n📝 Description: {mode_desc}\n\n💡 Commands:\n  • /preprocessing on - Enable preprocessing\n  • /preprocessing off - Disable preprocessing\n  • /preprocessing toggle - Switch mode"
-
+        result = f"🔧 Preprocessing: {status}\n📝 Description: {mode_desc}\n📊 Word threshold: {threshold} words\n\n"
+        
+        if self.preprocessing_enabled:
+            result += f"💡 Activation logic:\n  • ≤{threshold} words: Skip preprocessing (direct to LLM)\n  • >{threshold} words: Use preprocessing\n\n"
+        
+        result += "🔧 Commands:\n  • /preprocessing on - Enable preprocessing\n  • /preprocessing off - Disable preprocessing\n  • /preprocessing toggle - Switch mode\n  • /preprocessing threshold <number> - Set word threshold"
+        
+        return result
+    
     def set_preprocessing_provider(self, provider: str) -> str:
         """Set the provider for preprocessing operations."""
         # Validate provider
@@ -237,16 +260,29 @@ class LLMClient:
         return f"✅ Preprocessing model set to: {model}\n📝 Provider: {self.preprocessing_provider}\n💡 Use '/preprocessing config' to see full configuration"
 
     async def optimize_prompt(self, original_prompt: str) -> str:
-        """Use preprocessing provider/model to optimize the user's prompt."""
+        """Use preprocessing provider/model to optimize the user's prompt with enhanced context awareness."""
         try:
-            # If preprocessing is disabled, return original prompt
-            if not getattr(self, 'preprocessing_enabled', True):
+            # Check if preprocessing should be used based on word threshold
+            if not self.should_use_preprocessing(original_prompt):
                 return original_prompt
             
-            # Create optimization prompt
-            optimization_prompt = f"""Please optimize this user prompt to be more specific, detailed, and effective for getting comprehensive AI assistance. Keep the core intent but make it clearer and more actionable:
+            # Build comprehensive context for preprocessing
+            preprocessing_context = await self._build_preprocessing_context(original_prompt)
+            
+            # Create context-aware optimization prompt
+            optimization_prompt = f"""Please optimize this user prompt to be more specific, detailed, and effective for getting comprehensive AI assistance. Keep the core intent but make it clearer and more actionable.
 
-Original prompt: "{original_prompt}"
+{preprocessing_context}
+
+USER CURRENT REQUEST:
+"{original_prompt}"
+
+OPTIMIZATION INSTRUCTIONS:
+- Consider the conversation history and project context above
+- Make the prompt more specific and actionable
+- Keep the original intent but add helpful context
+- If the request relates to the current project, reference relevant context
+- Make it clear what specific outcome the user wants
 
 Optimized prompt:"""
             
@@ -268,7 +304,7 @@ Optimized prompt:"""
                 optimized_prompt = original_prompt  # Fallback
                 for line in lines:
                     line = line.strip()
-                    if line and not line.lower().startswith(('here', 'optimized', 'improved')):
+                    if line and not line.lower().startswith(('here', 'optimized', 'improved', 'the optimized', 'here is')):
                         if len(line) > len(original_prompt) * 0.7:  # Should be substantial
                             optimized_prompt = line
                             break
@@ -282,18 +318,216 @@ Optimized prompt:"""
                 
         except Exception as e:
             logger.error(f"Error optimizing prompt: {e}")
-            return original_prompt  # Fallback to original on error
+            return original_prompt  # Fallback to original on error  # Fallback to original on error  # Fallback to original on error
+
+    async def _build_preprocessing_context(self, user_input: str) -> str:
+        """Build comprehensive context for preprocessing including history and directory context."""
+        try:
+            context_parts = []
+            
+            # Get preprocessing model capabilities for context management
+            preprocessing_capabilities = await self._get_preprocessing_model_capabilities()
+            context_limit = preprocessing_capabilities.get('context_limit', 8000)  # Default to 8K tokens
+            
+            # Reserve space for prompt and instructions (approximately 800 tokens)
+            available_tokens = context_limit - estimate_tokens(user_input) - 800
+            
+            if available_tokens <= 0:
+                return "CURRENT REQUEST CONTEXT:\nLimited context available due to request size."
+            
+            # Add directory context if enabled
+            if self.preprocessing_directory_context_enabled:
+                try:
+                    project_context = ProjectDetector.detect_project_context(self.current_working_directory)
+                    project_context_str = format_project_context(project_context)
+                    project_tokens = estimate_tokens(project_context_str)
+                    
+                    if project_tokens <= available_tokens * 0.4:  # Use max 40% for project context
+                        context_parts.append(project_context_str)
+                        available_tokens -= project_tokens
+                except Exception as e:
+                    logger.warning(f"Failed to get project context: {e}")
+            
+            # Add conversation history if enabled and available
+            if self.preprocessing_history_enabled and self.conversation_history and available_tokens > 100:
+                history_context = self._select_relevant_history(available_tokens)
+                if history_context:
+                    context_parts.append(history_context)
+            
+            if not context_parts:
+                return "CURRENT REQUEST CONTEXT:\nNo additional context available."
+            
+            return '\n\n'.join(context_parts)
+            
+        except Exception as e:
+            logger.error(f"Error building preprocessing context: {e}")
+            return "CURRENT REQUEST CONTEXT:\nError building context."
+
+    async def _get_preprocessing_model_capabilities(self) -> Dict[str, Any]:
+        """Get capabilities for the preprocessing model."""
+        try:
+            # Save current settings
+            original_provider = self.provider
+            original_model = self.model
+            
+            # Temporarily switch to preprocessing settings
+            self.provider = self.preprocessing_provider
+            self.model = self.preprocessing_model
+            
+            try:
+                capabilities = await self.get_model_capabilities()
+                return {
+                    'context_limit': getattr(capabilities, 'context_tokens', 8000),
+                    'supports_streaming': getattr(capabilities, 'supports_streaming', False)
+                }
+            finally:
+                # Restore settings
+                self.provider = original_provider
+                self.model = original_model
+                
+        except Exception as e:
+            logger.warning(f"Failed to get preprocessing model capabilities: {e}")
+            # Return sensible defaults
+            return {
+                'context_limit': 8000,  # Conservative default for most models
+                'supports_streaming': False
+            }
+
+    def _select_relevant_history(self, available_tokens: int) -> str:
+        """Select most relevant conversation history within token limits."""
+        try:
+            if not self.conversation_history:
+                return ""
+            
+            # Convert conversation history to a more readable format
+            history_messages = []
+            
+            # Get recent messages first (reversed to get most recent)
+            recent_messages = list(reversed(self.conversation_history[-self.preprocessing_max_history_messages:]))
+            
+            total_tokens = 0
+            selected_messages = []
+            
+            for msg in recent_messages:
+                # Format message
+                role = msg.get('role', 'unknown')
+                content = msg.get('content', '')
+                
+                # Skip empty messages
+                if not content.strip():
+                    continue
+                
+                # Skip system messages that are too verbose
+                if role == 'system' and len(content) > 500:
+                    continue
+                
+                formatted_msg = f"{role.upper()}: {content}"
+                msg_tokens = estimate_tokens(formatted_msg)
+                
+                # Check if we have room for this message
+                if total_tokens + msg_tokens > available_tokens:
+                    break
+                
+                selected_messages.insert(0, formatted_msg)  # Insert at beginning to maintain order
+                total_tokens += msg_tokens
+                
+                # Stop if we have enough context
+                if len(selected_messages) >= 8:  # Reasonable limit
+                    break
+            
+            if not selected_messages:
+                return ""
+            
+            history_header = f"CONVERSATION HISTORY ({len(selected_messages)} recent messages):"
+            return f"{history_header}\n" + "\n\n".join(selected_messages)
+            
+        except Exception as e:
+            logger.error(f"Error selecting relevant history: {e}")
+            return ""
+
+    def should_use_preprocessing(self, user_input: str) -> bool:
+        """Determine if input should use preprocessing based on word count and enabled status."""
+        try:
+            # Check if preprocessing is enabled
+            if not getattr(self, 'preprocessing_enabled', True):
+                return False
+            
+            # Count words by splitting on whitespace
+            word_count = len(user_input.strip().split())
+            
+            # Get threshold, default to 4 if not set
+            threshold = getattr(self, 'preprocessing_threshold', 4)
+            
+            # Return True if word count exceeds threshold
+            return word_count > threshold
+            
+        except Exception as e:
+            logger.error(f"Error in should_use_preprocessing: {e}")
+            # Default to using preprocessing on error to maintain current behavior
+            return getattr(self, 'preprocessing_enabled', True)
+
+    def set_preprocessing_threshold(self, threshold: int) -> str:
+        """Set the minimum word count threshold for preprocessing activation."""
+        try:
+            if threshold < 1:
+                return "❌ Threshold must be at least 1 word"
+            
+            if threshold > 100:
+                return "❌ Threshold cannot exceed 100 words (unreasonably high)"
+            
+            old_threshold = getattr(self, 'preprocessing_threshold', 4)
+            self.preprocessing_threshold = threshold
+            
+            return f"""✅ Preprocessing threshold updated
+📊 Old threshold: {old_threshold} words
+📊 New threshold: {threshold} words
+
+💡 How this works:
+• Inputs ≤{threshold} words: Skip preprocessing (direct to LLM)
+• Inputs >{threshold} words: Use preprocessing (if enabled)
+
+🔧 Examples:
+• "{' '.join(['word'] * threshold)}" → Direct (≤{threshold} words)
+• "{' '.join(['word'] * (threshold + 1))}" → Preprocessing (>{threshold} words)"""
+            
+        except Exception as e:
+            logger.error(f"Error setting preprocessing threshold: {e}")
+            return f"❌ Error setting threshold: {str(e)}"
+    
+    def get_preprocessing_threshold(self) -> int:
+        """Get the current preprocessing threshold."""
+        return getattr(self, 'preprocessing_threshold', 4)
 
     def get_preprocessing_config(self) -> str:
-        """Get detailed preprocessing configuration."""
+        """Get detailed preprocessing configuration including context features."""
         config_msg = "🔧 Preprocessing Configuration\n"
         config_msg += "=" * 35 + "\n\n"
         
         # Current settings
         status = "enabled" if getattr(self, 'preprocessing_enabled', True) else "disabled"
+        threshold = getattr(self, 'preprocessing_threshold', 4)
         config_msg += f"📊 Current Status: {status}\n"
+        config_msg += f"📏 Word Threshold: {threshold} words\n"
         config_msg += f"🔄 Preprocessing Provider: {self.preprocessing_provider}\n"
         config_msg += f"🤖 Preprocessing Model: {self.preprocessing_model}\n\n"
+        
+        # Context features
+        config_msg += "🌟 Context-Aware Features:\n"
+        dir_status = "✅ Enabled" if self.preprocessing_directory_context_enabled else "❌ Disabled"
+        hist_status = "✅ Enabled" if self.preprocessing_history_enabled else "❌ Disabled"
+        config_msg += f"  📁 Directory Context: {dir_status}\n"
+        config_msg += f"    └─ Working Directory: {self.current_working_directory}\n"
+        config_msg += f"  📚 Conversation History: {hist_status}\n"
+        config_msg += f"    └─ Max Messages: {self.preprocessing_max_history_messages}\n"
+        config_msg += f"    └─ Available Messages: {len(self.conversation_history)}\n\n"
+        
+        # Threshold behavior
+        config_msg += "📊 Threshold Behavior:\n"
+        config_msg += f"  • ≤{threshold} words: Skip preprocessing (direct to LLM)\n"
+        config_msg += f"  • >{threshold} words: Use preprocessing (if enabled)\n"
+        config_msg += f"  • Examples:\n"
+        config_msg += f"    - 'hello' ({len('hello'.split())} word) → Direct\n"
+        config_msg += f"    - 'make comprehensive analysis' ({len('make comprehensive analysis'.split())} words) → Preprocessing\n\n"
         
         # Main conversation settings
         config_msg += "📱 Main Conversation:\n"
@@ -311,18 +545,83 @@ Optimized prompt:"""
         
         # Commands
         config_msg += "💡 Commands:\n"
+        config_msg += "  Core Settings:\n"
+        config_msg += "  • /preprocessing threshold <number> - Set word threshold\n"
         config_msg += "  • /preprocessing provider <provider> - Set preprocessing provider\n"
         config_msg += "  • /preprocessing model <model> - Set preprocessing model\n"
         config_msg += "  • /preprocessing on/off/toggle - Control preprocessing mode\n"
-        config_msg += "  • /preprocessing status - Show current mode\n\n"
+        config_msg += "  Context Features:\n"
+        config_msg += "  • /preprocessing context on/off - Toggle directory context\n"
+        config_msg += "  • /preprocessing history on/off - Toggle conversation history\n"
+        config_msg += "  • /preprocessing history <number> - Set max history messages\n"
+        config_msg += "  • /preprocessing context status - Show context feature status\n\n"
         
         # Examples
         config_msg += "🚀 Example Configurations:\n"
         config_msg += "  • Fast local preprocessing: ollama + gpt-oss:20b\n"
         config_msg += "  • Powerful cloud responses: anthropic + claude-3.5-sonnet\n"
         config_msg += "  • Mixed setup for cost/performance optimization\n"
+        config_msg += f"  • Context-aware preprocessing with project detection\n"
+        config_msg += f"  • Conversation history integration for better continuity\n"
         
         return config_msg
+
+    def set_preprocessing_context_enabled(self, enabled: bool) -> str:
+        """Enable or disable directory context in preprocessing."""
+        self.preprocessing_directory_context_enabled = enabled
+        status = "enabled" if enabled else "disabled"
+        return f"📁 Preprocessing directory context {status}."
+
+    def set_preprocessing_history_enabled(self, enabled: bool) -> str:
+        """Enable or disable conversation history in preprocessing."""
+        self.preprocessing_history_enabled = enabled
+        status = "enabled" if enabled else "disabled"
+        return f"📚 Preprocessing conversation history {status}."
+
+    def set_preprocessing_max_history(self, max_messages: int) -> str:
+        """Set maximum number of history messages for preprocessing."""
+        if max_messages < 0:
+            return "❌ Maximum history messages must be non-negative."
+        if max_messages > 50:
+            return "❌ Maximum history messages should not exceed 50 for performance reasons."
+        
+        self.preprocessing_max_history_messages = max_messages
+        return f"📚 Preprocessing max history messages set to {max_messages}."
+
+    def get_preprocessing_context_status(self) -> str:
+        """Get detailed status of preprocessing context features."""
+        return f"""🔧 **Preprocessing Context Status:**
+
+📁 **Directory Context:** {"✅ Enabled" if self.preprocessing_directory_context_enabled else "❌ Disabled"}
+  └─ Working Directory: {self.current_working_directory}
+
+📚 **Conversation History:** {"✅ Enabled" if self.preprocessing_history_enabled else "❌ Disabled"}
+  └─ Max Messages: {self.preprocessing_max_history_messages}
+  └─ Available Messages: {len(self.conversation_history)}
+
+💡 **Usage:**
+  • /preprocessing context on/off - Toggle directory context
+  • /preprocessing history on/off - Toggle conversation history
+  • /preprocessing history <number> - Set max history messages"""
+
+    def set_working_directory(self, directory: str) -> str:
+        """Set the working directory for project context detection."""
+        try:
+            from pathlib import Path
+            path = Path(directory).resolve()
+            if not path.exists():
+                return f"❌ Directory does not exist: {directory}"
+            if not path.is_dir():
+                return f"❌ Path is not a directory: {directory}"
+            
+            self.current_working_directory = str(path)
+            return f"📁 Working directory set to: {self.current_working_directory}"
+        except Exception as e:
+            return f"❌ Error setting working directory: {str(e)}"
+
+    def get_working_directory(self) -> str:
+        """Get current working directory."""
+        return self.current_working_directory
         
     def _load_config(self, config_path: Optional[Path] = None) -> Dict[str, Any]:
         """Load LLM configuration from user's settings."""
@@ -689,6 +988,9 @@ Remember: Be truthful about the system's current state rather than creating fals
                           progress_callback: Optional[Callable[[str], None]] = None) -> str:
         """Send message to LLM and get response with enhanced error reporting and progress tracking."""
         try:
+            # DEBUG: Log the message received by LLM client
+            logger.debug(f"[PIPELINE-DEBUG] LLM client send_message received: {message[:200]}..." if len(message) > 200 else f"[PIPELINE-DEBUG] LLM client send_message received: {message}")
+            
             # Initialize progress tracker
             from ..ui.v3.progress_tracker import ProgressTracker, ProcessingPhase, ToolExecutionInfo
             progress_tracker = ProgressTracker(progress_callback)

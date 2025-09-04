@@ -1,6 +1,7 @@
 """Console-Style Flow Renderer - eliminates all panel layout issues."""
 
 import sys
+import uuid
 from typing import Optional, List
 from rich.console import Console
 from rich.text import Text
@@ -8,6 +9,7 @@ from rich.rule import Rule
 from rich.padding import Padding
 from .ui_renderer_base import UIRenderer
 from .console_message_formatter import ConsoleMessageFormatter
+from .streaming_state_manager import StreamingStateManager
 
 
 class ConsoleRenderer(UIRenderer):
@@ -19,8 +21,14 @@ class ConsoleRenderer(UIRenderer):
         self.formatter = None
         self._cleanup_called = False
         self._header_shown = False  # Prevent duplicate headers
-        self._streaming_active = False  # Track if currently streaming
-        self._current_streaming_content = ""  # Current streaming message
+        
+        # Initialize streaming state manager
+        self.streaming_manager = StreamingStateManager(supports_tty=capabilities.is_tty)
+        
+        # Input history management
+        self._input_history = []
+        self._max_history = 1000
+        self._history_pos = -1
         
     def initialize(self) -> bool:
         """Initialize console renderer with Rich formatting."""
@@ -81,15 +89,16 @@ class ConsoleRenderer(UIRenderer):
             return
         self._cleanup_called = True
         
-        # No special cleanup needed - console renderer is stateless
-        pass
+        # Clean up streaming state
+        if self.streaming_manager:
+            self.streaming_manager.force_cleanup()
     
     def render_frame(self) -> None:
         """No frame rendering needed for console style."""
         pass
     
     def handle_input(self) -> Optional[str]:
-        """Handle user input with Rich prompt styling."""
+        """Handle user input with Rich prompt styling and basic history support."""
         try:
             if self.state.is_processing:
                 return None
@@ -99,8 +108,40 @@ class ConsoleRenderer(UIRenderer):
                 self.console.print("💬 [yellow]>[/yellow] ", end="")
             
             try:
+                # Get input with readline support for basic history/editing
+                import readline
+                
+                # Configure readline for better terminal experience
+                readline.set_startup_hook(None)
+                readline.clear_history()
+                
+                # Add current history to readline
+                for item in self._input_history[-50:]:  # Last 50 items for performance
+                    readline.add_history(item)
+                
                 user_input = input().strip()
+                
+                # Add to our history if not empty and different from last
+                if user_input and (not self._input_history or self._input_history[-1] != user_input):
+                    self._input_history.append(user_input)
+                    # Keep history within limits
+                    if len(self._input_history) > self._max_history:
+                        self._input_history = self._input_history[-self._max_history:]
+                
                 return user_input if user_input else None
+                
+            except ImportError:
+                # Fallback without readline
+                user_input = input().strip()
+                
+                # Still maintain our basic history
+                if user_input and (not self._input_history or self._input_history[-1] != user_input):
+                    self._input_history.append(user_input)
+                    if len(self._input_history) > self._max_history:
+                        self._input_history = self._input_history[-self._max_history:]
+                
+                return user_input if user_input else None
+                
             except (EOFError, KeyboardInterrupt):
                 return "/quit"
             except Exception:
@@ -177,48 +218,24 @@ class ConsoleRenderer(UIRenderer):
         self.show_message(error, "error")
     
     def handle_streaming_update(self, content: str) -> None:
-        """Handle real-time streaming updates with Rich formatting - Environment-aware."""
+        """Handle real-time streaming updates with robust state management."""
         try:
             if not self.console:
-                # Fallback to plain text behavior
                 return
-            
-            # First streaming update - initialize
-            if not self._streaming_active:
-                self._streaming_active = True
-                self._current_streaming_content = ""
                 
-                if self.capabilities.is_tty:
-                    # TTY environment - can use carriage returns
-                    self.console.print("🤖 AI (streaming): ", end="")
-                else:
-                    # Non-TTY environment - use progress dots
-                    self.console.print("🤖 AI: ", end="")
+            # Start streaming session if not already active
+            if not self.streaming_manager.is_streaming_active():
+                session_id = str(uuid.uuid4())[:8]  # Short session ID
+                self.streaming_manager.start_streaming_session(session_id)
             
-            # Update display based on environment
-            if self.capabilities.is_tty:
-                # TTY: Update with carriage return (line overwrite)
-                if len(content) > len(self._current_streaming_content) + 10:  # Throttle updates
-                    self._current_streaming_content = content
-                    
-                    if len(content) > 100:
-                        display_content = content[:97] + "..."
-                    else:
-                        display_content = content
-                    
-                    try:
-                        self.console.print(f"\r🤖 AI (streaming): {display_content}", end="")
-                    except Exception:
-                        # Fallback to simple print
-                        print(f"\r🤖 AI (streaming): {display_content}", end="", flush=True)
-            else:
-                # Non-TTY: Show progress dots
-                if len(content) > len(self._current_streaming_content) + 20:  # Less frequent
-                    self._current_streaming_content = content
-                    self.console.print(".", end="")
+            # Use streaming state manager to handle the update
+            self.streaming_manager.display_streaming_update(content)
             
         except Exception as e:
             print(f"\nStreaming update error: {e}")
+            # Force cleanup on error
+            if self.streaming_manager:
+                self.streaming_manager.force_cleanup()
     
     def display_chat_message(self, role: str, content: str, timestamp: str = None) -> None:
         """Display a chat message using console formatter."""
@@ -227,15 +244,9 @@ class ConsoleRenderer(UIRenderer):
                 return
             
             # If we were streaming and this is the final assistant message
-            if self._streaming_active and role == "assistant":
-                # Finalize the streaming display with complete message
-                if self.capabilities.is_tty:
-                    self.console.print()  # New line to finish streaming line
-                else:
-                    self.console.print(" [Complete]")  # Finish the progress dots
-                
-                self._streaming_active = False
-                self._current_streaming_content = ""
+            if self.streaming_manager.is_streaming_active() and role == "assistant":
+                # Complete the streaming session first
+                self.streaming_manager.complete_streaming_session()
                 
                 # Display the complete final message using formatter
                 self.formatter.format_and_display_message(role, content, timestamp)
@@ -251,10 +262,9 @@ class ConsoleRenderer(UIRenderer):
         """Show goodbye message."""
         try:
             if self.console:
-                # If we were streaming, finish with a newline
-                if self._streaming_active:
-                    self.console.print()
-                    self._streaming_active = False
+                # Clean up any active streaming
+                if self.streaming_manager.is_streaming_active():
+                    self.streaming_manager.complete_streaming_session()
                 
                 self.console.print()  # Blank line
                 goodbye_text = Text("👋 Goodbye!", style="bold yellow")

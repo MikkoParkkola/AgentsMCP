@@ -87,7 +87,26 @@ class ConsoleMessageFormatter:
             self.console.print(f"  {content}", style=style)
     
     def format_help_message(self, help_text: str) -> None:
-        """Format help message with proper bullet point handling."""
+        """Format help message with proper markdown rendering and rich formatting."""
+        try:
+            # Use Rich's Markdown renderer for proper formatting
+            from rich.markdown import Markdown
+            
+            # Create markdown object with proper rendering
+            markdown = Markdown(help_text)
+            
+            # Display the rendered markdown
+            self.console.print(markdown)
+            
+        except ImportError:
+            # Fallback to manual formatting if Rich markdown not available
+            self._format_help_manual(help_text)
+        except Exception as e:
+            # Fallback to manual formatting on any error
+            self._format_help_manual(help_text)
+    
+    def _format_help_manual(self, help_text: str) -> None:
+        """Manual formatting for help message if Rich markdown fails."""
         try:
             lines = help_text.split('\n')
             
@@ -97,12 +116,37 @@ class ConsoleMessageFormatter:
                     self.console.print()
                     continue
                 
+                # Handle headers with **bold** markdown
+                if line.startswith('💬 **') and line.endswith(':**'):
+                    # Extract header text and make it bold
+                    header_text = line[4:-3]  # Remove emoji and markdown
+                    header_display = Text.assemble(
+                        ("💬 ", "blue"),
+                        (header_text + ":", "bold blue")
+                    )
+                    self.console.print(header_display)
+                    continue
+                    
+                # Handle other sections with emoji headers
+                if '**' in line and line.endswith(':**'):
+                    # Find emoji and header
+                    parts = line.split(' **', 1)
+                    if len(parts) == 2:
+                        emoji_part = parts[0]
+                        header_part = parts[1][:-3]  # Remove ":**"
+                        header_display = Text.assemble(
+                            (emoji_part + " ", "yellow"),
+                            (header_part + ":", "bold yellow")
+                        )
+                        self.console.print(header_display)
+                        continue
+                
                 # Handle bullet points
                 if line.startswith('• '):
-                    # Format bullet points with proper styling
-                    command_part = line[2:].split(' - ', 1)
-                    if len(command_part) == 2:
-                        command, description = command_part
+                    # Parse command and description
+                    bullet_content = line[2:]  # Remove bullet
+                    if ' - ' in bullet_content:
+                        command, description = bullet_content.split(' - ', 1)
                         bullet_text = Text.assemble(
                             ("  • ", "cyan"),
                             (command, "bold cyan"),
@@ -114,20 +158,52 @@ class ConsoleMessageFormatter:
                         # Simple bullet point
                         bullet_text = Text.assemble(
                             ("  • ", "cyan"),
-                            (line[2:], "white")
+                            (bullet_content, "white")
+                        )
+                        self.console.print(bullet_text)
+                elif line.startswith('  • '):
+                    # Indented bullet (sub-bullet)
+                    bullet_content = line[4:]  # Remove indented bullet
+                    if ' - ' in bullet_content:
+                        command, description = bullet_content.split(' - ', 1)
+                        bullet_text = Text.assemble(
+                            ("    • ", "dim cyan"),
+                            (command, "cyan"),
+                            (" - ", "dim white"),
+                            (description, "dim white")
+                        )
+                        self.console.print(bullet_text)
+                    else:
+                        bullet_text = Text.assemble(
+                            ("    • ", "dim cyan"),
+                            (bullet_content, "dim white")
                         )
                         self.console.print(bullet_text)
                 else:
-                    # Regular text line
-                    if len(line) > self.text_width:
-                        wrapped_lines = textwrap.wrap(line, width=self.text_width)
-                        for wrapped_line in wrapped_lines:
-                            self.console.print(f"  {wrapped_line}", style="white")
+                    # Regular text line - handle **bold** markdown
+                    if '**' in line:
+                        # Simple bold text handling
+                        formatted_line = Text()
+                        parts = line.split('**')
+                        for i, part in enumerate(parts):
+                            if i % 2 == 0:
+                                # Regular text
+                                formatted_line.append(f"  {part}", style="white")
+                            else:
+                                # Bold text
+                                formatted_line.append(part, style="bold white")
+                        self.console.print(formatted_line)
                     else:
-                        self.console.print(f"  {line}", style="white")
+                        # Plain text
+                        if len(line) > self.text_width:
+                            wrapped_lines = textwrap.wrap(line, width=self.text_width)
+                            for wrapped_line in wrapped_lines:
+                                self.console.print(f"  {wrapped_line}", style="white")
+                        else:
+                            self.console.print(f"  {line}", style="white")
             
         except Exception as e:
-            # Fallback to simple display
+            # Ultimate fallback to simple display
             self.console.print(f"  {help_text}", style="white")
     
     def format_system_info(self, info_text: str) -> None:

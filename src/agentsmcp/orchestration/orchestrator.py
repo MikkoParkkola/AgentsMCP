@@ -140,6 +140,10 @@ class Orchestrator:
         self.response_synthesizer = ResponseSynthesizer()
         self.communication_interceptor = CommunicationInterceptor()
         
+        # Sequential thinking and progress tracking
+        from .task_tracker import TaskTracker
+        self.task_tracker = TaskTracker(progress_update_callback=self._on_progress_update)
+        
         # Agent management with enhanced capabilities
         self.active_agents = {}
         self.agent_status = {}
@@ -256,6 +260,13 @@ class Orchestrator:
         # Register listeners with agent tracker
         self.agent_tracker.add_status_listener(on_agent_status_change)
         self.agent_tracker.add_task_listener(on_task_change)
+    
+    def _on_progress_update(self, progress_info: str) -> None:
+        """Handle progress updates from the task tracker."""
+        # Log progress for internal monitoring
+        self.logger.debug(f"Orchestrator progress: {progress_info}")
+        # Progress information is handled by the TaskTracker internally
+        # and passed to the UI via status callbacks
     
     async def process_user_input(self, user_input: str, context: Dict = None) -> OrchestratorResponse:
         """
@@ -398,10 +409,29 @@ class Orchestrator:
                     importance=4
                 )
             
-            # Route to LLM agent for normal processing
-            self.logger.debug("Routing to LLM agent for processing")
+            # Start task with sequential thinking before routing to LLM
+            task_id = f"orchestrator_{int(time.time())}"
+            self.logger.debug("Starting sequential planning before LLM processing")
             
-            response = await self._route_to_llm_directly(user_input, context)
+            await self.task_tracker.start_task(
+                task_id=task_id,
+                task_name="Orchestrator Processing",
+                user_input=user_input,
+                estimated_duration_ms=45000  # 45 seconds estimate
+            )
+            
+            try:
+                # Route to LLM agent with sequential thinking integration
+                self.logger.debug("Executing task with sequential thinking")
+                response = await self._route_to_llm_directly(user_input, context)
+                
+                # Mark task as completed
+                await self.task_tracker.complete_task(task_id)
+                
+            except Exception as task_error:
+                # Handle task execution error
+                await self.task_tracker.mark_task_error(task_id, str(task_error))
+                raise task_error
             
             # Add planning suggestion to response if applicable
             if is_complex_task and len(user_input.split()) > 10 and not user_input.startswith('/'):

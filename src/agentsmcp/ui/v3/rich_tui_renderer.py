@@ -22,6 +22,9 @@ class RichTUIRenderer(UIRenderer):
         self._cleanup_called = False  # Guard against multiple cleanup calls
         self._conversation_history = []  # Track messages for the conversation panel
         self._current_status = "Ready"  # Track current status
+        # Input history management
+        self._input_history = []
+        self._max_history = 1000  # Track current status
         
     def initialize(self) -> bool:
         """PHASE 3: Initialize Rich TUI with Live display panels."""
@@ -202,7 +205,7 @@ class RichTUIRenderer(UIRenderer):
             pass
     
     def handle_input(self) -> Optional[str]:
-        """PHASE 3: Input handling compatible with Live display."""
+        """PHASE 3: Input handling compatible with Live display and history support."""
         try:
             if self.state.is_processing:
                 return None
@@ -212,10 +215,34 @@ class RichTUIRenderer(UIRenderer):
                 # Temporarily pause Live display for clean input
                 self.live.stop()
                 
-                # Simple input prompt
+                # Enhanced input prompt with readline support
                 try:
                     self.console.print("\n💬 [yellow]>[/yellow] ", end="")
-                    user_input = input().strip()
+                    
+                    # Try to use readline for better input experience
+                    try:
+                        import readline
+                        
+                        # Configure readline
+                        readline.set_startup_hook(None)
+                        readline.clear_history()
+                        
+                        # Add recent history to readline
+                        for item in self._input_history[-50:]:  # Last 50 for performance
+                            readline.add_history(item)
+                        
+                        user_input = input().strip()
+                        
+                    except ImportError:
+                        # Fallback without readline
+                        user_input = input().strip()
+                    
+                    # Add to history
+                    if user_input and (not self._input_history or self._input_history[-1] != user_input):
+                        self._input_history.append(user_input)
+                        if len(self._input_history) > self._max_history:
+                            self._input_history = self._input_history[-self._max_history:]
+                    
                 except (EOFError, KeyboardInterrupt):
                     user_input = "/quit"
                 except Exception:
@@ -228,7 +255,24 @@ class RichTUIRenderer(UIRenderer):
             else:
                 # Fallback input for non-Live display
                 try:
+                    # Try with readline support
+                    try:
+                        import readline
+                        readline.set_startup_hook(None)
+                        readline.clear_history()
+                        for item in self._input_history[-50:]:
+                            readline.add_history(item)
+                    except ImportError:
+                        pass
+                    
                     user_input = input("💬 > ").strip()
+                    
+                    # Add to history
+                    if user_input and (not self._input_history or self._input_history[-1] != user_input):
+                        self._input_history.append(user_input)
+                        if len(self._input_history) > self._max_history:
+                            self._input_history = self._input_history[-self._max_history:]
+                    
                     return user_input if user_input else None
                 except (EOFError, KeyboardInterrupt):
                     return "/quit"

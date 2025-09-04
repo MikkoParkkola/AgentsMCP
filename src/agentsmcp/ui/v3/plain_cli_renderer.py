@@ -2,8 +2,10 @@
 
 import sys
 import threading
+import uuid
 from typing import Optional
 from .ui_renderer_base import UIRenderer
+from .streaming_state_manager import StreamingStateManager
 
 
 class PlainCLIRenderer(UIRenderer):
@@ -13,8 +15,9 @@ class PlainCLIRenderer(UIRenderer):
         super().__init__(capabilities)
         self._input_lock = threading.Lock()
         self._last_prompt_shown = False
-        self._streaming_active = False  # Track if currently streaming
-        self._current_streaming_content = ""  # Current streaming message
+        
+        # Initialize streaming state manager
+        self.streaming_manager = StreamingStateManager(supports_tty=capabilities.is_tty)
         
     def initialize(self) -> bool:
         """Initialize plain CLI renderer."""
@@ -36,9 +39,9 @@ class PlainCLIRenderer(UIRenderer):
         self._cleanup_called = True
         
         try:
-            # Plain CLI cleanup - NO goodbye message here
-            # Let the TUI launcher handle the single goodbye message
-            pass
+            # Clean up streaming state
+            if self.streaming_manager:
+                self.streaming_manager.force_cleanup()
         except Exception:
             pass  # Ignore cleanup errors
     
@@ -96,54 +99,29 @@ class PlainCLIRenderer(UIRenderer):
         self.show_message(error, "error")
     
     def handle_streaming_update(self, content: str) -> None:
-        """Handle real-time streaming updates in plain text - Environment-aware streaming."""
+        """Handle real-time streaming updates using streaming state manager."""
         try:
-            # First streaming update - initialize
-            if not self._streaming_active:
-                self._streaming_active = True
-                self._current_streaming_content = ""
-                
-                if self.capabilities.is_tty:
-                    # TTY environment - we can use carriage returns
-                    print("🤖 AI (streaming): ", end="", flush=True)
-                else:
-                    # Non-TTY environment - use progress dots
-                    print("🤖 AI: ", end="", flush=True)
+            # Start streaming session if not already active
+            if not self.streaming_manager.is_streaming_active():
+                session_id = str(uuid.uuid4())[:8]  # Short session ID
+                self.streaming_manager.start_streaming_session(session_id)
             
-            # Update content based on environment
-            if self.capabilities.is_tty:
-                # TTY: Update with carriage return (line overwrite)
-                if len(content) > len(self._current_streaming_content) + 10:  # Throttle updates
-                    self._current_streaming_content = content
-                    
-                    if len(content) > 80:
-                        display_content = content[:77] + "..."
-                    else:
-                        display_content = content
-                    
-                    print(f"\r🤖 AI (streaming): {display_content}", end="", flush=True)
-            else:
-                # Non-TTY: Show progress dots periodically
-                if len(content) > len(self._current_streaming_content) + 20:  # Less frequent dots
-                    self._current_streaming_content = content
-                    print(".", end="", flush=True)
+            # Use streaming state manager to handle the update
+            self.streaming_manager.display_streaming_update(content)
             
         except Exception as e:
             print(f"\nStreaming update error: {e}")
+            # Force cleanup on error
+            if self.streaming_manager:
+                self.streaming_manager.force_cleanup()
     
     def display_chat_message(self, role: str, content: str, timestamp: str = None) -> None:
         """Display a chat message with plain text formatting."""
         try:
             # If we were streaming and this is the final assistant message
-            if self._streaming_active and role == "assistant":
-                # Finalize the streaming display with complete message
-                if self.capabilities.is_tty:
-                    print()  # New line to finish streaming line
-                else:
-                    print(" [Complete]")  # Finish the progress dots
-                
-                self._streaming_active = False
-                self._current_streaming_content = ""
+            if self.streaming_manager.is_streaming_active() and role == "assistant":
+                # Complete the streaming session first
+                self.streaming_manager.complete_streaming_session()
                 
                 # Display the complete final message
                 role_symbols = {

@@ -236,6 +236,11 @@ class ChatEngine:
                 # Get optimized prompt
                 optimized_prompt = await self._llm_client.optimize_prompt(user_input)
                 
+                # DEBUG: Log optimization results
+                import logging
+                logger = logging.getLogger(__name__)
+                # Prompt optimization applied
+                
                 # Show optimized prompt if it's different from original
                 if optimized_prompt != user_input and len(optimized_prompt.strip()) > len(user_input.strip()) * 0.8:
                     # Create and show optimized prompt message
@@ -247,9 +252,11 @@ class ChatEngine:
                     self._notify_message(optimized_message)
                     # Use optimized prompt for processing
                     actual_prompt = optimized_prompt
+                    # Using optimized prompt
                 else:
                     # Use original prompt if optimization didn't improve it
                     actual_prompt = user_input
+                    # Using original prompt (optimization didn't improve)
             else:
                 # Preprocessing disabled or input too short - just show user message with timestamp
                 user_message = self.state.add_message(MessageRole.USER, user_input)
@@ -398,6 +405,11 @@ class ChatEngine:
     async def _handle_streaming_response(self, user_input: str, task_id: Optional[str] = None) -> None:
         """Handle streaming AI response with real-time updates and history logging."""
         try:
+            # DEBUG: Log the actual prompt being sent to LLM for execution
+            import logging
+            logger = logging.getLogger(__name__)
+            # Starting streaming execution
+            
             # Stream response chunks directly without creating placeholder message
             full_response = ""
             async for chunk in self._get_ai_response_streaming(user_input):
@@ -453,6 +465,11 @@ class ChatEngine:
     async def _get_ai_response_streaming(self, user_input: str):
         """Stream AI response in real-time chunks with progress tracking."""
         try:
+            # DEBUG: Log the prompt being passed to LLM client
+            import logging
+            logger = logging.getLogger(__name__)
+            # Getting streaming AI response
+            
             if self._llm_client is None:
                 self._initialize_llm_client()
             
@@ -465,6 +482,9 @@ class ChatEngine:
                 """Forward progress updates to TUI."""
                 if self._status_callback:
                     self._status_callback(status)
+            
+            # DEBUG: Log before calling LLM client
+            # Calling LLM client
             
             # Use streaming if supported, otherwise fallback to batch
             if self._llm_client.supports_streaming():
@@ -485,6 +505,11 @@ class ChatEngine:
         Get AI response to user input using the real LLMClient with detailed error reporting and progress tracking.
         """
         try:
+            # DEBUG: Log the prompt being passed to LLM client
+            import logging
+            logger = logging.getLogger(__name__)
+            # Getting AI response
+            
             # Use the existing LLM client (initialized once in __init__)
             if self._llm_client is None:
                 self._initialize_llm_client()
@@ -498,8 +523,15 @@ class ChatEngine:
                 if self._status_callback:
                     self._status_callback(status)
             
+            # DEBUG: Log before calling LLM client
+            # Calling LLM client send_message
+            
             # Get response from real LLM with progress tracking
             response = await self._llm_client.send_message(user_input, progress_callback=progress_callback)
+            
+            # DEBUG: Log response received
+            # LLM response received
+            
             return response
             
         except Exception as e:
