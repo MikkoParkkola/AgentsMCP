@@ -134,10 +134,13 @@ class RevolutionaryTUIInterface:
                 # First, get actual terminal size using multiple methods
                 actual_width, actual_height = self._detect_actual_terminal_size()
                 
+                # Determine if we should force terminal mode based on size detection
+                has_valid_size = actual_width > 0 and actual_height > 0
+                
                 # Initialize console with proper size detection
                 self.console = Console(
-                    # Don't force terminal - let Rich detect properly
-                    force_terminal=None,  # Let Rich auto-detect
+                    # Force terminal mode when we have valid dimensions to ensure Rich respects explicit sizing
+                    force_terminal=True if has_valid_size else None,
                     legacy_windows=False,
                     file=sys.stdout,
                     stderr=False,
@@ -959,7 +962,7 @@ class RevolutionaryTUIInterface:
         return self._safe_layout_text(content_text, max_width)
     
     async def run(self):
-        """Main entry point for Revolutionary TUI Interface with terminal state management."""
+        """Main entry point for Revolutionary TUI Interface with enhanced terminal detection."""
         try:
             # Import required modules
             import signal
@@ -998,15 +1001,36 @@ class RevolutionaryTUIInterface:
                 logger_instance.handlers = [null_handler]
                 logger_instance.setLevel(logging.CRITICAL)
             
+            # ENHANCED TTY DETECTION: More permissive for user environments
             # Check for CI/automated environments that should not use Rich
-            # But allow TTY environments to proceed to Rich display
-            is_tty = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
             is_ci = any(var in os.environ for var in ['CI', 'GITHUB_ACTIONS', 'TRAVIS', 'JENKINS', 'BUILD'])
             
             if is_ci:
                 logger.error("CI environment detected - using minimal fallback to prevent output pollution")
-                # Return immediately with exit code 0 to prevent any Rich output cycling
                 return 0
+            
+            # Enhanced terminal capability detection
+            basic_tty = sys.stdin.isatty() if hasattr(sys.stdin, 'isatty') else False
+            has_term_env = os.environ.get('TERM', '') != ''
+            has_term_program = os.environ.get('TERM_PROGRAM', '') != ''
+            has_terminal_size = hasattr(os, 'get_terminal_size')
+            
+            # Check for specific terminal programs that support input even if not detected as TTY
+            supported_terminals = ['iTerm.app', 'Terminal.app', 'VSCode', 'vscode']
+            is_supported_terminal = any(term in os.environ.get('TERM_PROGRAM', '') for term in supported_terminals)
+            
+            # CRITICAL FIX: Allow interactive mode if we have ANY indication of terminal capability
+            # This fixes the issue where iTerm.app users get stuck in demo mode
+            allow_interactive_mode = (
+                basic_tty or 
+                has_term_env or 
+                has_term_program or 
+                is_supported_terminal or
+                has_terminal_size
+            )
+            
+            # Use Rich TTY if we have full TTY support
+            is_tty = basic_tty and has_term_env
             
             # THREAT: Debug output floods scrollback buffer
             # MITIGATION: Use logging instead of print statements
@@ -1014,6 +1038,8 @@ class RevolutionaryTUIInterface:
                 logger.debug("Revolutionary TUI Interface run() method called")
                 logger.debug(f"RICH_AVAILABLE: {RICH_AVAILABLE}")
                 logger.debug(f"CLI config: {self.cli_config}")
+                logger.debug(f"Basic TTY: {basic_tty}, TERM: {has_term_env}, TERM_PROGRAM: {has_term_program}")
+                logger.debug(f"Supported terminal: {is_supported_terminal}, Allow interactive: {allow_interactive_mode}")
             
             # Initialize components
             if debug_mode:
@@ -1092,7 +1118,7 @@ class RevolutionaryTUIInterface:
                             try:
                                 # Use terminal_controller for proper screen management if available
                                 if hasattr(self, 'terminal_controller') and self.terminal_controller:
-                                    self.terminal_controller.enter_alternate_screen()
+                                    await self.terminal_controller.enter_alternate_screen()
                                     self._alternate_screen_active = True
                                 else:
                                     # Enhanced manual terminal control to prevent scrollback pollution
@@ -1201,9 +1227,12 @@ class RevolutionaryTUIInterface:
                                     import traceback
                                     logger.debug(f"Emergency Rich Live traceback:\n{traceback.format_exc()}")
                                 
-                                # FINAL FALLBACK: Run without Rich
-                                logger.warning("🔄 Falling back to emergency non-Rich mode")
-                                await self._run_emergency_fallback_loop()
+                                # FINAL FALLBACK: Run without Rich but check for interactive capability
+                                logger.warning("🔄 Falling back to enhanced interactive mode")
+                                if allow_interactive_mode:
+                                    await self._enhanced_interactive_mode()
+                                else:
+                                    await self._run_emergency_fallback_loop()
                     
                     except Exception as rich_e:
                         logger.error(f"Rich Live display creation failed: {rich_e}")
@@ -1211,16 +1240,27 @@ class RevolutionaryTUIInterface:
                             import traceback
                             logger.debug(f"Rich Live creation traceback:\n{traceback.format_exc()}")
                         
-                        # Fallback to emergency mode
-                        logger.warning("🔄 Falling back to emergency non-Rich mode")
-                        await self._run_emergency_fallback_loop()
+                        # Fallback to enhanced interactive mode if supported
+                        if allow_interactive_mode:
+                            logger.info("🔄 Falling back to enhanced interactive mode")
+                            await self._enhanced_interactive_mode()
+                        else:
+                            logger.warning("🔄 Falling back to emergency non-Rich mode")
+                            await self._run_emergency_fallback_loop()
                 
                 else:
-                    # Rich not available or not TTY - run in demo mode
-                    logger.info("📱 Rich not available or not in TTY - running demo mode")
-                    if debug_mode:
-                        logger.debug(f"Rich available: {RICH_AVAILABLE}, Is TTY: {is_tty}")
-                    await self._demo_mode_loop()
+                    # CRITICAL FIX: Check for interactive capability instead of just going to demo mode
+                    if allow_interactive_mode:
+                        logger.info("💬 Enhanced interactive mode enabled (terminal capabilities detected)")
+                        if debug_mode:
+                            logger.debug(f"Interactive mode: Basic TTY={basic_tty}, TERM={has_term_env}, TERM_PROGRAM={has_term_program}, Supported={is_supported_terminal}")
+                        await self._enhanced_interactive_mode()
+                    else:
+                        # Rich not available or no terminal capability - run in demo mode
+                        logger.info("📱 No interactive capability detected - running demo mode")
+                        if debug_mode:
+                            logger.debug(f"Demo mode: Rich available={RICH_AVAILABLE}, Interactive allowed={allow_interactive_mode}")
+                        await self._demo_mode_loop()
                 
             finally:
                 # CRITICAL FIX: Restore original terminal state AFTER Rich exits
@@ -1803,7 +1843,7 @@ class RevolutionaryTUIInterface:
             executor.shutdown(wait=False)
     
     async def _demo_mode_loop(self):
-        """Enhanced demo mode with input support for non-TTY environments."""
+        """Enhanced demo mode with proper TTY-aware input handling."""
         logger.info("Starting enhanced demo mode for non-TTY environment")
         
         print("\n🚀 Revolutionary TUI Interface - Demo Mode")
@@ -1844,7 +1884,7 @@ class RevolutionaryTUIInterface:
             logger.info(f"Demo countdown: {countdown}s remaining")
             await asyncio.sleep(1.0)
         
-        # Enhanced: Add interactive input capability after demo
+        # Enhanced: Add TTY-aware interactive input capability after demo
         print("\n💬 Interactive mode now available:")
         print("   • Type messages and press Enter to see them processed") 
         print("   • Type '/quit' to exit")
@@ -1853,53 +1893,310 @@ class RevolutionaryTUIInterface:
         sys.stdout.flush()
         logger.info("Starting interactive input mode in demo")
         
-        # Ensure we're still running for the interactive part
-        self.running = True
+        # Check if we have TTY input available
+        has_tty_input = hasattr(sys.stdin, 'isatty') and sys.stdin.isatty()
         
-        while self.running:
-            try:
-                # Provide visible input prompt
-                user_input = input("\n💬 TUI> ")
-                
-                # Echo the input so user sees what they typed
-                if user_input.strip():
-                    print(f"📝 You typed: {user_input}")
-                    sys.stdout.flush()
+        if has_tty_input:
+            logger.info("TTY input detected - entering full interactive mode")
+            # Full interactive mode with TTY
+            while self.running:
+                try:
+                    # Provide visible input prompt
+                    user_input = input("\n💬 TUI> ")
                     
-                    # Process the input through the existing system
-                    await self._process_user_input(user_input)
-                    
-                    # If a quit command was processed, running will be False
-                    if not self.running:
-                        break
+                    # Echo the input so user sees what they typed
+                    if user_input.strip():
+                        print(f"📝 You typed: {user_input}")
+                        sys.stdout.flush()
                         
-                    # Show any conversation updates that resulted from input processing
-                    if hasattr(self.state, 'conversation_history') and self.state.conversation_history:
-                        # Show the last assistant response if any
-                        last_message = self.state.conversation_history[-1]
-                        if last_message.get('role') == 'assistant':
-                            print(f"🤖 Assistant: {last_message.get('content', '')}")
-                            sys.stdout.flush()
-                else:
-                    # Handle empty input
-                    print("💭 (Empty input - type something or '/help' for commands)")
+                        # Process the input through the existing system
+                        await self._process_user_input(user_input)
+                        
+                        # If a quit command was processed, running will be False
+                        if not self.running:
+                            break
+                            
+                        # Show any conversation updates that resulted from input processing
+                        if hasattr(self.state, 'conversation_history') and self.state.conversation_history:
+                            # Show the last assistant response if any
+                            last_message = self.state.conversation_history[-1]
+                            if last_message.get('role') == 'assistant':
+                                print(f"🤖 Assistant: {last_message.get('content', '')}")
+                                sys.stdout.flush()
+                    else:
+                        # Handle empty input
+                        print("💭 (Empty input - type something or '/help' for commands)")
+                        sys.stdout.flush()
+                        
+                except (EOFError, KeyboardInterrupt):
+                    print("\n👋 Exiting TUI...")
                     sys.stdout.flush()
+                    logger.info("Interactive mode interrupted by user (EOF/Ctrl+C)")
+                    break
+                except Exception as e:
+                    logger.error(f"Error in interactive input loop: {e}")
+                    print(f"❌ Input error: {e}")
+                    print("💡 Try again or type '/quit' to exit")
+                    sys.stdout.flush()
+        else:
+            logger.info("Non-TTY environment detected - enabling fallback interactive mode")
+            # Non-TTY environment - provide real interactive mode with input() fallback
+            print("\n🔄 Interactive mode enabled in non-TTY environment...")
+            print("💡 Using input() for interaction (limited features)")
+            sys.stdout.flush()
+            
+            # Real interactive mode even without TTY
+            while self.running:
+                try:
+                    # Use input() as fallback for non-TTY environments
+                    user_input = input("\n💬 TUI> ")
                     
-            except (EOFError, KeyboardInterrupt):
-                print("\n👋 Exiting TUI...")
-                sys.stdout.flush()
-                logger.info("Demo mode interrupted by user (EOF/Ctrl+C)")
-                break
-            except Exception as e:
-                logger.error(f"Error in demo input loop: {e}")
-                print(f"❌ Input error: {e}")
-                print("💡 Try again or type '/quit' to exit")
-                sys.stdout.flush()
+                    # Echo the input so user sees what they typed
+                    if user_input.strip():
+                        print(f"📝 Processing: {user_input}")
+                        sys.stdout.flush()
+                        
+                        # Process the user input
+                        await self._process_user_input(user_input)
+                        
+                        # Check if user wants to quit
+                        if user_input.strip().lower() in ['/quit', 'quit', 'exit']:
+                            print("👋 Goodbye!")
+                            sys.stdout.flush()
+                            logger.info("User requested quit in non-TTY interactive mode")
+                            break
+                    else:
+                        # Handle empty input
+                        print("💭 (Empty input - type something or '/help' for commands)")
+                        sys.stdout.flush()
+                        
+                except (EOFError, KeyboardInterrupt):
+                    print("\n👋 Exiting TUI...")
+                    sys.stdout.flush()
+                    logger.info("Interactive mode interrupted by user (EOF/Ctrl+C)")
+                    break
+                except Exception as e:
+                    logger.error(f"Error in non-TTY interactive input loop: {e}")
+                    print(f"❌ Input error: {e}")
+                    print("💡 Try again or type '/quit' to exit")
+                    sys.stdout.flush()
         
-        print("\n✅ Demo completed - TUI shutting down gracefully")
-        sys.stdout.flush()
-        logger.info("Enhanced demo mode completed successfully")
-        self.running = False
+        # Only show completion message if we actually completed the demo
+        # (not if user explicitly quit from interactive mode)
+        if self.running:
+            print("\n✅ Demo completed - TUI shutting down gracefully")
+            sys.stdout.flush()
+            logger.info("Enhanced demo mode completed successfully")
+            self.running = False
+        else:
+            logger.info("Interactive mode ended - TUI shutting down gracefully")
+
+    async def _enhanced_interactive_mode(self):
+        """Enhanced interactive mode for terminals that support input but may not register as full TTY.
+        
+        This method provides a robust interactive experience for environments like iTerm.app 
+        running through Claude Code where stdin.isatty() returns False but input is actually available.
+        """
+        import sys
+        import os
+        import asyncio
+        import logging
+        from rich.prompt import Prompt
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.text import Text
+        
+        logger = logging.getLogger(__name__)
+        console = Console()
+        
+        try:
+            # Show welcome message
+            welcome_text = Text()
+            welcome_text.append("🤖 Revolutionary TUI Interface - Enhanced Interactive Mode\n", style="bold cyan")
+            welcome_text.append("✨ Terminal capabilities detected - full interactive experience enabled\n", style="green")
+            welcome_text.append("\nAvailable commands:\n", style="yellow")
+            welcome_text.append("  • Type messages and press Enter to chat with AI\n", style="white")
+            welcome_text.append("  • /help - Show help information\n", style="blue")
+            welcome_text.append("  • /status - Show system status\n", style="blue")
+            welcome_text.append("  • /quit - Exit the TUI\n", style="blue")
+            welcome_text.append("  • /clear - Clear the screen\n", style="blue")
+            welcome_text.append("\nType your message below:\n", style="yellow")
+            
+            welcome_panel = Panel(
+                welcome_text,
+                title="[bold]Welcome to AgentsMCP TUI[/bold]",
+                border_style="cyan",
+                expand=False
+            )
+            console.print(welcome_panel)
+            console.print()
+            
+            # Initialize conversation components
+            if hasattr(self, 'conversation_manager') and self.conversation_manager:
+                logger.info("✅ Conversation manager available for enhanced interactive mode")
+            else:
+                logger.warning("⚠️  No conversation manager - responses will be limited")
+            
+            # Main interactive loop
+            while self.running:
+                try:
+                    # Use Rich prompt for better input handling
+                    try:
+                        user_input = Prompt.ask(
+                            "[bold cyan]TUI>[/bold cyan]",
+                            console=console,
+                            default=""
+                        ).strip()
+                    except (EOFError, KeyboardInterrupt):
+                        # Handle Ctrl+C or EOF gracefully
+                        console.print("\n[yellow]👋 Exiting TUI...[/yellow]")
+                        break
+                    except Exception as input_error:
+                        # Fallback to basic input if Rich prompt fails
+                        logger.warning(f"Rich prompt failed, using basic input: {input_error}")
+                        console.print("[cyan]TUI> [/cyan]", end="")
+                        try:
+                            user_input = input().strip()
+                        except (EOFError, KeyboardInterrupt):
+                            console.print("\n[yellow]👋 Exiting TUI...[/yellow]")
+                            break
+                    
+                    if not user_input:
+                        continue
+                    
+                    # Handle commands
+                    if user_input.startswith('/'):
+                        await self._handle_command(user_input, console)
+                    else:
+                        # Handle regular chat input
+                        await self._handle_chat_input(user_input, console)
+                        
+                except KeyboardInterrupt:
+                    console.print("\n[yellow]⚠️  Received Ctrl+C - shutting down gracefully...[/yellow]")
+                    break
+                except Exception as loop_error:
+                    logger.error(f"Error in enhanced interactive loop: {loop_error}")
+                    console.print(f"[red]❌ Error: {loop_error}[/red]")
+                    # Continue the loop unless it's a critical error
+                    if "critical" in str(loop_error).lower():
+                        break
+            
+            console.print("[green]✅ Enhanced interactive mode shutting down gracefully[/green]")
+            
+        except Exception as e:
+            logger.error(f"Enhanced interactive mode failed: {e}")
+            console.print(f"[red]❌ Enhanced interactive mode error: {e}[/red]")
+            # Fallback to emergency mode
+            await self._run_emergency_fallback_loop()
+    
+    async def _handle_command(self, command: str, console):
+        """Handle slash commands in enhanced interactive mode."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        command = command.lower().strip()
+        
+        if command == '/quit' or command == '/exit':
+            console.print("[yellow]👋 Goodbye![/yellow]")
+            self.running = False
+            return
+        
+        elif command == '/help':
+            help_text = """[bold cyan]Available Commands:[/bold cyan]
+
+[blue]/help[/blue]     - Show this help message
+[blue]/status[/blue]   - Show system status  
+[blue]/clear[/blue]    - Clear the screen
+[blue]/quit[/blue]     - Exit the TUI
+
+[bold yellow]Chat Features:[/bold yellow]
+• Type any message to chat with the AI
+• Multi-line input supported
+• Commands are processed locally
+• AI responses use configured LLM provider
+
+[bold green]Tips:[/bold green]
+• Use Ctrl+C to exit gracefully
+• Terminal supports full Unicode and colors
+• Input is processed in real-time"""
+            
+            console.print(Panel(help_text, title="[bold]AgentsMCP TUI Help[/bold]", border_style="blue"))
+        
+        elif command == '/status':
+            # Show system status
+            status_info = []
+            status_info.append(f"🔄 TUI Running: {self.running}")
+            status_info.append(f"🖥️  Terminal: {os.environ.get('TERM_PROGRAM', 'Unknown')}")
+            status_info.append(f"📺 Console: Rich {getattr(console, '_color_system', 'auto')}")
+            
+            if hasattr(self, 'conversation_manager') and self.conversation_manager:
+                status_info.append("💬 Conversation Manager: ✅ Active")
+            else:
+                status_info.append("💬 Conversation Manager: ❌ Not Available")
+            
+            if hasattr(self, 'orchestrator') and self.orchestrator:
+                status_info.append("🎭 Orchestrator: ✅ Active")
+            else:
+                status_info.append("🎭 Orchestrator: ❌ Not Available")
+            
+            status_text = "\n".join(status_info)
+            console.print(Panel(status_text, title="[bold]System Status[/bold]", border_style="green"))
+        
+        elif command == '/clear':
+            console.clear()
+            console.print("[green]✨ Screen cleared[/green]")
+        
+        else:
+            console.print(f"[red]❓ Unknown command: {command}[/red]")
+            console.print("[yellow]Type /help for available commands[/yellow]")
+    
+    async def _handle_chat_input(self, user_input: str, console):
+        """Handle regular chat input in enhanced interactive mode."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            console.print(f"[dim]Processing: {user_input}[/dim]")
+            
+            # Try to use conversation manager if available
+            if hasattr(self, 'conversation_manager') and self.conversation_manager:
+                try:
+                    # Process through conversation manager
+                    response = await self.conversation_manager.process_user_input(user_input)
+                    if response:
+                        console.print(Panel(response, title="[bold]AI Response[/bold]", border_style="green"))
+                    else:
+                        console.print("[yellow]🤖 AI response was empty or failed to process[/yellow]")
+                except Exception as conv_error:
+                    logger.error(f"Conversation manager error: {conv_error}")
+                    console.print(f"[red]❌ Conversation error: {conv_error}[/red]")
+            
+            # Try orchestrator as fallback
+            elif hasattr(self, 'orchestrator') and self.orchestrator:
+                try:
+                    result = await self.orchestrator.process_command(user_input)
+                    if result:
+                        console.print(Panel(str(result), title="[bold]System Response[/bold]", border_style="blue"))
+                    else:
+                        console.print("[yellow]🔧 System response was empty[/yellow]")
+                except Exception as orch_error:
+                    logger.error(f"Orchestrator error: {orch_error}")
+                    console.print(f"[red]❌ System error: {orch_error}[/red]")
+            
+            else:
+                # No conversation components available - show helpful message
+                console.print(Panel(
+                    f"[yellow]📝 Input received: '{user_input}'[/yellow]\n\n"
+                    "[red]⚠️  No conversation manager or orchestrator available.[/red]\n"
+                    "[blue]This would normally be processed by the AI system.[/blue]\n\n"
+                    "[dim]To enable AI responses, ensure conversation components are properly initialized.[/dim]",
+                    title="[bold]Input Acknowledged[/bold]",
+                    border_style="yellow"
+                ))
+            
+        except Exception as e:
+            logger.error(f"Error handling chat input: {e}")
+            console.print(f"[red]❌ Error processing input: {e}[/red]")
     
     # Polling-based update loop REMOVED - replaced with event-driven updates
     # All status and metrics updates now happen via events only

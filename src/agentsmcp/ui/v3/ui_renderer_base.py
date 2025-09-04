@@ -34,6 +34,7 @@ class UIRenderer(ABC):
         self.capabilities = capabilities
         self.state = UIState()
         self._active = False
+        self._cleanup_called = False
     
     @abstractmethod
     def initialize(self) -> bool:
@@ -107,6 +108,37 @@ class ProgressiveRenderer:
     
     def select_best_renderer(self) -> Optional[UIRenderer]:
         """Select the best available renderer for current capabilities."""
+        # Handle forced renderer selection
+        if hasattr(self.capabilities, 'force_plain') and self.capabilities.force_plain:
+            # Force plain CLI renderer only
+            for name, info in self.renderers.items():
+                if 'plain' in name.lower():
+                    try:
+                        if info['instance'] is None:
+                            info['instance'] = info['class'](self.capabilities)
+                        renderer = info['instance']
+                        if renderer.activate():
+                            self.current_renderer = renderer
+                            return renderer
+                    except Exception as e:
+                        print(f"Failed to activate forced plain renderer {name}: {e}")
+            return None
+        
+        if hasattr(self.capabilities, 'force_simple') and self.capabilities.force_simple:
+            # Force simple TUI renderer (skip rich)
+            for name, info in self.renderers.items():
+                if 'simple' in name.lower() or 'plain' in name.lower():
+                    try:
+                        if info['instance'] is None:
+                            info['instance'] = info['class'](self.capabilities)
+                        renderer = info['instance']
+                        if renderer.activate():
+                            self.current_renderer = renderer
+                            return renderer
+                    except Exception as e:
+                        print(f"Failed to activate forced simple renderer {name}: {e}")
+            return None
+        
         # Sort by priority (highest first)
         sorted_renderers = sorted(
             self.renderers.items(),

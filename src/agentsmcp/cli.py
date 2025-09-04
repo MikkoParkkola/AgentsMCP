@@ -1194,10 +1194,28 @@ def roles_alias(ctx):
 @click.option("--agent", "agent_type", default="ollama-turbo-coding", help="Default AI agent")
 @click.option("--revolutionary/--basic", default=True, help="Use Revolutionary TUI (default) or basic TUI")
 @click.option("--safe-mode", is_flag=True, help="Launch in maximum compatibility mode")
+@click.option("--legacy", is_flag=True, help="Force use of legacy v2 system")
 @click.pass_context
 def tui_alias(ctx, theme: str, no_welcome: bool, refresh_interval: float, 
-              orchestrator_model: str, agent_type: str, revolutionary: bool, safe_mode: bool):
+              orchestrator_model: str, agent_type: str, revolutionary: bool, safe_mode: bool, legacy: bool):
     """🚀 Launch the Revolutionary TUI interface with automatic capability detection."""
+    
+    # Try v3 system first (unless explicitly requesting legacy)
+    if not legacy:
+        try:
+            from agentsmcp.ui.v3.tui_launcher import launch_tui
+            print("🚀 Starting AI Command Composer with clean v3 architecture...")
+            exit_code = asyncio.run(launch_tui())
+            # CRITICAL FIX: Always exit after V3 completes, regardless of exit code
+            sys.exit(exit_code)
+        except ImportError as e:
+            print(f"⚠️  V3 TUI not available ({e}), falling back to legacy system...")
+        except Exception as e:
+            print(f"⚠️  V3 TUI failed ({e}), falling back to legacy system...")
+    
+    # Fallback to legacy v2 system
+    print("🔄 Using legacy Revolutionary TUI system...")
+    
     # Import here to avoid startup overhead
     from agentsmcp.ui.cli_app import CLIConfig
     from agentsmcp.ui.v2.revolutionary_launcher import launch_revolutionary_tui
@@ -1240,9 +1258,7 @@ def tui_alias(ctx, theme: str, no_welcome: bool, refresh_interval: float,
             "Failed to start the Revolutionary TUI interface"
         )
         print(f"❌ Revolutionary TUI failed: {exc}")
-        print("💡 Try using --safe-mode for maximum compatibility")
-
-@main.command("tui-v2-dev", hidden=False)
+        print("💡 Try using --safe-mode for maximum compatibility or --legacy for v2 system")@main.command("tui-v2-dev", hidden=False)
 @click.option("--minimal", is_flag=True, help="Run v2 in minimal input mode (default)")
 @click.option("--debug", is_flag=True, help="Enable v2 minimal debug logging")
 @click.option("--backend/--no-backend", default=True, help="Enable conversation backend (default: enabled)")

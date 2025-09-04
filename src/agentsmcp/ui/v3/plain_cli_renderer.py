@@ -28,6 +28,11 @@ class PlainCLIRenderer(UIRenderer):
     
     def cleanup(self) -> None:
         """Clean up plain CLI renderer."""
+        # Prevent multiple cleanup calls
+        if getattr(self, '_cleanup_called', False):
+            return
+        self._cleanup_called = True
+        
         try:
             print()
             print("Goodbye! 👋")
@@ -49,32 +54,22 @@ class PlainCLIRenderer(UIRenderer):
             print(f"Render error: {e}")
     
     def handle_input(self) -> Optional[str]:
-        """Handle user input in plain CLI mode."""
-        with self._input_lock:
+        """Handle user input in BARE-BONES plain CLI mode."""
+        try:
+            # SIMPLIFIED input handling - no complex state management
+            # Just use standard input() function - most reliable
             try:
-                if self.state.is_processing:
-                    return None
-                
-                # Clear current input display
-                if self._last_prompt_shown:
-                    print()  # Move to next line
-                    self._last_prompt_shown = False
-                
-                # Get input from user
-                try:
-                    user_input = input("💬 > ").strip()
-                except (EOFError, KeyboardInterrupt):
-                    return "/quit"
-                
-                if user_input:
-                    self.state.current_input = ""  # Clear input buffer
-                    return user_input
-                
-                return None
-                
+                user_input = input("> ").strip()
+                return user_input if user_input else None
+            except (EOFError, KeyboardInterrupt):
+                return "/quit"
             except Exception as e:
                 print(f"Input error: {e}")
                 return None
+                
+        except Exception as e:
+            print(f"Critical input error: {e}")
+            return None
     
     def show_message(self, message: str, level: str = "info") -> None:
         """Show a message in plain text."""
@@ -121,12 +116,16 @@ class SimpleTUIRenderer(UIRenderer):
     def initialize(self) -> bool:
         """Initialize simple TUI renderer."""
         try:
-            # Clear screen and position cursor
             if self.capabilities.is_tty:
-                print("\033[2J\033[H", end="")  # Clear screen, go to top
+                # Clear screen and position cursor - but be less aggressive
+                print("\033[2J\033[H", end="", flush=True)  # Clear screen, go to top
+                print()  # Add some breathing room
             
             self._draw_header()
-            self._draw_input_area()
+            
+            if self.capabilities.is_tty:
+                print()  # Add space before input area
+            
             return True
         except Exception as e:
             print(f"Failed to initialize simple TUI: {e}")
@@ -134,6 +133,11 @@ class SimpleTUIRenderer(UIRenderer):
     
     def cleanup(self) -> None:
         """Clean up simple TUI renderer."""
+        # Prevent multiple cleanup calls
+        if getattr(self, '_cleanup_called', False):
+            return
+        self._cleanup_called = True
+        
         try:
             if self.capabilities.is_tty:
                 print("\033[2J\033[H", end="")  # Clear screen
@@ -147,65 +151,45 @@ class SimpleTUIRenderer(UIRenderer):
             if not self.capabilities.is_tty:
                 return  # Fallback to plain mode behavior
             
-            # Save cursor position
-            print("\033[s", end="")
-            
-            # Update input area
-            self._draw_input_area()
-            
-            # Show status if available
-            if self.state.status_message:
-                self._draw_status()
-            
-            # Restore cursor position
-            print("\033[u", end="", flush=True)
-            
+            # For SimpleTUI, minimize rendering to avoid conflicts
+            # Only show status if there's an important message
+            if self.state.status_message and self.state.status_message.strip():
+                print(f"\n{self.state.status_message}")
+                
         except Exception as e:
             print(f"Render error: {e}")
     
     def handle_input(self) -> Optional[str]:
         """Handle user input in simple TUI mode."""
         try:
-            import select
-            
             if not self.capabilities.is_tty:
                 # Fallback to plain input
-                return input("💬 > ").strip() or None
+                user_input = input("💬 > ").strip()
+                return user_input if user_input else None
             
-            # Check if input is available (non-blocking)
-            if select.select([sys.stdin], [], [], 0.1)[0]:
-                char = sys.stdin.read(1)
+            # For TTY mode, use blocking input with proper line handling
+            # This is simpler and more reliable than character-by-character input
+            try:
+                # Position cursor at input line
+                input_line = self._screen_height - 1
+                print(f"\033[{input_line};1H\033[K💬 > ", end="", flush=True)
                 
-                if ord(char) == 13:  # Enter key
-                    result = self._input_buffer.strip()
-                    self._input_buffer = ""
-                    self._cursor_pos = 0
-                    self.state.current_input = ""
-                    return result if result else None
-                    
-                elif ord(char) == 127:  # Backspace
-                    if self._cursor_pos > 0:
-                        self._input_buffer = (
-                            self._input_buffer[:self._cursor_pos-1] + 
-                            self._input_buffer[self._cursor_pos:]
-                        )
-                        self._cursor_pos -= 1
-                        self.state.current_input = self._input_buffer
-                        
-                elif ord(char) >= 32:  # Printable character
-                    self._input_buffer = (
-                        self._input_buffer[:self._cursor_pos] + 
-                        char + 
-                        self._input_buffer[self._cursor_pos:]
-                    )
-                    self._cursor_pos += 1
-                    self.state.current_input = self._input_buffer
-            
-            return None
+                # Use blocking input - this works correctly with terminal
+                user_input = input("").strip()
+                
+                if user_input:
+                    # Update state for potential rendering
+                    self.state.current_input = ""  # Clear since we got the input
+                    return user_input
+                
+                return None
+                
+            except (EOFError, KeyboardInterrupt):
+                return "/quit"
             
         except Exception as e:
             print(f"Input error: {e}")
-            # Fallback to blocking input
+            # Ultimate fallback to basic input
             try:
                 return input("💬 > ").strip() or None
             except (EOFError, KeyboardInterrupt):
@@ -256,13 +240,13 @@ class SimpleTUIRenderer(UIRenderer):
     def _draw_input_area(self) -> None:
         """Draw input area."""
         try:
-            input_line = self._screen_height - 1
-            
-            # Clear input line
-            if self.capabilities.is_tty:
-                print(f"\033[{input_line};1H\033[K", end="")
-                print(f"💬 > {self.state.current_input}", end="", flush=True)
-                
+            # For SimpleTUI, we keep this minimal to avoid cursor conflicts
+            # The actual input prompt is handled in handle_input()
+            if not self.capabilities.is_tty:
+                # Non-TTY fallback
+                if self.state.current_input:
+                    print(f"💬 > {self.state.current_input}", end="", flush=True)
+                    
         except Exception as e:
             print(f"Input area draw error: {e}")
     

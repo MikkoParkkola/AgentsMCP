@@ -110,17 +110,6 @@ def show_tui_help():
 
 def handle_tui_command(args: List[str]) -> int:
     """Handle TUI-specific command processing."""
-    # Ensure v2 sane defaults when invoking TUI via wrapper
-    try:
-        os.environ.setdefault("AGENTS_TUI_ENABLE_V2", "1")
-        # Run full v2 UI by default; minimal raw mode can be enabled explicitly if needed
-        os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "0")
-        os.environ.setdefault("AGENTS_TUI_V2_BACKEND", "1")
-        os.environ.setdefault("AGENTS_TUI_V2_BACKEND_PREWARM", "1")
-        os.environ.setdefault("AGENTS_TUI_SUPPRESS_TIPS", "1")
-    except Exception:
-        pass
-
     # Check for help first — delegate to Click for consistent formatting
     if "--help" in args or "-h" in args:
         try:
@@ -148,8 +137,55 @@ def handle_tui_command(args: List[str]) -> int:
         print("   TUI may not display correctly, consider using a better terminal")
         print()
     
+    # Parse arguments for legacy flag
+    debug_mode = "--debug" in args
+    legacy_mode = "--legacy" in args
+    
+    # Try v3 system first (unless explicitly requesting legacy)
+    if not legacy_mode:
+        try:
+            if debug_mode:
+                print("🔧 Debug: Attempting to start v3 TUI system...")
+            
+            import asyncio
+            from agentsmcp.ui.v3.tui_launcher import launch_tui
+            
+            print("🚀 Starting AI Command Composer with clean v3 architecture...")
+            exit_code = asyncio.run(launch_tui())
+            
+            if debug_mode:
+                print(f"🔧 Debug: V3 system completed with exit code: {exit_code}")
+            
+            # CRITICAL FIX: Exit immediately after V3 completes, don't fall through to V2
+            sys.exit(exit_code)
+            
+        except ImportError as e:
+            if debug_mode:
+                print(f"🔧 Debug: V3 import failed: {e}")
+            print(f"⚠️  V3 TUI not available ({e}), falling back to legacy system...")
+        except Exception as e:
+            if debug_mode:
+                print(f"🔧 Debug: V3 system failed: {e}")
+            print(f"⚠️  V3 TUI failed ({e}), falling back to legacy system...")
+    else:
+        if debug_mode:
+            print("🔧 Debug: Legacy mode requested, skipping v3 system...")
+    
+    # Fallback to legacy v2 system
+    print("🔄 Using legacy Revolutionary TUI system...")
+    
+    # Ensure v2 sane defaults when invoking TUI via wrapper
+    try:
+        os.environ.setdefault("AGENTS_TUI_ENABLE_V2", "1")
+        os.environ.setdefault("AGENTS_TUI_V2_MINIMAL", "0")
+        os.environ.setdefault("AGENTS_TUI_V2_BACKEND", "1")
+        os.environ.setdefault("AGENTS_TUI_V2_BACKEND_PREWARM", "1")
+        os.environ.setdefault("AGENTS_TUI_SUPPRESS_TIPS", "1")
+    except Exception:
+        pass
+    
     # Parse TUI arguments and convert to CLI format for ui.cli_app.main()
-    cli_args = []  # Start with empty args for the flat CLI structure
+    cli_args = []
     
     i = 1  # Skip 'tui' command
     while i < len(args):
@@ -175,6 +211,10 @@ def handle_tui_command(args: List[str]) -> int:
         elif arg == "--debug":
             cli_args.append("--debug")
             
+        elif arg == "--legacy":
+            # Already handled above
+            pass
+            
         elif arg == "--refresh-interval":
             if i + 1 < len(args):
                 try:
@@ -189,18 +229,16 @@ def handle_tui_command(args: List[str]) -> int:
                 return 1
                 
         elif arg == "--orchestrator-model":
-            # This option might not be supported in the flat CLI
             if i + 1 < len(args):
-                print(f"⚠️  --orchestrator-model option may not be supported in TUI mode")
+                print(f"⚠️  --orchestrator-model option may not be supported in legacy TUI mode")
                 i += 1
             else:
                 print("❌ --orchestrator-model requires a value")
                 return 1
                 
         elif arg == "--agent":
-            # This option might not be supported in the flat CLI
             if i + 1 < len(args):
-                print(f"⚠️  --agent option may not be supported in TUI mode")
+                print(f"⚠️  --agent option may not be supported in legacy TUI mode")
                 i += 1
             else:
                 print("❌ --agent requires a value")
@@ -217,10 +255,9 @@ def handle_tui_command(args: List[str]) -> int:
         i += 1
     
     try:
-        # Import and run the TUI with processed arguments
-        debug_mode = "--debug" in args
+        # Import and run the legacy TUI with processed arguments
         if debug_mode:
-            print(f"🔧 Debug: Starting Modern TUI with arguments: {cli_args}")
+            print(f"🔧 Debug: Starting Legacy TUI with arguments: {cli_args}")
         
         # Convert CLI args to config and run the TUI
         if debug_mode:
@@ -289,7 +326,7 @@ def handle_tui_command(args: List[str]) -> int:
         print("1. Check Python version: python3 --version")
         print("2. Verify terminal size and capabilities")
         print("3. Try running with --debug for more details")
-        print("4. Use legacy mode: ./agentsmcp run interactive --legacy")
+        print("4. Use legacy mode: ./agentsmcp tui --legacy")
         return 1
 
 def show_system_status() -> int:

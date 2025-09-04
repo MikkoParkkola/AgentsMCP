@@ -105,7 +105,7 @@ def test_scenario_3_chat_engine():
         print("Testing ChatEngine with '/help' command...")
         result = asyncio.run(engine.process_input("/help"))
         
-        if result is False:  # /help should return False (don't exit)
+        if result is True:  # /help should return True (continue running)
             print("✅ ChatEngine processed /help command correctly")
             
             # Check if callbacks were called

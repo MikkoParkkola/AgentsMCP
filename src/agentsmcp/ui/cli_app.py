@@ -250,19 +250,28 @@ class CLIApp:
                     logging.getLogger(__name__).exception(
                         "Failed to start TUI"
                     )
-                    # Respect no-fallback mode to surface TUI errors for debugging
-                    if _os.getenv("AGENTS_TUI_V2_NO_FALLBACK", "0") == "1":
-                        await self._show_error(f"TUI failed: {exc}")
-                        # Early return to avoid silently switching to legacy UI
-                        return {
-                            "status": "error",
-                            "session_duration": 0,
-                            "final_mode": "tui",
-                            "error": str(exc)
-                        }
-                    # Fallback to interactive mode if TUI fails
-                    print(f"TUI failed, falling back to interactive mode: {exc}")
-                    await self._run_interactive_mode()
+                    # V3-ONLY MODE - No V2 fallback, enhanced error reporting
+                    await self._show_error(f"V3 TUI failed: {exc}")
+                    print("❌ V2 fallback DISABLED - debugging V3 issues")
+                    print(f"   Error details: {str(exc)}")
+                    print("   This error needs to be fixed in the V3 system")
+                    print("   Falling back to simple PlainCLIRenderer instead of V2...")
+                    
+                    # Try the simple PlainCLI fallback instead of V2
+                    try:
+                        await self._run_simple_plain_cli()
+                    except Exception as cli_exc:
+                        print(f"❌ Even PlainCLI fallback failed: {cli_exc}")
+                        print("   Falling back to basic interactive mode...")
+                        await self._run_interactive_mode()
+                    
+                    return {
+                        "status": "error_with_fallback",
+                        "session_duration": 0,
+                        "final_mode": "plain_cli_fallback",
+                        "error": str(exc),
+                        "note": "V2 Revolutionary TUI disabled - used PlainCLI fallback"
+                    }
             else:
                 await self._run_interactive_mode()  # Default fallback
                 
@@ -341,13 +350,19 @@ class CLIApp:
         # Start dashboard
         await self.status_dashboard.start_dashboard()
     
+    # V2 TUI COMPLETELY REMOVED - _run_tui_shell method disabled
+    # This method previously launched V2 Revolutionary TUI - now disabled to force V3 debugging
     async def _run_tui_shell(self):
-        """Launch the fixed working TUI (replaces old tui_shell)."""
-        print("🚀 Launching TUI (fixed working implementation)...")
-        from .v2 import launch_main_tui
-        exit_code = await launch_main_tui(self.config)
-        if exit_code != 0:
-            await self._show_error(f"TUI failed with exit code: {exit_code}")
+        """V2 TUI DISABLED - This method is no longer functional.
+        
+        Previously launched V2 Revolutionary TUI system, but now disabled
+        to force exclusive V3 usage and enable proper V3 debugging.
+        """
+        print("❌ V2 TUI system DISABLED - _run_tui_shell() is no longer functional")
+        print("   This method previously launched V2 Revolutionary TUI")
+        print("   V2 is disabled to force V3-only execution for debugging")
+        print("   Use V3 TUI system via _run_modern_tui() instead")
+        return 1  # Return error code to indicate this method is disabled
 
     async def _run_statistics_mode(self):
         """Run the statistics display"""
@@ -369,64 +384,128 @@ class CLIApp:
         await self.statistics_display.start_display()
 
     async def _run_modern_tui(self):
-        """Launch the Revolutionary TUI with automatic capability detection.
+        """Launch V3 TUI system ONLY - V2 Revolutionary TUI completely disabled.
 
-        This method launches the Revolutionary TUI system which automatically:
-        - Detects terminal capabilities and system performance
-        - Activates appropriate feature level (Basic → Enhanced → Revolutionary → Ultra)
-        - Provides graceful fallback to basic TUI on any failures
-        - Maintains complete backward compatibility
+        This method forces the system to use V3 TUI exclusively:
+        - Uses the new v3 architecture with progressive enhancement
+        - Provides detailed error reporting for debugging
+        - Falls back to simple PlainCLIRenderer if V3 completely fails
+        - NO V2 fallback to allow proper V3 debugging
         """
         if self.config.debug_mode:
-            print("🔧 Debug: _run_modern_tui() called")
+            print("🔧 Debug: _run_modern_tui() called - V2 DISABLED, V3-ONLY MODE")
             
-        print("🚀 Starting Revolutionary TUI system...")
+        print("🚀 Starting V3 TUI system (V2 Revolutionary TUI DISABLED)...")
         
         try:
             if self.config.debug_mode:
-                print("🔧 Debug: Importing revolutionary_launcher...")
+                print("🔧 Debug: Importing V3 tui_launcher...")
                 
-            # Import and launch Revolutionary TUI system
-            from .v2.revolutionary_launcher import launch_revolutionary_tui
+            # Import and launch V3 TUI system ONLY
+            from .v3.tui_launcher import launch_tui
             
             if self.config.debug_mode:
-                print("🔧 Debug: Calling launch_revolutionary_tui()...")
-                print(f"🔧 Debug: Config passed - debug_mode: {self.config.debug_mode}")
+                print("🔧 Debug: Calling V3 launch_tui()...")
+                print(f"🔧 Debug: Config debug_mode: {self.config.debug_mode}")
                 
-            exit_code = await launch_revolutionary_tui(self.config)
+            print("✅ V3 TUI launcher imported successfully")
+            exit_code = await launch_tui()
             
             if exit_code != 0:
-                print(f"⚠️  Revolutionary TUI exited with code: {exit_code}")
-                print("   Attempting fallback to fixed working TUI...")
-                return await self._run_fallback_tui()
+                print(f"⚠️  V3 TUI exited with code: {exit_code}")
+                print("   This indicates a V3 issue that needs debugging")
             
             return exit_code
             
         except ImportError as e:
-            print(f"⚠️  Revolutionary TUI components missing: {e}")
-            print("   Falling back to fixed working TUI...")
-            return await self._run_fallback_tui()
+            print(f"❌ V3 TUI components missing: {e}")
+            import traceback
+            print("📋 Full import error traceback:")
+            traceback.print_exc()
+            print("   Falling back to simple PlainCLIRenderer...")
+            return await self._run_simple_plain_cli()
         except Exception as e:
             import logging
+            import traceback
             logger = logging.getLogger(__name__)
-            logger.warning(f"Revolutionary TUI launch failed: {e}")
+            logger.error(f"V3 TUI launch failed: {e}")
             
-            print(f"⚠️  Revolutionary TUI failed: {e}")
-            print("   Falling back to fixed working TUI...")
-            return await self._run_fallback_tui()
+            print(f"❌ V3 TUI failed with exception: {e}")
+            print("📋 Full error traceback:")
+            traceback.print_exc()
+            print("   This error needs to be debugged in V3 system")
+            print("   Falling back to simple PlainCLIRenderer...")
+            return await self._run_simple_plain_cli()
     
-    async def _run_fallback_tui(self):
-        """Run the basic fallback TUI when Revolutionary TUI fails."""
+    async def _run_simple_plain_cli(self):
+        """Run the simplest possible CLI renderer when V3 TUI completely fails."""
+        print("🔄 Starting simple PlainCLIRenderer fallback...")
         try:
-            from .v2.fixed_working_tui import launch_fixed_working_tui
-            return await launch_fixed_working_tui()
+            # Import V3 PlainCLIRenderer directly
+            from .v3.plain_cli_renderer import PlainCLIRenderer
+            from .v3.terminal_capabilities import TerminalCapabilities
+            from .v3.chat_engine import ChatEngine
+            
+            # Create minimal capabilities for fallback
+            capabilities = TerminalCapabilities(
+                is_tty=False,
+                width=80,
+                height=24,
+                supports_colors=False,
+                supports_unicode=False,
+                supports_rich=False
+            )
+            
+            # Create and run plain CLI renderer
+            renderer = PlainCLIRenderer(capabilities)
+            chat_engine = ChatEngine()
+            
+            print("✅ PlainCLIRenderer initialized")
+            print("📝 Type your messages and press Enter. Type '/quit' to exit.")
+            print()
+            
+            # Simple interaction loop
+            while True:
+                try:
+                    user_input = input("> ").strip()
+                    
+                    if user_input.lower() in ['/quit', '/exit', 'quit', 'exit']:
+                        print("👋 Goodbye!")
+                        return 0
+                    
+                    if user_input.lower() in ['/help', 'help']:
+                        print("📚 Available commands:")
+                        print("  /help - Show this help")
+                        print("  /quit, /exit - Exit the application")
+                        print("  Just type to chat!")
+                        continue
+                    
+                    if not user_input:
+                        continue
+                    
+                    # Process through chat engine
+                    should_continue = await chat_engine.process_input(user_input)
+                    if not should_continue:
+                        print("👋 Goodbye!")
+                        return 0
+                        
+                except KeyboardInterrupt:
+                    print("\n👋 Goodbye!")
+                    return 0
+                except EOFError:
+                    print("\n👋 Goodbye!")
+                    return 0
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+                    continue
+                    
         except ImportError as e:
-            print(f"❌ Fixed working TUI not available: {e}")
-            print("   No TUI implementation available. Switching to simple interactive mode...")
+            print(f"❌ Even PlainCLIRenderer not available: {e}")
+            print("   Using absolute minimal interactive mode...")
             return await self._run_simple_interactive_mode()
         except Exception as e:
-            print(f"❌ Fixed working TUI failed: {e}")
-            print("   No TUI implementation available. Switching to simple interactive mode...")
+            print(f"❌ PlainCLIRenderer failed: {e}")
+            print("   Using absolute minimal interactive mode...")
             return await self._run_simple_interactive_mode()
     
     async def _run_simple_interactive_mode(self):
@@ -988,7 +1067,44 @@ async def main():
         if hasattr(config, key):
             setattr(config, key, value)
     
-    # Create and start the CLI application
+    # Handle TUI mode with V3 ONLY architecture (V2 completely disabled)
+    if args.mode == "tui":
+        try:
+            # Import and use ONLY the V3 TUI system - no V2 fallback
+            from .v3.tui_launcher import launch_tui
+            print("🚀 Starting V3 TUI system (V2 Revolutionary TUI DISABLED)...")
+            
+            if config.debug_mode:
+                print("🔧 Debug: V3 direct launch - bypassing legacy CLI app routing")
+                
+            exit_code = await launch_tui()
+            
+            if exit_code != 0:
+                print(f"❌ V3 TUI failed with exit code: {exit_code}")
+                print("   This indicates a V3 system issue that needs debugging")
+            
+            return exit_code
+            
+        except ImportError as e:
+            print(f"❌ V3 TUI not available: {e}")
+            if config.debug_mode:
+                import traceback
+                print("📋 Full V3 import error:")
+                traceback.print_exc()
+            print("   V2 system DISABLED - no fallback available")
+            print("   Please fix V3 import issues or run in different mode")
+            return 1
+        except Exception as e:
+            print(f"❌ V3 TUI failed: {e}")
+            if config.debug_mode:
+                import traceback
+                print("📋 Full V3 error:")
+                traceback.print_exc()
+            print("   V2 system DISABLED - debugging V3 issues")
+            print("   This error needs to be fixed in V3 system")
+            return 1
+    
+    # Create and start the CLI application (legacy system)
     app = CLIApp(config, mode=args.mode)
     
     try:
