@@ -34,8 +34,9 @@ class PlainCLIRenderer(UIRenderer):
         self._cleanup_called = True
         
         try:
-            print()
-            print("Goodbye! 👋")
+            # Plain CLI cleanup - NO goodbye message here
+            # Let the TUI launcher handle the single goodbye message
+            pass
         except Exception:
             pass  # Ignore cleanup errors
     

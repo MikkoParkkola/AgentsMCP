@@ -12,6 +12,7 @@ class RichTUIRenderer(UIRenderer):
     def __init__(self, capabilities):
         super().__init__(capabilities)
         self.console = None
+        self._cleanup_called = False  # Guard against multiple cleanup calls
         # PHASE 2: Remove all complex state tracking that might interfere with input
         # No Live display, no layouts, no raw terminal mode, no cursor tracking
         
@@ -40,9 +41,14 @@ class RichTUIRenderer(UIRenderer):
     
     def cleanup(self) -> None:
         """PHASE 2: Minimal cleanup - no complex terminal restoration."""
+        if self._cleanup_called:
+            return  # Prevent multiple cleanup calls
+        self._cleanup_called = True
+        
         try:
-            if self.console and hasattr(self.console, 'print'):
-                self.console.print("[green]Goodbye! 👋[/green]")
+            # Rich renderer cleanup - NO goodbye message here
+            # Let the TUI launcher handle the single goodbye message
+            pass
         except Exception:
             pass  # Ignore cleanup errors
     

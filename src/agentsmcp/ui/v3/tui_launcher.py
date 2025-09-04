@@ -20,6 +20,8 @@ class TUILauncher:
         self.current_renderer = None
         self.chat_engine = None
         self.running = False
+        self._cleanup_called = False  # Guard against multiple cleanup calls
+        self._goodbye_shown = False   # Ensure single goodbye message
         
     def initialize(self) -> bool:
         """Initialize V3 TUI launcher - PHASE 2 COMPLETE: Rich renderer with proper EOF handling."""
@@ -122,7 +124,7 @@ class TUILauncher:
                     if user_input:
                         # Handle quit command directly
                         if user_input.lower().strip() in ['/quit', '/exit', 'quit', 'exit']:
-                            print("👋 Goodbye!")
+                            self._show_goodbye()
                             break
                         
                         # Simple echo with renderer-appropriate formatting
@@ -144,6 +146,7 @@ class TUILauncher:
                     
                 except KeyboardInterrupt:
                     print("\n⚠️ Received Ctrl+C - shutting down gracefully...")
+                    self._show_goodbye()
                     break
                 except Exception as e:
                     print(f"❌ Error in main loop: {e}")
@@ -196,8 +199,26 @@ Let's start chatting!
         """Public cleanup method for external use."""
         self._cleanup()
     
+    def _show_goodbye(self) -> None:
+        """Show a single goodbye message."""
+        if self._goodbye_shown:
+            return
+        self._goodbye_shown = True
+        
+        # Show goodbye with appropriate renderer
+        if self.current_renderer and hasattr(self.current_renderer, 'console'):
+            # Rich renderer - use Rich formatting
+            self.current_renderer.console.print("[green]👋 Goodbye![/green]")
+        else:
+            # Plain renderer or fallback
+            print("👋 Goodbye!")
+    
     def _cleanup(self) -> None:
         """Clean up resources."""
+        if self._cleanup_called:
+            return  # Prevent multiple cleanup calls
+        self._cleanup_called = True
+        
         try:
             if self.current_renderer:
                 self.current_renderer.cleanup()
@@ -230,7 +251,7 @@ def main() -> int:
     try:
         return asyncio.run(launch_tui())
     except KeyboardInterrupt:
-        print("\n👋 Goodbye!")
+        # No goodbye here - let TUI launcher handle it
         return 0
     except Exception as e:
         print(f"❌ Fatal error: {e}")
