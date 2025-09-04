@@ -111,6 +111,92 @@ class TUILauncher:
             print("🔍 V3: Full initialization error traceback:")
             traceback.print_exc()
             return False
+        # Initialize TUI with minimal output
+    try:
+        # COMPLETE LOG SUPPRESSION: Absolutely no DEBUG/INFO messages during TUI
+        # This must be done BEFORE any LLM components are imported/initialized
+        conversation_loggers = [
+            'agentsmcp.conversation.llm_client',
+            'agentsmcp.conversation.conversation', 
+            'agentsmcp.conversation.orchestrated_conversation',
+            'agentsmcp.conversation.dispatcher',
+            'agentsmcp.conversation.structured_processor',
+            'agentsmcp.conversation',  # Parent logger as fallback
+            'agentsmcp.llm',  # LLM module
+            'agentsmcp',  # Root agentsmcp logger
+            ''  # Root logger itself
+        ]
+        
+        # Set to level 100 (higher than CRITICAL=50) to suppress EVERYTHING
+        for logger_name in conversation_loggers:
+            logger = logging.getLogger(logger_name)
+            logger.setLevel(100)  # Suppress ALL messages including CRITICAL
+            logger.propagate = False  # Prevent propagation
+            # Remove all handlers to ensure no output
+            for handler in logger.handlers[:]:
+                logger.removeHandler(handler)
+            # Add null handler to absorb any messages
+            logger.addHandler(logging.NullHandler())
+            
+        # Set root logger to maximum suppression
+        root_logger = logging.getLogger()
+        root_logger.setLevel(100)  # Higher than CRITICAL
+        
+        # Remove ALL handlers from root logger
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+            
+        # Add ONLY a null handler to completely absorb all logging
+        root_logger.addHandler(logging.NullHandler())
+        
+        # Disable logging module entirely for maximum suppression
+        logging.disable(logging.CRITICAL)  # Disable all logging below level 50
+        
+        # Detect terminal capabilities
+        from .terminal_capabilities import detect_terminal_capabilities
+        self.capabilities = detect_terminal_capabilities()
+        
+        # Initialize renderer system
+        self.progressive_renderer = ProgressiveRenderer(self.capabilities)
+        
+        # Register renderers
+        self.progressive_renderer.register_renderer("plain", PlainCLIRenderer, priority=10)
+        
+        if self.capabilities.is_tty and self.capabilities.supports_rich:
+            # Console renderer available
+            self.progressive_renderer.register_renderer("console", ConsoleRenderer, priority=20)
+        else:
+            # Console renderer not available
+            pass
+        
+        # Select renderer
+        self.current_renderer = self.progressive_renderer.select_best_renderer()
+        if not self.current_renderer:
+            print("❌ TUI initialization failed")
+            return False
+        
+        renderer_name = self.current_renderer.__class__.__name__
+        # Renderer selected
+        
+        # Initialize chat engine
+        self.chat_engine = ChatEngine()
+        
+        # Set up callbacks
+        self.chat_engine.set_callbacks(
+            status_callback=self._on_status_change,
+            message_callback=self._on_new_message,
+            error_callback=self._on_error
+        )
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ V3: Critical initialization failure: {e}")
+        import traceback
+        print("🔍 V3: Full initialization error traceback:")
+        traceback.print_exc()
+        return False
+    
     def _on_status_change(self, status: str) -> None:
         """Handle status change from chat engine."""
         if self.current_renderer and hasattr(self.current_renderer, 'show_status'):
@@ -200,16 +286,6 @@ class TUILauncher:
         def signal_handler(signum, frame):
             print(f"\n⚠️ Received signal {signum} - shutting down...")
             self.running = False
-            
-            # Force cleanup immediately on signal to prevent hanging
-            try:
-                self._cleanup()
-            except Exception as e:
-                print(f"⚠️ Signal cleanup error: {e}")
-            
-            # Exit after cleanup attempt
-            import sys
-            sys.exit(0)
         
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -260,21 +336,6 @@ Let's start chatting!
         self._cleanup_called = True
         
         try:
-            # Clean up chat engine first
-            if self.chat_engine and hasattr(self.chat_engine, 'cleanup'):
-                # Run async cleanup in a safe way
-                import asyncio
-                try:
-                    loop = asyncio.get_running_loop()
-                    # We're in an async context, schedule the cleanup
-                    asyncio.create_task(self.chat_engine.cleanup())
-                except RuntimeError:
-                    # No running loop, create a new one for cleanup
-                    try:
-                        asyncio.run(self.chat_engine.cleanup())
-                    except Exception:
-                        pass  # Ignore cleanup errors if we can't run async
-                        
             if self.current_renderer:
                 self.current_renderer.cleanup()
             if self.progressive_renderer:

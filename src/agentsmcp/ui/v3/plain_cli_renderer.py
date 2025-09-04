@@ -93,6 +93,34 @@ class PlainCLIRenderer(UIRenderer):
         """Show an error message in plain text."""
         self.show_message(error, "error")
     
+    def display_chat_message(self, role: str, content: str, timestamp: str = None) -> None:
+        """Display a chat message with plain text formatting."""
+        try:
+            # Format messages based on role with emojis and timestamp
+            role_symbols = {
+                "user": "👤",
+                "assistant": "🤖", 
+                "system": "ℹ️"
+            }
+            symbol = role_symbols.get(role, "❓")
+            role_name = role.title()
+            
+            if timestamp:
+                print(f"{timestamp} {symbol} {role_name}: {content}")
+            else:
+                # Fallback without timestamp
+                print(f"{symbol} {role_name}: {content}")
+        except Exception as e:
+            print(f"Chat message display error: {e}")
+    
+    def show_status(self, status: str) -> None:
+        """Show status message in plain text."""
+        try:
+            if status and status != "Ready":  # Avoid spamming "Ready" status
+                print(f"⏳ {status}")
+        except Exception as e:
+            print(f"Status display error: {e}")
+    
     def _show_help(self) -> None:
         """Show help information."""
         help_text = """

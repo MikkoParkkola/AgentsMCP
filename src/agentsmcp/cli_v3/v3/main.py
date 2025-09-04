@@ -320,15 +320,10 @@ class TuiLaunchHandler(CommandHandler):
         """Launch TUI interface."""
         try:
             # Import TUI launcher
-            from ....ui.v2.main_app import launch_main_tui
-            
-            # Set environment for v2 TUI
-            os.environ.setdefault("AGENTS_TUI_ENABLE_V2", "1")
-            os.environ.setdefault("AGENTS_TUI_V2_BACKEND", "1")
-            os.environ.setdefault("AGENTS_TUI_V2_FORCE_RAW_INPUT", "1")
+            from ....ui.v3.tui_launcher import launch_tui
             
             # Launch TUI asynchronously
-            exit_code = await launch_main_tui()
+            exit_code = await launch_tui()
             
             return {
                 "launched": True,

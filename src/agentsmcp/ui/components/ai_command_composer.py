@@ -527,7 +527,7 @@ class AICommandComposer:
             component = event_data.get('component') if isinstance(event_data, dict) else None
             action = event_data.get('action') if isinstance(event_data, dict) else None
             
-            if component == "revolutionary_tui":
+            if component == "tui":
                 if action == "input_changed":
                     input_text = event_data.get('input_text', '')
                     if len(input_text) > 0:

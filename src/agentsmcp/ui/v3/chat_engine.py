@@ -5,6 +5,7 @@ from typing import List, Dict, Any, Optional, Callable, AsyncGenerator
 from dataclasses import dataclass, field
 from enum import Enum
 import time
+from datetime import datetime
 
 
 class MessageRole(Enum):
@@ -72,6 +73,11 @@ class ChatEngine:
             '/history': self._handle_history_command,
             '/status': self._handle_status_command
         }
+    
+    @staticmethod
+    def _format_timestamp() -> str:
+        """Format current time as [hh:mm:ss] timestamp."""
+        return datetime.now().strftime("[%H:%M:%S]")
     
     def set_callbacks(self, 
                      status_callback: Optional[Callable[[str], None]] = None,
@@ -195,9 +201,9 @@ class ChatEngine:
     
     async def _handle_help_command(self, args: str) -> bool:
         """Handle /help command."""
-        help_message = """Available Commands:
+        help_message = """Commands:
 • /help - Show this help message
-• /quit - Exit the application  
+• /quit - Exit the application
 • /clear - Clear conversation history
 • /history - Show conversation history
 • /status - Show current status
@@ -210,7 +216,7 @@ Just type your message and press Enter to chat with the AI!"""
     
     async def _handle_quit_command(self, args: str) -> bool:
         """Handle /quit command."""
-        self._notify_status("Goodbye!")
+        # Don't show goodbye here - let TUI launcher handle it
         return False  # Signal to quit
     
     async def _handle_clear_command(self, args: str) -> bool:
@@ -263,6 +269,33 @@ Just type your message and press Enter to chat with the AI!"""
     def is_processing(self) -> bool:
         """Check if currently processing a message."""
         return self.state.is_processing
+
+    
+    async def cleanup(self) -> None:
+        """Clean up ChatEngine resources."""
+        try:
+            # Clean up LLM client if it exists
+            if hasattr(self, '_llm_client') and self._llm_client:
+                # Check if LLM client has cleanup method
+                if hasattr(self._llm_client, 'cleanup'):
+                    await self._llm_client.cleanup()
+                elif hasattr(self._llm_client, 'close'):
+                    await self._llm_client.close()
+                self._llm_client = None
+            
+            # Clear callbacks to prevent hanging references
+            self._status_callback = None
+            self._message_callback = None  
+            self._error_callback = None
+            
+            # Clear state
+            self.state.messages.clear()
+            self.state.is_processing = False
+            
+        except Exception as e:
+            # Log cleanup errors but don't raise them
+            import logging
+            logging.warning(f"ChatEngine cleanup warning: {e}")
 
 
 class MockAIProvider:

@@ -119,8 +119,8 @@ class PredictiveSpawner:
         self.demand_predictors: Dict[str, Any] = {}
         self.resource_predictors: Dict[str, Any] = {}
         
-        # Initialize default agent templates
-        asyncio.create_task(self._initialize_agent_templates())
+        # Initialize flag to track if async initialization has been done
+        self._initialized = False
         
         # Start prediction and spawning loops
         self.prediction_task = None
@@ -135,6 +135,11 @@ class PredictiveSpawner:
             Dictionary containing system status and initial predictions
         """
         logger.info("🚀 Starting Predictive Spawning System")
+        
+        # Initialize agent templates if not already done
+        if not self._initialized:
+            await self._initialize_agent_templates()
+            self._initialized = True
         
         self.is_running = True
         

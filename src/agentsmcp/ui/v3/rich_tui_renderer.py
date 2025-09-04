@@ -1,87 +1,244 @@
-"""Rich TUI renderer - PHASE 2: MINIMAL features to isolate input issues."""
+"""Rich TUI renderer - PHASE 3: Rich Live display panels with stable input handling."""
 
 import sys
 from typing import Optional
 from rich.console import Console
+from rich.live import Live
+from rich.layout import Layout
+from rich.panel import Panel
+from rich.text import Text
+from rich.table import Table
 from .ui_renderer_base import UIRenderer
 
 
 class RichTUIRenderer(UIRenderer):
-    """PHASE 2: Minimal Rich-based TUI renderer - no complex features."""
+    """PHASE 3: Rich TUI with Live display panels and stable input handling."""
     
     def __init__(self, capabilities):
         super().__init__(capabilities)
         self.console = None
+        self.live = None
+        self.layout = None
         self._cleanup_called = False  # Guard against multiple cleanup calls
-        # PHASE 2: Remove all complex state tracking that might interfere with input
-        # No Live display, no layouts, no raw terminal mode, no cursor tracking
+        self._conversation_history = []  # Track messages for the conversation panel
+        self._current_status = "Ready"  # Track current status
         
     def initialize(self) -> bool:
-        """PHASE 2: Initialize MINIMAL Rich TUI - just console output, no Live display."""
+        """PHASE 3: Initialize Rich TUI with Live display panels."""
         try:
             # Check if Rich should work in this environment
             if not self.capabilities.supports_rich:
                 return False
             
-            # PHASE 2: Initialize ONLY basic Rich console - no Live display, no layouts
+            # Initialize Rich console
             self.console = Console(
                 force_terminal=self.capabilities.is_tty,
                 color_system="auto" if self.capabilities.supports_colors else None
             )
             
-            # PHASE 2: Show simple Rich welcome (no complex layouts)
-            self.console.print("🤖 [bold blue]Rich Console TUI (Simple Mode)[/bold blue]")
-            self.console.print("[dim]PHASE 2: Testing minimal Rich features - no Live display or raw terminal mode[/dim]")
+            # PHASE 3: Create Rich Layout with panels
+            self.layout = Layout()
+            
+            # Split layout into header, body (conversation + status), and footer
+            # Use smaller fixed sizes to fit better in terminal
+            self.layout.split_column(
+                Layout(name="header", size=1),  # Reduced from 3 to 1
+                Layout(name="body", ratio=1),
+                Layout(name="footer", size=1)   # Reduced from 3 to 1
+            )
+            
+            # Split body into conversation and status panels  
+            self.layout["body"].split_row(
+                Layout(name="conversation", ratio=3),
+                Layout(name="status", ratio=1)
+            )
+            
+            # Initialize panels but DON'T update them yet - wait for Live display to start
+            # This prevents immediate rendering to console during init
+            self._initialize_panels()
+            
+            # Create Live display but DON'T start it yet to prevent duplicate headers
+            if self.capabilities.is_tty:
+                self.live = Live(
+                    self.layout,
+                    console=self.console,
+                    refresh_per_second=2,  # Moderate refresh rate
+                    screen=False,  # Don't take over full screen - allows input mixing
+                    vertical_overflow="ellipsis"  # Handle overflow gracefully
+                )
+                # Live display will be started by start_live_display() method after init is complete
+            else:
+                # Fallback for non-TTY environments
+                self.console.print("🤖 [bold blue]Rich Console TUI (Live Display)[/bold blue]")
             
             return True
             
         except Exception as e:
-            print(f"Failed to initialize minimal Rich TUI: {e}")
+            print(f"Failed to initialize Rich TUI with Live display: {e}")
             return False
+
     
+    def _initialize_panels(self) -> None:
+        """Initialize panel content without rendering to prevent header duplication."""
+        # Just prepare the layout structure - don't call layout.update() yet
+        # This prevents immediate console rendering during initialization
+        pass
+    
+    def start_live_display(self) -> None:
+        """Start the Live display after initialization is complete to prevent duplicate headers."""
+        try:
+            if self.live and self.capabilities.is_tty:
+                if not (hasattr(self.live, '_started') and self.live._started):
+                    # Now that we're ready to start Live display, initialize all panels
+                    self._update_header()
+                    self._update_conversation_panel()
+                    self._update_status_panel()
+                    self._update_footer()
+                    # Start the Live display
+                    self.live.start()
+        except Exception as e:
+            print(f"Failed to start Live display: {e}")
+    
+    def _update_header(self) -> None:
+        """Update the header panel."""
+        header_text = Text.assemble(
+            ("🤖 ", "bold blue"),
+            ("AgentsMCP TUI", "bold white"),
+            (" - PHASE 3", "dim yellow")
+        )
+        self.layout["header"].update(
+            Panel(header_text, style="blue", padding=(0, 1), height=1)
+        )
+    
+    def _update_conversation_panel(self) -> None:
+        """Update the conversation panel with message history."""
+        if not self._conversation_history:
+            content = Text("No messages yet. Start a conversation!", style="dim italic")
+        else:
+            # Show last 10 messages to keep it manageable
+            recent_messages = self._conversation_history[-10:]
+            content = Text()
+            
+            # More accurate width calculation for conversation panel
+            # The layout is conversation (ratio=3) : status (ratio=1), so conversation gets 75% of body width
+            console_width = self.console.size.width
+            # Account for: panel borders (2 chars each side = 4), padding (2 chars each side = 4 total)
+            # The Rich layout automatically handles the separation between conversation and status panels
+            conversation_width = int(console_width * 0.75) - 6  # Panel borders + padding
+            
+            for msg in recent_messages:
+                # Handle multiline messages properly by splitting on existing newlines first
+                msg_lines = msg.split('\n')
+                for msg_line in msg_lines:
+                    # Wrap long lines at word boundaries
+                    if len(msg_line) > conversation_width:
+                        import textwrap
+                        wrapped_lines = textwrap.wrap(msg_line, width=conversation_width)
+                        for line in wrapped_lines:
+                            content.append(f"{line}\n")
+                    else:
+                        content.append(f"{msg_line}\n")
+        
+        self.layout["conversation"].update(
+            Panel(content, title="[bold white]Conversation", border_style="green", padding=(0, 1))
+        )
+    
+    def _update_status_panel(self) -> None:
+        """Update the status panel with current information."""
+        # Create a simple status table
+        table = Table.grid(padding=(0, 1))
+        table.add_column("Label", style="bold cyan")
+        table.add_column("Value", style="white")
+        
+        table.add_row("Status:", self._current_status)
+        table.add_row("Messages:", str(len(self._conversation_history)))
+        table.add_row("Time:", Text.from_markup("[dim]Live[/dim]"))
+        
+        self.layout["status"].update(
+            Panel(table, title="[bold white]Status", border_style="yellow", padding=(0, 1))
+        )
+    
+    def _update_footer(self) -> None:
+        """Update the footer panel with help text."""
+        footer_text = Text.assemble(
+            ("Commands: ", "bold white"),
+            ("/help", "cyan"),
+            (", ", "white"),
+            ("/quit", "cyan"),
+            (", ", "white"),
+            ("/clear", "cyan"),
+            ("  •  ", "dim"),
+            ("Type your message and press Enter", "dim italic")
+        )
+        self.layout["footer"].update(
+            Panel(footer_text, style="dim", padding=(0, 1), height=1)
+        )
+
     def cleanup(self) -> None:
-        """PHASE 2: Minimal cleanup - no complex terminal restoration."""
+        """PHASE 3: Cleanup with Live display management."""
         if self._cleanup_called:
             return  # Prevent multiple cleanup calls
         self._cleanup_called = True
         
         try:
+            # Stop Live display if it's running
+            if self.live and hasattr(self.live, 'stop'):
+                self.live.stop()
             # Rich renderer cleanup - NO goodbye message here
             # Let the TUI launcher handle the single goodbye message
-            pass
         except Exception:
             pass  # Ignore cleanup errors
     
     def render_frame(self) -> None:
-        """PHASE 2: No frame rendering - using simple console prints."""
-        # PHASE 2: No Live display, no frame rendering - keep it simple
-        pass
+        """PHASE 3: Update Live display panels."""
+        try:
+            if self.live and self.layout:
+                # Update all panels to reflect current state
+                self._update_conversation_panel()
+                self._update_status_panel()
+                # Header and footer are static, so no need to update
+        except Exception as e:
+            # Fallback to console print if Live display fails
+            pass
     
     def handle_input(self) -> Optional[str]:
-        """PHASE 2: Use standard input() like PlainCLI - no raw terminal mode."""
+        """PHASE 3: Input handling compatible with Live display."""
         try:
             if self.state.is_processing:
                 return None
             
-            # PHASE 2: Use standard input() function like PlainCLI but with Rich formatting
-            self.console.print("💬 [yellow]>[/yellow] ", end="")
-            user_input = input().strip()
-            return user_input if user_input else None
+            # For screen=False Live display, we can do minimal interrupt input
+            if self.live and hasattr(self.live, '_started') and self.live._started:
+                # Temporarily pause Live display for clean input
+                self.live.stop()
+                
+                # Simple input prompt
+                try:
+                    self.console.print("\n💬 [yellow]>[/yellow] ", end="")
+                    user_input = input().strip()
+                except (EOFError, KeyboardInterrupt):
+                    user_input = "/quit"
+                except Exception:
+                    user_input = "/quit"
+                
+                # Restart Live display immediately
+                self.live.start()
+                
+                return user_input if user_input else None
+            else:
+                # Fallback input for non-Live display
+                try:
+                    user_input = input("💬 > ").strip()
+                    return user_input if user_input else None
+                except (EOFError, KeyboardInterrupt):
+                    return "/quit"
                     
-        except KeyboardInterrupt:
-            return "/quit"
-        except EOFError:
-            # EOF reached - no more input available (e.g., piped input finished)
-            # Return /quit to gracefully exit instead of infinite error loop
-            return "/quit"
         except Exception as e:
-            if self.console:
-                self.console.print(f"[red]Input error: {e}[/red]")
             # Return /quit on persistent errors to avoid infinite loops
             return "/quit"
     
     def show_message(self, message: str, level: str = "info") -> None:
-        """PHASE 2: Show a simple Rich formatted message."""
+        """Show a simple Rich formatted message."""
         try:
             colors = {
                 "info": "blue",
@@ -91,12 +248,76 @@ class RichTUIRenderer(UIRenderer):
             }
             color = colors.get(level, "blue")
             
-            # PHASE 2: Direct console print instead of complex state management
+            # Direct console print with Rich formatting
             if self.console:
                 self.console.print(f"[{color}]{message}[/{color}]")
             
         except Exception as e:
             print(f"Message display error: {e}")
+    
+    def display_chat_message(self, role: str, content: str, timestamp: str = None) -> None:
+        """Display a chat message with appropriate formatting."""
+        try:
+            if not self.console:
+                return
+            
+            # Add timestamp prefix if provided
+            time_prefix = f"{timestamp} " if timestamp else ""
+            
+            # Format message for display
+            if role == "user":
+                formatted_msg = f"{time_prefix}👤 You: {content}"
+                display_msg = f"{time_prefix}[bold blue]👤 You:[/bold blue] {content}"
+            elif role == "assistant":
+                formatted_msg = f"{time_prefix}🤖 AI: {content}"
+                display_msg = f"{time_prefix}[bold green]🤖 AI:[/bold green] {content}"
+            elif role == "system":
+                formatted_msg = f"{time_prefix}ℹ️ System: {content}"
+                display_msg = f"{time_prefix}[dim yellow]ℹ️ System:[/dim yellow] {content}"
+            else:
+                formatted_msg = f"{time_prefix}❓ {role}: {content}"
+                display_msg = f"{time_prefix}[dim]❓ {role}:[/dim] {content}"
+            
+            # Add to conversation history for Live display panels
+            self._conversation_history.append(formatted_msg)
+            
+            # If Live display is active, ONLY update panels - no direct console.print
+            if self.live and hasattr(self.live, '_started') and self.live._started:
+                # Just update the conversation panel - Live display will handle rendering
+                # No need to explicitly refresh - Live display auto-refreshes
+                self._update_conversation_panel()
+            else:
+                # Direct console print ONLY if Live display not active
+                self.console.print(display_msg)
+                
+        except Exception as e:
+            print(f"Chat message display error: {e}")
+    
+    def show_status(self, status: str) -> None:
+        """Show status message and update Live display."""
+        try:
+            # Update internal status
+            self._current_status = status
+            
+            # Update Live display panels if active
+            if self.live and self.layout:
+                self._update_status_panel()
+                
+                # Only show status in console if Live display is not active
+                # and avoid spamming "Ready" messages
+            elif self.console and status and status != "Ready":
+                self.console.print(f"[dim cyan]⏳ {status}[/dim cyan]")
+                
+        except Exception as e:
+            print(f"Status display error: {e}")
+    
+    def show_thinking(self) -> None:
+        """Show thinking indicator."""
+        try:
+            if self.console:
+                self.console.print("[dim cyan]🤔 Thinking...[/dim cyan]")
+        except Exception as e:
+            print(f"Thinking display error: {e}")
     
     def show_error(self, error: str) -> None:
         """Show an error in Rich TUI."""
