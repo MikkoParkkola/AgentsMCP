@@ -184,314 +184,109 @@ class ChatEngine:
             self._notify_error(f"Unknown command: {command}. Type /help for available commands.")
             return True
     
-    def _is_simple_input(self, user_input: str) -> bool:
-        """Check if input is a simple greeting or basic query that doesn't need task tracking."""
-        input_lower = user_input.lower().strip().rstrip('?!.,')
+    def _route_input(self, user_input: str) -> tuple[str, int]:
+        """Simple word count routing - no pattern matching, no deterministic responses."""
+        cleaned_input = user_input.strip()
+        if not cleaned_input:
+            raise ValueError("Empty input")
         
-        # First check: if input is too long, it's not simple (prevents misclassification)
-        if len(input_lower) > 50:
-            return False
-        
-        # Comprehensive simple patterns including conversational extensions
-        simple_patterns = [
-            # Basic greetings
-            "hello", "hi", "hey", "howdy", "greetings",
-            "thanks", "thank you", "thx", "ty", 
-            "bye", "goodbye", "see you", "cya", "farewell",
+        word_count = len(cleaned_input.split())
+        route = "direct" if word_count <= 4 else "preprocessed"
+        return route, word_count
+    
+    async def _handle_direct_llm(self, user_input: str) -> str:
+        """Direct LLM call for short inputs - no preprocessing, no task tracking."""
+        if self._llm_client:
+            # Temporarily disable preprocessing for direct path
+            original_preprocessing = getattr(self._llm_client, 'preprocessing_enabled', True)
+            self._llm_client.preprocessing_enabled = False
             
-            # Status queries - base forms
-            "how are you", "what's up", "whats up", "sup", "how's it going",
-            "how do you do", "how's everything", "how are things",
+            try:
+                self._notify_status("🤖 Generating direct response...")
+                response = await self._llm_client.send_message(user_input)
+                return response
+            finally:
+                # Restore original preprocessing setting
+                self._llm_client.preprocessing_enabled = original_preprocessing
+        return "LLM client not available"
+    
+    async def _handle_preprocessed_llm(self, user_input: str) -> str:
+        """Preprocessed LLM call for longer inputs - full enhancement pipeline."""
+        if self._llm_client:
+            # Ensure preprocessing is enabled for this path
+            original_preprocessing = getattr(self._llm_client, 'preprocessing_enabled', True)
+            self._llm_client.preprocessing_enabled = True
             
-            # Status queries - extended forms (THIS IS THE KEY FIX)
-            "how are you today", "how are you doing", "how's your day",
-            "how are you feeling", "how's everything going",
-            "how are you holding up", "how have you been",
-            
-            # Time-based greetings
-            "good morning", "good afternoon", "good evening", "good night",
-            
-            # Simple responses and confirmations
-            "ok", "okay", "yes", "no", "sure", "please", "help",
-            "nice", "cool", "awesome", "great", "perfect",
-            
-            # Identity queries
-            "who are you", "what are you", "are you there"
-        ]
-        
-        # Simple question words that often lead to infinite loops
-        simple_question_words = ["who", "what", "when", "where", "why", "how"]
-        
-        words = input_lower.split()
-        
-        # Check for exact matches with simple patterns
-        if any(pattern == input_lower for pattern in simple_patterns):
-            self.logger.info(f"Simple input detected (exact match): '{user_input}' -> '{input_lower}'")
-            return True
-            
-        # EXTENDED WORD COUNT LOGIC - allow up to 5 words for conversational inputs
-        if len(words) <= 5:  # Increased from 3 to 5 words
-            for pattern in simple_patterns:
-                if pattern in input_lower and len(input_lower) <= 35:  # Slightly increased char limit
-                    self.logger.info(f"Simple input detected (pattern match): '{user_input}' -> '{pattern}'")
-                    return True
-        
-        # Prefix matching for common greeting extensions (but exclude technical terms)
-        technical_keywords = [
-            "implement", "database", "schema", "api", "authentication", "handle", "error",
-            "code", "function", "class", "method", "variable", "algorithm", "deploy",
-            "server", "client", "framework", "library", "system", "architecture", 
-            "design", "pattern", "optimization", "performance", "security"
-        ]
-        
-        greeting_prefixes = ["how are you", "what's up", "how's it", "how do you"]
-        for prefix in greeting_prefixes:
-            if input_lower.startswith(prefix):
-                # Check if input contains technical keywords - if so, it's complex
-                if any(tech_word in input_lower for tech_word in technical_keywords):
-                    self.logger.info(f"Complex input detected (technical content): '{user_input}' -> contains technical keywords")
-                    return False
-                self.logger.info(f"Simple input detected (prefix match): '{user_input}' -> starts with '{prefix}'")
-                return True
-            
-        # Single question word queries (like "what?", "how?")
-        if len(words) == 1 and any(word.rstrip('?!.,') in simple_question_words for word in words):
-            self.logger.info(f"Simple input detected (single question word): '{user_input}'")
-            return True
-            
-        # Very short inputs are likely simple (but not too short to be empty)
-        if len(input_lower) <= 15 and len(input_lower.strip()) > 0:
-            self.logger.info(f"Simple input detected (very short): '{user_input}'")
-            return True
-        
-        # Log when input is NOT considered simple for debugging
-        self.logger.info(f"Complex input detected: '{user_input}' ({len(words)} words, {len(input_lower)} chars)")
-        return False
+            try:
+                self._notify_status("🎯 Generating enhanced response...")
+                response = await self._llm_client.send_message(user_input)
+                return response
+            finally:
+                # Restore original preprocessing setting
+                self._llm_client.preprocessing_enabled = original_preprocessing
+        return "LLM client not available"
     
     async def _handle_chat_message(self, user_input: str) -> bool:
-        """Handle regular chat message with streaming support, context management, and history logging."""
-        task_id = None  # Track task ID for proper cleanup
+        """Simplified message handler - route by word count, always call LLM."""
         try:
-            # Check if this is a simple input that doesn't need complex task tracking
-            is_simple = self._is_simple_input(user_input)
+            # Simple routing decision  
+            route, word_count = self._route_input(user_input)
             
-            # For simple inputs, temporarily disable preprocessing to prevent infinite loops
-            original_preprocessing = None
-            if is_simple and self._llm_client:
-                original_preprocessing = getattr(self._llm_client, 'preprocessing_enabled', True)
-                self._llm_client.preprocessing_enabled = False
-                # Log the bypass for debugging
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"Simple input detected: '{user_input}' - bypassing preprocessing to prevent infinite loops")
+            self.logger.info(f"Routing '{user_input}' ({word_count} words) to {route} path")
             
-            # Check if preprocessing should be used based on word threshold and enabled status
-            should_preprocess = self._llm_client.should_use_preprocessing(user_input) if self._llm_client else False
+            # Add user message to history
+            user_message = self.state.add_message(MessageRole.USER, user_input)
+            self._notify_message(user_message)
             
-            if should_preprocess and self._llm_client:
-                # Add original user message to history
-                user_message = self.state.add_message(MessageRole.USER, user_input)
-                self._notify_message(user_message)
-                
-                # Log to persistent history
-                usage = self.context_manager.calculate_usage(
-                    self.state.messages, self._current_provider, self._current_model
-                )
-                self.history_manager.add_message(
-                    role="user",
-                    content=user_input,
-                    context_usage={
-                        "tokens": usage.current_tokens,
-                        "percentage": usage.percentage
-                    }
-                )
-                
-                # Show status while optimizing with context information
-                context_info = []
-                if self._llm_client.preprocessing_directory_context_enabled:
-                    context_info.append("📁 Directory Context")
-                if self._llm_client.preprocessing_history_enabled and self._llm_client.conversation_history:
-                    history_count = min(len(self._llm_client.conversation_history), self._llm_client.preprocessing_max_history_messages)
-                    context_info.append(f"📚 History ({history_count} msgs)")
-                
-                context_str = f" + {' + '.join(context_info)}" if context_info else ""
-                self._notify_status(f"📝 Optimizing prompt with enhanced context{context_str}...")
-                
-                # Get optimized prompt
-                optimized_prompt = await self._llm_client.optimize_prompt(user_input)
-                
-                # DEBUG: Log optimization results
-                import logging
-                logger = logging.getLogger(__name__)
-                # Prompt optimization applied
-                
-                # Show optimized prompt if it's different from original
-                if optimized_prompt != user_input and len(optimized_prompt.strip()) > len(user_input.strip()) * 0.8:
-                    # Create and show optimized prompt message
-                    optimized_message = ChatMessage(
-                        role=MessageRole.SYSTEM,
-                        content=f"📝 Optimized prompt: {optimized_prompt}",
-                        timestamp=self._format_timestamp()
-                    )
-                    self._notify_message(optimized_message)
-                    # Use optimized prompt for processing
-                    actual_prompt = optimized_prompt
-                    # Using optimized prompt
-                else:
-                    # Use original prompt if optimization didn't improve it
-                    actual_prompt = user_input
-                    # Using original prompt (optimization didn't improve)
+            # Log to persistent history
+            usage = self.context_manager.calculate_usage(
+                self.state.messages, self._current_provider, self._current_model
+            )
+            self.history_manager.add_message(
+                role="user",
+                content=user_input,
+                context_usage={
+                    "tokens": usage.current_tokens,
+                    "percentage": usage.percentage
+                }
+            )
+            
+            # Route to appropriate LLM handler
+            if route == "direct":
+                response = await self._handle_direct_llm(user_input)
             else:
-                # Preprocessing disabled or input too short - just show user message with timestamp
-                user_message = self.state.add_message(MessageRole.USER, user_input)
-                self._notify_message(user_message)
+                response = await self._handle_preprocessed_llm(user_input)
+            
+            # Add assistant response to history
+            if response and response.strip():
+                ai_message = self.state.add_message(MessageRole.ASSISTANT, response)
+                self._notify_message(ai_message)
                 
-                # Log to persistent history
-                usage = self.context_manager.calculate_usage(
+                # Log assistant response to persistent history
+                final_usage = self.context_manager.calculate_usage(
                     self.state.messages, self._current_provider, self._current_model
                 )
                 self.history_manager.add_message(
-                    role="user",
-                    content=user_input,
+                    role="assistant",
+                    content=response,
                     context_usage={
-                        "tokens": usage.current_tokens,
-                        "percentage": usage.percentage
+                        "tokens": final_usage.current_tokens,
+                        "percentage": final_usage.percentage
                     }
                 )
-                
-                actual_prompt = user_input
-            
-            # Check for automatic context compaction before processing
-            current_usage = self.context_manager.calculate_usage(
-                self.state.messages, self._current_provider, self._current_model
-            )
-            
-            if self.context_manager.should_compact(current_usage):
-                self._notify_status("🗜️ Compacting context to save space...")
-                try:
-                    compacted_messages, compaction_event = self.context_manager.compact_context(
-                        self.state.messages, current_usage
-                    )
-                    
-                    # Update state messages
-                    self.state.messages = compacted_messages
-                    
-                    # Record in history
-                    self.history_manager.add_compaction_event(
-                        compaction_event.messages_summarized,
-                        compaction_event.tokens_saved,
-                        compaction_event.summary,
-                        compaction_event.trigger_percentage
-                    )
-                    
-                    # Update LLM client conversation history
-                    if self._llm_client is not None:
-                        history_dicts = [msg.to_dict() for msg in self.state.messages]
-                        self._llm_client.conversation_history = history_dicts
-                    
-                    # Show compaction notification
-                    compaction_msg = ChatMessage(
-                        role=MessageRole.SYSTEM,
-                        content=f"🗜️ Context automatically compacted: {compaction_event.messages_summarized} messages summarized, {compaction_event.tokens_saved:,} tokens saved",
-                        timestamp=self._format_timestamp()
-                    )
-                    self._notify_message(compaction_msg)
-                    
-                except Exception as e:
-                    import logging
-                    logging.warning(f"Auto-compaction failed: {e}")
-                    # Continue processing even if compaction fails
-            
-            # Set processing state
-            self.state.is_processing = True
-            
-            # Show current context usage in status
-            updated_usage = self.context_manager.calculate_usage(
-                self.state.messages, self._current_provider, self._current_model
-            )
-            self._notify_status(f"Processing... {updated_usage.format_usage()}")
-            
-            # Only start complex task tracking for non-simple inputs
-            if not is_simple:
-                task_id = await self.task_tracker.start_task(
-                    user_input=actual_prompt,
-                    context={"complexity": "medium", "task_type": "chat_response"},
-                    estimated_duration_ms=30000  # 30 seconds estimate
-                )
-            
-            # Execute task with sequential thinking integration
-            try:
-                # For complex tasks that require execution
-                if task_id is not None:
-                    # Execute the planned task
-                    self._notify_status("🔄 Executing planned task...")
-                    try:
-                        execution_result = await self.task_tracker.execute_task(task_id)
-                        
-                        # Check if execution produced a specific response
-                        if execution_result and execution_result.get('success'):
-                            # If task execution was successful, still need to get AI response
-                            # The execution mainly tracks progress and planning
-                            pass
-                    except Exception as exec_error:
-                        self.logger.warning(f"Task execution error (continuing with normal flow): {exec_error}")
-                        # Continue with normal AI response flow even if task execution fails
-                
-                # Check if streaming is available and enabled
-                if await self._should_use_streaming():
-                    await self._handle_streaming_response(actual_prompt, task_id)
-                else:
-                    # Fallback to batch processing
-                    response = await self._get_ai_response(actual_prompt)
-                    ai_message = self.state.add_message(MessageRole.ASSISTANT, response)
-                    self._notify_message(ai_message)
-                    
-                    # Log assistant response to persistent history
-                    final_usage = self.context_manager.calculate_usage(
-                        self.state.messages, self._current_provider, self._current_model
-                    )
-                    self.history_manager.add_message(
-                        role="assistant",
-                        content=response,
-                        context_usage={
-                            "tokens": final_usage.current_tokens,
-                            "percentage": final_usage.percentage
-                        }
-                    )
-                
-                # Complete task tracking if it was started
-                if task_id is not None:
-                    self.task_tracker.progress_display.complete_task()
-                
-            except Exception as task_error:
-                # Handle task execution error and cleanup task tracking
-                if task_id is not None:
-                    self.task_tracker.progress_display.complete_task()
-                self._notify_error(f"Task execution error: {str(task_error)}")
-                raise task_error
-            
-            # Clear processing state
-            self.state.is_processing = False
-            
-            # Show final context usage status
-            final_usage = self.context_manager.calculate_usage(
-                self.state.messages, self._current_provider, self._current_model
-            )
-            self._notify_status(f"Ready - {final_usage.format_usage()}")
+            else:
+                error_response = "🤖 I apologize, but I wasn't able to generate a response."
+                ai_message = self.state.add_message(MessageRole.ASSISTANT, error_response)
+                self._notify_message(ai_message)
             
             return True
             
         except Exception as e:
-            self.state.is_processing = False
-            # Cleanup task tracking if it was started
-            if task_id is not None:
-                self.task_tracker.progress_display.complete_task()
-            self._notify_error(f"Error getting AI response: {str(e)}")
+            self.logger.error(f"Error processing message: {e}")
+            error_message = f"⚠️ Error: {str(e)}"
+            ai_message = self.state.add_message(MessageRole.ASSISTANT, error_message)
+            self._notify_message(ai_message)
             return True
-        finally:
-            # Restore preprocessing setting for simple inputs
-            if original_preprocessing is not None and self._llm_client:
-                self._llm_client.preprocessing_enabled = original_preprocessing
     
     async def _should_use_streaming(self) -> bool:
         """Check if streaming should be used for responses."""
