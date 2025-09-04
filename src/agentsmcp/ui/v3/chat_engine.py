@@ -182,13 +182,29 @@ class ChatEngine:
             self._notify_error(f"Unknown command: {command}. Type /help for available commands.")
             return True
     
+    def _is_simple_input(self, user_input: str) -> bool:
+        """Check if input is a simple greeting or basic query that doesn't need task tracking."""
+        simple_patterns = [
+            "hello", "hi", "hey", "thanks", "thank you", "bye", "goodbye",
+            "ok", "okay", "yes", "no", "sure", "please", "help"
+        ]
+        # Check if input is very short or matches simple patterns
+        words = user_input.lower().strip().split()
+        if len(words) <= 2 and any(pattern in user_input.lower() for pattern in simple_patterns):
+            return True
+        return len(user_input.strip()) <= 10  # Very short inputs are likely simple
+    
     async def _handle_chat_message(self, user_input: str) -> bool:
         """Handle regular chat message with streaming support, context management, and history logging."""
+        task_id = None  # Track task ID for proper cleanup
         try:
-            # Check if preprocessing is enabled and show optimized prompt
-            preprocessing_enabled = getattr(self._llm_client, 'preprocessing_enabled', True) if self._llm_client else True
+            # Check if this is a simple input that doesn't need complex task tracking
+            is_simple = self._is_simple_input(user_input)
             
-            if preprocessing_enabled and self._llm_client:
+            # Check if preprocessing should be used based on word threshold and enabled status
+            should_preprocess = self._llm_client.should_use_preprocessing(user_input) if self._llm_client else False
+            
+            if should_preprocess and self._llm_client:
                 # Add original user message to history
                 user_message = self.state.add_message(MessageRole.USER, user_input)
                 self._notify_message(user_message)
@@ -206,8 +222,16 @@ class ChatEngine:
                     }
                 )
                 
-                # Show status while optimizing
-                self._notify_status("📝 Optimizing prompt...")
+                # Show status while optimizing with context information
+                context_info = []
+                if self._llm_client.preprocessing_directory_context_enabled:
+                    context_info.append("📁 Directory Context")
+                if self._llm_client.preprocessing_history_enabled and self._llm_client.conversation_history:
+                    history_count = min(len(self._llm_client.conversation_history), self._llm_client.preprocessing_max_history_messages)
+                    context_info.append(f"📚 History ({history_count} msgs)")
+                
+                context_str = f" + {' + '.join(context_info)}" if context_info else ""
+                self._notify_status(f"📝 Optimizing prompt with enhanced context{context_str}...")
                 
                 # Get optimized prompt
                 optimized_prompt = await self._llm_client.optimize_prompt(user_input)
@@ -227,7 +251,7 @@ class ChatEngine:
                     # Use original prompt if optimization didn't improve it
                     actual_prompt = user_input
             else:
-                # Preprocessing disabled - just show user message with timestamp
+                # Preprocessing disabled or input too short - just show user message with timestamp
                 user_message = self.state.add_message(MessageRole.USER, user_input)
                 self._notify_message(user_message)
                 
@@ -296,18 +320,19 @@ class ChatEngine:
             )
             self._notify_status(f"Processing... {updated_usage.format_usage()}")
             
-            # Start task with sequential thinking before LLM processing
-            task_id = await self.task_tracker.start_task(
-                user_input=actual_prompt,
-                context={"complexity": "medium", "task_type": "chat_response"},
-                estimated_duration_ms=30000  # 30 seconds estimate
-            )
+            # Only start complex task tracking for non-simple inputs
+            if not is_simple:
+                task_id = await self.task_tracker.start_task(
+                    user_input=actual_prompt,
+                    context={"complexity": "medium", "task_type": "chat_response"},
+                    estimated_duration_ms=30000  # 30 seconds estimate
+                )
             
             # Execute task with sequential thinking integration
             try:
                 # Check if streaming is available and enabled
                 if await self._should_use_streaming():
-                    await self._handle_streaming_response(actual_prompt)
+                    await self._handle_streaming_response(actual_prompt, task_id)
                 else:
                     # Fallback to batch processing
                     response = await self._get_ai_response(actual_prompt)
@@ -327,11 +352,14 @@ class ChatEngine:
                         }
                     )
                 
-                # Task tracking happens within start_task/execute_task cycle
-                # The task will be marked as completed when the chat response is done
+                # Complete task tracking if it was started
+                if task_id is not None:
+                    self.task_tracker.progress_display.complete_task()
                 
             except Exception as task_error:
-                # Handle task execution error
+                # Handle task execution error and cleanup task tracking
+                if task_id is not None:
+                    self.task_tracker.progress_display.complete_task()
                 self._notify_error(f"Task execution error: {str(task_error)}")
                 raise task_error
             
@@ -348,6 +376,9 @@ class ChatEngine:
             
         except Exception as e:
             self.state.is_processing = False
+            # Cleanup task tracking if it was started
+            if task_id is not None:
+                self.task_tracker.progress_display.complete_task()
             self._notify_error(f"Error getting AI response: {str(e)}")
             return True
     
@@ -364,7 +395,7 @@ class ChatEngine:
         except Exception:
             return False
     
-    async def _handle_streaming_response(self, user_input: str) -> None:
+    async def _handle_streaming_response(self, user_input: str, task_id: Optional[str] = None) -> None:
         """Handle streaming AI response with real-time updates and history logging."""
         try:
             # Stream response chunks directly without creating placeholder message
@@ -392,8 +423,15 @@ class ChatEngine:
                 }
             )
             
+            # Complete task tracking if it was started
+            if task_id is not None:
+                self.task_tracker.progress_display.complete_task()
+            
         except Exception as e:
-            # Handle streaming errors
+            # Handle streaming errors and cleanup task tracking
+            if task_id is not None:
+                self.task_tracker.progress_display.complete_task()
+                
             error_msg = f"❌ Streaming error: {str(e)}"
             ai_message = self.state.add_message(MessageRole.ASSISTANT, error_msg)
             self._notify_message(ai_message)
@@ -500,6 +538,7 @@ class ChatEngine:
 🛠️ **Preprocessing Commands:**
 • /preprocessing on/off/toggle - Control preprocessing mode
 • /preprocessing status - Show current preprocessing status
+• /preprocessing threshold <number> - Set minimum word threshold
 • /preprocessing provider <provider> - Set preprocessing provider
 • /preprocessing model <model> - Set preprocessing model  
 • /preprocessing config - Show detailed preprocessing configuration
@@ -527,14 +566,17 @@ If you're getting connection errors:
 • **Search**: Use `/history search <text>` to find specific messages
 • **Statistics**: Use `/history stats` for detailed session analytics
 
-📊 **Preprocessing Modes:**
-• **On** (default): Multi-turn tool execution + prompt optimization
-• **Off**: Direct LLM responses only, faster but simpler
+📊 **Smart Preprocessing System:**
+• **Word Threshold**: Only inputs >4 words trigger preprocessing
+• **Short Inputs**: "hello", "thanks" go directly to LLM (faster)
+• **Complex Inputs**: "analyze this code" use preprocessing (enhanced)
+• **Customizable**: Use `/preprocessing threshold 6` to adjust
 
 🎯 **Advanced Preprocessing:**
 • **Custom Provider/Model**: Use different models for preprocessing vs responses
 • **Example**: Fast local Ollama for preprocessing, powerful Anthropic for responses
 • **Commands**: 
+  - `/preprocessing threshold 6` - Adjust word threshold
   - `/preprocessing provider ollama`
   - `/preprocessing model gpt-oss:20b`
   - `/preprocessing config`
@@ -553,7 +595,8 @@ If you're getting connection errors:
 
 💡 **Pro Tips:**
 • Type `/config` if you see connection errors
-• Use `/preprocessing off` for faster responses
+• Use `/preprocessing threshold 1` to preprocess all inputs
+• Use `/preprocessing threshold 10` to only preprocess complex queries
 • Use `/context` to monitor token usage
 • Mix providers: fast local preprocessing + powerful cloud responses
 • Export important sessions with `/history export`
@@ -889,7 +932,7 @@ If you're getting connection errors:
             return True
 
     async def _handle_preprocessing_command(self, args: str) -> bool:
-        """Handle /preprocessing command to control preprocessing mode."""
+        """Handle /preprocessing command to control preprocessing mode and context features."""
         try:
             # Use the existing LLM client (initialized once in __init__)
             if self._llm_client is None:
@@ -900,9 +943,10 @@ If you're getting connection errors:
                 return True
             
             args = args.strip()
-            parts = args.split(' ', 1) if args else ['']
+            parts = args.split(' ', 2) if args else ['']
             command = parts[0].lower()
             arg_value = parts[1] if len(parts) > 1 else ""
+            extra_arg = parts[2] if len(parts) > 2 else ""
             
             if command == "on":
                 result = self._llm_client.toggle_preprocessing(True)
@@ -912,6 +956,16 @@ If you're getting connection errors:
                 result = self._llm_client.toggle_preprocessing()
             elif command == "status" or command == "":
                 result = self._llm_client.get_preprocessing_status()
+            elif command == "threshold":
+                if not arg_value:
+                    current_threshold = self._llm_client.get_preprocessing_threshold()
+                    result = f"📊 Current preprocessing threshold: {current_threshold} words\n\n💡 Usage: /preprocessing threshold <number>\n📝 Example: /preprocessing threshold 6\n\n🔧 How it works:\n  • ≤{current_threshold} words: Skip preprocessing (direct to LLM)\n  • >{current_threshold} words: Use preprocessing (if enabled)"
+                else:
+                    try:
+                        threshold = int(arg_value)
+                        result = self._llm_client.set_preprocessing_threshold(threshold)
+                    except ValueError:
+                        result = "❌ Threshold must be a number\n💡 Usage: /preprocessing threshold <number>\n📝 Example: /preprocessing threshold 4"
             elif command == "provider":
                 if not arg_value:
                     result = "❌ Provider name required\n💡 Usage: /preprocessing provider <provider>\n📋 Valid providers: ollama, ollama-turbo, openai, anthropic, openrouter"
@@ -924,21 +978,62 @@ If you're getting connection errors:
                     result = self._llm_client.set_preprocessing_model(arg_value)
             elif command == "config":
                 result = self._llm_client.get_preprocessing_config()
+            elif command == "context":
+                if not arg_value:
+                    result = self._llm_client.get_preprocessing_context_status()
+                elif arg_value.lower() == "on":
+                    result = self._llm_client.set_preprocessing_context_enabled(True)
+                elif arg_value.lower() == "off":
+                    result = self._llm_client.set_preprocessing_context_enabled(False)
+                elif arg_value.lower() == "status":
+                    result = self._llm_client.get_preprocessing_context_status()
+                else:
+                    result = "❌ Invalid context command\n💡 Usage:\n  • /preprocessing context on - Enable directory context\n  • /preprocessing context off - Disable directory context\n  • /preprocessing context status - Show context status"
+            elif command == "history":
+                if not arg_value:
+                    result = f"📚 Current conversation history settings:\n  • Enabled: {'✅ Yes' if self._llm_client.preprocessing_history_enabled else '❌ No'}\n  • Max Messages: {self._llm_client.preprocessing_max_history_messages}\n  • Available Messages: {len(self._llm_client.conversation_history)}\n\n💡 Usage:\n  • /preprocessing history on/off - Toggle history\n  • /preprocessing history <number> - Set max messages"
+                elif arg_value.lower() == "on":
+                    result = self._llm_client.set_preprocessing_history_enabled(True)
+                elif arg_value.lower() == "off":
+                    result = self._llm_client.set_preprocessing_history_enabled(False)
+                else:
+                    try:
+                        max_messages = int(arg_value)
+                        result = self._llm_client.set_preprocessing_max_history(max_messages)
+                    except ValueError:
+                        result = "❌ Invalid history command\n💡 Usage:\n  • /preprocessing history on - Enable history\n  • /preprocessing history off - Disable history\n  • /preprocessing history <number> - Set max messages"
+            elif command == "workdir" or command == "directory":
+                if not arg_value:
+                    result = f"📁 Current working directory: {self._llm_client.get_working_directory()}\n\n💡 Usage: /preprocessing workdir <path>"
+                else:
+                    result = self._llm_client.set_working_directory(arg_value)
             else:
                 result = """❌ Invalid preprocessing command.
 
 💡 Usage:
+  Core Settings:
   • /preprocessing on - Enable preprocessing
-  • /preprocessing off - Disable preprocessing
+  • /preprocessing off - Disable preprocessing  
   • /preprocessing toggle - Switch mode
   • /preprocessing status - Show current mode
+  • /preprocessing threshold <number> - Set word threshold
   • /preprocessing provider <provider> - Set preprocessing provider
   • /preprocessing model <model> - Set preprocessing model
   • /preprocessing config - Show detailed configuration
+  
+  Context Features:
+  • /preprocessing context on/off - Toggle directory context
+  • /preprocessing context status - Show context status
+  • /preprocessing history on/off - Toggle conversation history
+  • /preprocessing history <number> - Set max history messages
+  • /preprocessing workdir <path> - Set working directory
 
 🚀 Examples:
+  • /preprocessing threshold 6
   • /preprocessing provider ollama
   • /preprocessing model gpt-oss:20b
+  • /preprocessing context on
+  • /preprocessing history 8
   • /preprocessing config"""
             
             self._notify_message(ChatMessage(
@@ -1255,6 +1350,11 @@ Timeout configuration is set at startup. To use defaults:
             self._status_callback = None
             self._message_callback = None  
             self._error_callback = None
+            
+            # Clean up task tracker and progress display
+            if hasattr(self, 'task_tracker') and self.task_tracker:
+                if hasattr(self.task_tracker, 'progress_display'):
+                    self.task_tracker.progress_display.cleanup()
             
             # Clear state
             self.state.messages.clear()
