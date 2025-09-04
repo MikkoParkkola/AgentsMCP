@@ -22,53 +22,35 @@ class TUILauncher:
         self.running = False
         
     def initialize(self) -> bool:
-        """Initialize V3 TUI launcher - PHASE 2: Enable Rich renderer with minimal features."""
-        print("🔧 PHASE 2 V3 TUI: Starting minimal Rich renderer initialization...")
+        """Initialize V3 TUI launcher - PHASE 2 COMPLETE: Rich renderer with proper EOF handling."""
+        print("🔧 V3 TUI: Starting initialization with proven EOF handling fixes...")
         try:
-            # Detect actual terminal capabilities but enable Rich with TTY detection
-            print("🔧 PHASE 2: Detecting terminal capabilities...")
-            from .terminal_capabilities import detect_terminal_capabilities, TerminalCapabilities
-            detected_capabilities = detect_terminal_capabilities()
+            # Detect actual terminal capabilities properly
+            print("🔧 V3: Detecting terminal capabilities...")
+            from .terminal_capabilities import detect_terminal_capabilities
+            self.capabilities = detect_terminal_capabilities()
             
-            # PHASE 2: Force TTY mode for testing (TEMPORARY)
-            # This allows us to test Rich renderer even when not in real TTY
-            print("🔧 PHASE 2: FORCING TTY mode for testing minimal Rich renderer...")
-            self.capabilities = TerminalCapabilities(
-                is_tty=True,  # Force TTY mode
-                width=detected_capabilities.width,
-                height=detected_capabilities.height,
-                supports_colors=True,  # Force color support
-                supports_unicode=True,
-                supports_rich=True,   # Force Rich support
-                is_fast_terminal=True,
-                max_refresh_rate=5,
-                force_plain=False,
-                force_simple=False
-            )
-            
-            # PHASE 2: Enable Rich but only in real TTY environments
-            # This isolates whether Rich itself or specific Rich features cause issues
-            print(f"✓ Terminal capabilities (FORCED): TTY={self.capabilities.is_tty}, Rich={self.capabilities.supports_rich}")
+            print(f"✓ Terminal capabilities: TTY={self.capabilities.is_tty}, Rich={self.capabilities.supports_rich}")
             
             # Initialize progressive renderer system
-            print("🔧 PHASE 2: Initializing progressive renderer system...")
+            print("🔧 V3: Initializing progressive renderer system...")
             self.progressive_renderer = ProgressiveRenderer(self.capabilities)
             
-            # PHASE 2: Register both Plain and MINIMAL Rich renderer
-            print("🔧 PHASE 2: Registering Plain CLI renderer as fallback...")
+            # Register both Plain and Rich renderers (both have proper EOF handling now)
+            print("🔧 V3: Registering Plain CLI renderer as reliable fallback...")
             self.progressive_renderer.register_renderer("plain", PlainCLIRenderer, priority=10)
             
             if self.capabilities.is_tty and self.capabilities.supports_rich:
-                print("🔧 PHASE 2: Registering MINIMAL Rich TUI renderer (no complex features)...")
+                print("🔧 V3: Registering Rich TUI renderer with proven EOF handling...")
                 self.progressive_renderer.register_renderer("rich", RichTUIRenderer, priority=20)
             else:
-                print("🔧 PHASE 2: Rich disabled - not a TTY or Rich not supported")
+                print("🔧 V3: Rich disabled - not a TTY or Rich not supported")
             
             # Select best available renderer
-            print("🔧 PHASE 2: Selecting best available renderer...")
+            print("🔧 V3: Selecting best available renderer...")
             self.current_renderer = self.progressive_renderer.select_best_renderer()
             if not self.current_renderer:
-                print("❌ PHASE 2: No renderer could be initialized!")
+                print("❌ V3: No renderer could be initialized!")
                 return False
             
             renderer_name = self.current_renderer.__class__.__name__
@@ -77,15 +59,15 @@ class TUILauncher:
             # Initialize chat engine
             self.chat_engine = ChatEngine()
             
-            # NO callbacks for bare-bones version - too complex
-            print("🔧 BARE-BONES V3: Skipping complex callbacks for minimal version")
+            # Skip callbacks for now - keep simple until core functionality is solid
+            print("🔧 V3: Skipping complex callbacks for streamlined version")
             
             return True
             
         except Exception as e:
-            print(f"❌ BARE-BONES V3: Critical initialization failure: {e}")
+            print(f"❌ V3: Critical initialization failure: {e}")
             import traceback
-            print("🔍 BARE-BONES V3: Full initialization error traceback:")
+            print("🔍 V3: Full initialization error traceback:")
             traceback.print_exc()
             return False
     
@@ -112,18 +94,18 @@ class TUILauncher:
             self.current_renderer.show_error(error)
     
     async def run_main_loop(self) -> int:
-        """Run the BARE-BONES main TUI interaction loop."""
+        """Run the V3 TUI main interaction loop with proven EOF handling."""
         try:
             if not self.initialize():
                 return 1
             
-            print("🔧 BARE-BONES V3: Starting minimal main loop...")
+            print("🔧 V3: Starting main interaction loop...")
             
             # Set up signal handlers
             self._setup_signal_handlers()
             
-            # Simple welcome message (no complex rendering)
-            print("🤖 BARE-BONES AgentsMCP TUI")
+            # Simple welcome message
+            print("🤖 AgentsMCP TUI (V3 Architecture)")
             print("=" * 50)
             print("Type your message and press Enter.")
             print("Type '/quit' to exit.")
@@ -131,10 +113,10 @@ class TUILauncher:
             
             self.running = True
             
-            # SIMPLIFIED Main interaction loop - no complex rendering or async processing
+            # Main interaction loop with proven EOF handling
             while self.running:
                 try:
-                    # Direct input handling - no complex state tracking
+                    # Direct input handling with proper error recovery
                     user_input = self.current_renderer.handle_input()
                     
                     if user_input:
@@ -143,7 +125,7 @@ class TUILauncher:
                             print("👋 Goodbye!")
                             break
                         
-                        # PHASE 2: Simple echo with renderer-appropriate formatting
+                        # Simple echo with renderer-appropriate formatting
                         renderer_name = self.current_renderer.__class__.__name__
                         if hasattr(self.current_renderer, 'console'):
                             # Rich renderer - use Rich formatting
@@ -157,7 +139,8 @@ class TUILauncher:
                         # if not should_continue:
                         #     break
                     
-                    # NO sleep for busy waiting - keep it simple for now
+                    # Brief pause to prevent busy waiting
+                    await asyncio.sleep(0.01)
                     
                 except KeyboardInterrupt:
                     print("\n⚠️ Received Ctrl+C - shutting down gracefully...")
@@ -169,9 +152,9 @@ class TUILauncher:
             return 0
             
         except Exception as e:
-            print(f"❌ BARE-BONES V3: Fatal error in main loop: {e}")
+            print(f"❌ V3: Fatal error in main loop: {e}")
             import traceback
-            print("🔍 BARE-BONES V3: Full main loop error traceback:")
+            print("🔍 V3: Full main loop error traceback:")
             traceback.print_exc()
             return 1
         finally:

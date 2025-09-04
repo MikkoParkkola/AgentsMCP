@@ -65,11 +65,13 @@ class PlainCLIRenderer(UIRenderer):
                 return "/quit"
             except Exception as e:
                 print(f"Input error: {e}")
-                return None
+                # Return /quit on persistent errors to avoid infinite loops
+                return "/quit"
                 
         except Exception as e:
             print(f"Critical input error: {e}")
-            return None
+            # Return /quit on critical errors to avoid infinite loops
+            return "/quit"
     
     def show_message(self, message: str, level: str = "info") -> None:
         """Show a message in plain text."""
