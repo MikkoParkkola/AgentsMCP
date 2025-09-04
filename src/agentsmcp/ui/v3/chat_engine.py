@@ -184,15 +184,45 @@ class ChatEngine:
     
     def _is_simple_input(self, user_input: str) -> bool:
         """Check if input is a simple greeting or basic query that doesn't need task tracking."""
+        input_lower = user_input.lower().strip()
+        
+        # First check: if input is too long, it's not simple (prevents misclassification)
+        if len(input_lower) > 50:
+            return False
+        
+        # Enhanced simple patterns to prevent infinite loops on basic interactions
         simple_patterns = [
-            "hello", "hi", "hey", "thanks", "thank you", "bye", "goodbye",
-            "ok", "okay", "yes", "no", "sure", "please", "help"
+            "hello", "hi", "hey", "howdy", "greetings",
+            "thanks", "thank you", "thx", "ty", 
+            "bye", "goodbye", "see you", "cya", "farewell",
+            "ok", "okay", "yes", "no", "sure", "please", "help",
+            "how are you", "what's up", "whats up", "sup", "how's it going",
+            "good morning", "good afternoon", "good evening", "good night",
+            "nice", "cool", "awesome", "great", "perfect",
+            "who are you", "what are you", "are you there"
         ]
-        # Check if input is very short or matches simple patterns
-        words = user_input.lower().strip().split()
-        if len(words) <= 2 and any(pattern in user_input.lower() for pattern in simple_patterns):
+        
+        # Simple question words that often lead to infinite loops
+        simple_question_words = ["who", "what", "when", "where", "why", "how"]
+        
+        words = input_lower.split()
+        
+        # Check for exact matches with simple patterns
+        if any(pattern == input_lower.rstrip('?!.,') for pattern in simple_patterns):
             return True
-        return len(user_input.strip()) <= 10  # Very short inputs are likely simple
+            
+        # Check for short patterns that are mostly simple (stricter matching)
+        if len(words) <= 3:
+            for pattern in simple_patterns:
+                if pattern in input_lower and len(input_lower) <= 25:
+                    return True
+            
+        # Single question word queries (like "what?", "how?")
+        if len(words) == 1 and any(word.rstrip('?!.,') in simple_question_words for word in words):
+            return True
+            
+        # Very short inputs are likely simple (but not too short to be empty)
+        return len(input_lower) <= 15 and len(input_lower.strip()) > 0
     
     async def _handle_chat_message(self, user_input: str) -> bool:
         """Handle regular chat message with streaming support, context management, and history logging."""
@@ -200,6 +230,16 @@ class ChatEngine:
         try:
             # Check if this is a simple input that doesn't need complex task tracking
             is_simple = self._is_simple_input(user_input)
+            
+            # For simple inputs, temporarily disable preprocessing to prevent infinite loops
+            original_preprocessing = None
+            if is_simple and self._llm_client:
+                original_preprocessing = getattr(self._llm_client, 'preprocessing_enabled', True)
+                self._llm_client.preprocessing_enabled = False
+                # Log the bypass for debugging
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Simple input detected: '{user_input}' - bypassing preprocessing to prevent infinite loops")
             
             # Check if preprocessing should be used based on word threshold and enabled status
             should_preprocess = self._llm_client.should_use_preprocessing(user_input) if self._llm_client else False
@@ -388,6 +428,10 @@ class ChatEngine:
                 self.task_tracker.progress_display.complete_task()
             self._notify_error(f"Error getting AI response: {str(e)}")
             return True
+        finally:
+            # Restore preprocessing setting for simple inputs
+            if original_preprocessing is not None and self._llm_client:
+                self._llm_client.preprocessing_enabled = original_preprocessing
     
     async def _should_use_streaming(self) -> bool:
         """Check if streaming should be used for responses."""

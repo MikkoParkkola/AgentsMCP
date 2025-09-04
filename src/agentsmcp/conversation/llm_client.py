@@ -1756,18 +1756,23 @@ Remember: Be truthful about the system's current state rather than creating fals
                 try:
                     logger.info(f"Trying provider: {prov}")
                     result = None
-                    if prov == "ollama-turbo":
-                        result = await self._call_ollama_turbo(messages, enable_tools)
-                    elif prov == "openai":
-                        result = await self._call_openai(messages, enable_tools)
-                    elif prov == "openrouter":
-                        result = await self._call_openrouter(messages, enable_tools)
-                    elif prov == "ollama":
-                        result = await self._call_ollama(messages, enable_tools)
-                    elif prov == "anthropic":
-                        result = await self._call_anthropic(messages, enable_tools)
-                    elif prov == "codex":
-                        result = await self._call_codex(messages, enable_tools)
+                    # Add timeout protection to prevent infinite loops (30-second timeout)
+                    try:
+                        if prov == "ollama-turbo":
+                            result = await asyncio.wait_for(self._call_ollama_turbo(messages, enable_tools), timeout=30.0)
+                        elif prov == "openai":
+                            result = await asyncio.wait_for(self._call_openai(messages, enable_tools), timeout=30.0)
+                        elif prov == "openrouter":
+                            result = await asyncio.wait_for(self._call_openrouter(messages, enable_tools), timeout=30.0)
+                        elif prov == "ollama":
+                            result = await asyncio.wait_for(self._call_ollama(messages, enable_tools), timeout=30.0)
+                        elif prov == "anthropic":
+                            result = await asyncio.wait_for(self._call_anthropic(messages, enable_tools), timeout=30.0)
+                        elif prov == "codex":
+                            result = await asyncio.wait_for(self._call_codex(messages, enable_tools), timeout=30.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Provider {prov} timed out after 30 seconds, trying next provider")
+                        continue
 
                     if result:
                         content = self._extract_response_content(result)
