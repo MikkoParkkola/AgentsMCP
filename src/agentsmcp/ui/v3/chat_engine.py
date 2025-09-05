@@ -119,6 +119,12 @@ class ChatEngine:
     
     def _notify_status(self, status: str) -> None:
         """Notify UI of status change."""
+        # Handle special feature showcase messages
+        if status.startswith("FEATURE_SHOWCASE:"):
+            showcase_message = status[17:]  # Remove "FEATURE_SHOWCASE:" prefix
+            self._display_feature_showcase(showcase_message)
+            return
+        
         if self._status_callback:
             self._status_callback(status)
     
@@ -137,6 +143,25 @@ class ChatEngine:
         """Notify UI of streaming response update."""
         if self._status_callback:
             self._status_callback(f"streaming_update:{content}")
+    
+    def _display_feature_showcase(self, showcase_message: str) -> None:
+        """Display feature showcase with Rich formatting via special system message."""
+        try:
+            # Create a special system message for the showcase
+            showcase_chat_message = ChatMessage(
+                role=MessageRole.SYSTEM, 
+                content=f"FEATURE_SHOWCASE_FORMAT:{showcase_message}",
+                timestamp=time.time()
+            )
+            
+            # Send it through the message callback for proper formatting
+            self._notify_message(showcase_chat_message)
+            
+        except Exception as e:
+            # Fallback to plain text display via status
+            self.logger.warning(f"Failed to display feature showcase: {e}")
+            if self._status_callback:
+                self._status_callback(f"✅ Feature exists: {showcase_message[:100]}...")
     
     def _initialize_llm_client(self) -> None:
         """Initialize LLM client once and preserve it throughout the session."""

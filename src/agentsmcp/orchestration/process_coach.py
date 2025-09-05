@@ -35,6 +35,7 @@ from ..retrospective import (
     ImplementationStatus,
     PriorityLevel
 )
+from ..retrospective.logging.log_schemas import LoggingConfig
 from ..retrospective.generation import ImprovementGenerator, ImprovementEngine
 from ..retrospective.approval import ApprovalOrchestrator
 from ..retrospective.safety import SafetyOrchestrator
@@ -157,7 +158,7 @@ class ProcessCoach:
             self.agile_coach = AgileCoachAnalyzer()
             self.enforcement_system = OrchestratorEnforcementSystem()
             self.retrospective_integration = EnhancedRetrospectiveIntegration()
-            self.execution_capture = ExecutionLogCapture()
+            self.execution_capture = ExecutionLogCapture(LoggingConfig())
             
             # Improvement generation and validation
             self.improvement_generator = ImprovementGenerator()

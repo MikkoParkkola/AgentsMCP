@@ -257,16 +257,28 @@ class SequentialPlanner:
             Use the MCP sequential thinking tool to work through this systematically.
             """
             
-            # Call the LLM with timeout protection - critical fix for infinite loop
-            try:
-                response = await asyncio.wait_for(
-                    llm_client.send_message(planning_prompt),
-                    timeout=30.0  # 30-second timeout
-                )
-            except asyncio.TimeoutError:
-                self.logger.warning("MCP sequential thinking tool timed out after 30 seconds")
-                # Fall through to fallback below
-                raise Exception("Sequential thinking timeout")
+            # STEP 4 FIX: Skip MCP sequential thinking tool (causes endless loop)
+            # Use simple fallback planning instead
+            self.logger.info("Using fallback planning (MCP sequential thinking disabled due to endless loop issue)")
+            
+            # Create simple structured response without MCP tool
+            response = f"""
+            Analysis of user request: "{prompt[:200]}..."
+            
+            Planning Breakdown:
+            1. Task Understanding: This appears to be a complex request requiring structured approach
+            2. Main Components: Analysis, planning, execution, verification  
+            3. Approach: Use agent coordination and systematic processing
+            4. Key Steps:
+               - Initial analysis and context gathering
+               - Agent delegation for specialist input
+               - Coordination and integration of results
+               - Final response compilation and delivery
+            5. Estimated Time: 30-45 seconds for complex tasks
+            6. Success Criteria: Comprehensive response addressing user needs
+            
+            This is a fallback planning response to avoid MCP sequential thinking endless loop.
+            """
             
             # Parse the response for planning insights
             # The LLM should have used the MCP sequential thinking tool internally

@@ -62,6 +62,7 @@ def show_tui_help():
     print("  • Auto-detects environment and adapts accordingly")
     print()
     print("TUI OPTIONS:")
+    print("  --chat                            Launch legacy chat interface (workspace is default)")
     print("  --theme {auto|light|dark}          Set color theme (default: auto)")
     print("  --no-welcome                       Skip welcome screen")
     print("  --debug                           Enable debug output")
@@ -83,7 +84,8 @@ def show_tui_help():
     print("  ollama                 - Basic Ollama agent")
     print()
     print("EXAMPLES:")
-    print("  ./agentsmcp tui                          # Start (auto-detects mode)")
+    print("  ./agentsmcp tui                          # 🚀 Start workspace controller (default)")
+    print("  ./agentsmcp tui --chat                   # Launch legacy chat interface")
     print("  ./agentsmcp ui --theme dark              # Dark theme")
     print("  ./agentsmcp tui --debug                  # Debug mode")
     print("  ./agentsmcp tui --no-welcome             # Skip intro")
@@ -141,20 +143,49 @@ def handle_tui_command(args: List[str]) -> int:
         print("   TUI may not display correctly, consider using a better terminal")
         print()
     
-    # Parse arguments for legacy flag
+    # Parse arguments for legacy flag and chat flag
     debug_mode = "--debug" in args
     legacy_mode = "--legacy" in args
+    chat_mode = "--chat" in args
     
-    # Try v3 system first (unless explicitly requesting legacy)
-    if not legacy_mode:
+    # Default behavior: Launch V4 workspace controller (unless --chat is specified)
+    if not chat_mode and not legacy_mode:
         try:
             if debug_mode:
-                print("🔧 Debug: Attempting to start v3 TUI system...")
+                print("🔧 Debug: Launching v4 workspace controller (default)...")
+            
+            from agentsmcp.ui.v4.workspace_controller import main as workspace_main
+            print("🚀 Launching AgentsMCP Workspace Controller...")
+            print("💡 Press 'h' for help, 'q' to quit")
+            print("💡 Use --chat flag for legacy chat interface")
+            workspace_main()
+            return 0
+        except ImportError as e:
+            if debug_mode:
+                print(f"🔧 Debug: V4 workspace controller not available: {e}")
+            print("⚠️  V4 workspace controller not available, falling back to V3 chat...")
+            # Fall through to V3 chat system
+        except Exception as e:
+            if debug_mode:
+                print(f"🔧 Debug: Workspace controller failed: {e}")
+            print(f"⚠️  Workspace controller failed ({e}), falling back to V3 chat...")
+            # Fall through to V3 chat system
+    
+    # Chat mode (V3 system) - now requires explicit --chat flag
+    if chat_mode or not legacy_mode:  # Still fall back here if V4 failed
+        try:
+            if debug_mode:
+                print("🔧 Debug: Launching V3 chat interface...")
             
             import asyncio
             from agentsmcp.ui.v3.tui_launcher import launch_tui
             
-            print("🚀 Starting AI Command Composer with clean v3 architecture...")
+            if chat_mode:
+                print("🚀 Launching legacy chat interface...")
+                print("💡 Use 'agentsmcp tui' without --chat for modern workspace controller")
+            else:
+                print("🚀 Starting AI Command Composer as fallback...")
+            
             exit_code = asyncio.run(launch_tui())
             
             if debug_mode:
@@ -173,7 +204,7 @@ def handle_tui_command(args: List[str]) -> int:
             print(f"⚠️  V3 TUI failed ({e}), falling back to legacy system...")
     else:
         if debug_mode:
-            print("🔧 Debug: Legacy mode requested, skipping v3 system...")
+            print("🔧 Debug: Legacy mode requested, skipping v4 workspace and v3 systems...")
     
     # Fallback to legacy v2 system
     print("🔄 Using legacy Revolutionary TUI system...")

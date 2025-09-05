@@ -13,6 +13,7 @@ from enum import Enum
 
 from .sequential_planner import SequentialPlanner, SequentialPlan, PlanningStep
 from ..ui.v3.progress_display import ProgressDisplay, AgentStatus
+from ..capabilities.feature_detector import FeatureDetector, FeatureDetectionResult
 
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,7 @@ class TaskTracker:
         # Core components
         self.sequential_planner = SequentialPlanner()
         self.progress_display = ProgressDisplay(update_callback=progress_update_callback)
+        self.feature_detector = FeatureDetector(".")
         
         # Callbacks
         self.progress_update_callback = progress_update_callback
@@ -124,7 +126,42 @@ class TaskTracker:
         self.progress_display.update_orchestrator_status("Starting sequential planning...")
         
         try:
-            # Phase 1: Sequential Planning with timeout protection
+            # Phase 0: Feature Detection (prevents Ghost Feature Problem)
+            self._notify_status("🔍 Phase 0: Detecting existing features...")
+            try:
+                feature_detection_result = await self.feature_detector.detect_cli_feature(user_input)
+                
+                if feature_detection_result.exists:
+                    # Feature already exists - provide formatted showcase instead of implementation
+                    showcase_message = await self.feature_detector.generate_feature_showcase(feature_detection_result)
+                    
+                    # Mark task as completed with showcase
+                    self.task_status[task_id] = TaskStatus.COMPLETED
+                    self.successful_tasks += 1
+                    self.progress_display.complete_task()
+                    self._notify_status("✅ Feature already available - showing usage guide")
+                    
+                    # Send formatted showcase as special system message 
+                    if self.progress_update_callback:
+                        self.progress_update_callback(f"FEATURE_SHOWCASE:{showcase_message}")
+                    
+                    execution_duration = int((time.time() - time.time()) * 1000)  # Quick detection
+                    results = {
+                        "success": True,
+                        "feature_exists": True,
+                        "showcase_message": showcase_message,
+                        "detection_result": feature_detection_result,
+                        "execution_duration_ms": execution_duration
+                    }
+                    
+                    self.logger.info(f"Task {task_id} completed via feature detection: {feature_detection_result.feature_type} already exists")
+                    return task_id
+                    
+            except Exception as e:
+                # Don't fail on feature detection errors - continue with normal flow
+                self.logger.warning(f"Feature detection failed for task {task_id}, continuing with implementation: {e}")
+            
+            # Phase 1: Sequential Planning with timeout protection  
             self._notify_status("🎯 Phase 1: Sequential thinking and planning...")
             print(f"🐛 DEBUG TaskTracker: Starting sequential planning...")
             

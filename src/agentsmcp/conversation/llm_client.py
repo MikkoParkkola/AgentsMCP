@@ -2392,21 +2392,26 @@ Remember: Be truthful about the system's current state rather than creating fals
             return await self._fallback_response(messages)
     
     async def _fallback_response(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Generate fallback response when MCP clients fail."""
-        user_message = ""
-        for msg in reversed(messages):
-            if msg.get('role') == 'user':
-                user_message = msg.get('content', '')
-                break
+        """Generate error message when LLM connection fails - no generic responses."""
+        # Check configuration status to provide specific error
+        config_status = self.get_configuration_status()
+        provider_status = config_status["providers"].get(self.provider, {})
         
-        response_content = self._generate_intelligent_response(user_message, messages)
+        if not provider_status.get("configured"):
+            if self.provider == "ollama":
+                error_msg = "❌ **LLM Connection Error**: Ollama is not running.\n\n**To fix this:**\n1. Install Ollama from https://ollama.ai\n2. Start the service: `ollama serve`\n3. Pull a model: `ollama pull llama2`\n4. Try your request again"
+            else:
+                env_var = self._get_api_key_env_name(self.provider)
+                error_msg = f"❌ **LLM Connection Error**: {self.provider.upper()} API key not configured.\n\n**To fix this:**\n1. Get your API key from the {self.provider} dashboard\n2. Set the environment variable: `export {env_var}=your_api_key_here`\n3. Restart the application\n4. Try your request again"
+        else:
+            error_msg = f"❌ **LLM Connection Error**: Failed to connect to {self.provider}.\n\n**Possible causes:**\n• Network connection issues\n• Service temporarily unavailable\n• Rate limits exceeded\n• Invalid API credentials\n\n**Try:**\n1. Check your internet connection\n2. Verify your {self.provider} service status\n3. Wait a moment and try again"
         
         return {
             "choices": [
                 {
                     "message": {
                         "role": "assistant", 
-                        "content": response_content
+                        "content": error_msg
                     },
                     "finish_reason": "stop"
                 }
@@ -2689,57 +2694,9 @@ Remember: Be truthful about the system's current state rather than creating fals
             return f"Tool execution error: {str(e)}"
     
     def _generate_intelligent_response(self, user_message: str, messages: List[Dict[str, str]]) -> str:
-        """Generate intelligent response based on user input and context."""
-        user_lower = user_message.lower()
-        
-        # Handle common requests intelligently and signal command execution
-        if any(word in user_lower for word in ['status', 'running', 'check']):
-            return "I'll check the system status for you. [EXECUTE:status]"
-            
-        elif any(word in user_lower for word in ['settings', 'configure', 'config', 'setup']):
-            return "I'll open the settings for you to configure your AgentsMCP preferences. [EXECUTE:settings]"
-            
-        elif any(word in user_lower for word in ['dashboard', 'monitor', 'watch']):
-            return "I'll start the dashboard so you can monitor the system. [EXECUTE:dashboard]"
-            
-        elif any(word in user_lower for word in ['help', 'commands', 'what can']):
-            return "I'll show you the available commands and help information. [EXECUTE:help]"
-            
-        elif any(word in user_lower for word in ['theme', 'dark', 'light']):
-            # Extract theme preference
-            if 'dark' in user_lower:
-                return "I'll switch to dark mode. [EXECUTE:theme dark]"
-            elif 'light' in user_lower:
-                return "I'll switch to light mode. [EXECUTE:theme light]"
-            else:
-                return "I'll set the theme to auto mode. [EXECUTE:theme auto]"
-            
-        elif any(word in user_lower for word in ['web', 'api', 'endpoints']):
-            return "I'll show you the web API information. [EXECUTE:web]"
-        
-        elif any(phrase in user_lower for phrase in [
-            'investigate the project', 'analyze the project', 'examine the project',
-            'check the project', 'look at the project', 'scan the project',
-            'what kind of issues', 'find issues', 'project issues', 'code issues',
-            'investigate this folder', 'analyze this folder', 'examine this folder',
-            'repository analysis', 'analyze repository', 'scan repository',
-            'analyze the project in current directory', 'improvements you would make',
-            'analyze the current repo', 'analyze repo', 'analyze the repo', 'suggest improvements',
-            'analyze current', 'analyze this', 'analyze here'
-        ]):
-            return "I'll analyze the project structure and identify any potential issues. [EXECUTE:analyze_repository]"
-            
-        elif any(phrase in user_lower for phrase in [
-            'do these improvements', 'implement these', 'make these changes', 'apply these changes',
-            'please implement', 'implement the', 'make the improvements', 'apply the improvements',
-            'perform these', 'execute these', 'do the improvements', 'make these fixes',
-            'implement all', 'do all', 'yes, please implement', 'all of them',
-            'apply all', 'make all', 'fix all', 'implement everything'
-        ]):
-            return "I'll implement the suggested improvements using the coding agent. →→ DELEGATE-TO-codex: Implement all the suggested improvements from the previous analysis"
-            
-        else:
-            return f"I understand you're asking: '{user_message}'. However, I'm currently unable to handle complex tasks as the agent orchestration system is not functioning properly. I can help with basic commands like status, settings, dashboard, help, and theme changes. What would you like me to do?"
+        """This method has been removed - we no longer generate generic responses.
+        All fallback handling should provide clear error messages instead."""
+        return "❌ **System Error**: LLM connection failed and no generic responses are available. Please check your LLM configuration."
     
     def _extract_tool_calls(self, response: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Extract tool calls from LLM response."""
