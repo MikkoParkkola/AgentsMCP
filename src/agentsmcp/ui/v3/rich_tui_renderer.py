@@ -720,3 +720,28 @@ class RichTUIRenderer(UIRenderer):
                 
         except Exception as e:
             print(f"Agent progress update error: {e}")
+    
+    def complete_task_display(self) -> None:
+        """
+        Complete the current task display and stop progress updates.
+        This addresses the endless status loop in Rich TUI mode.
+        """
+        try:
+            # Complete the connected ProgressDisplay if available
+            if self._progress_display:
+                self._progress_display.complete_task()
+            
+            # Mark all agents as completed
+            for agent_info in self._agent_progress.values():
+                agent_info["status"] = "completed"
+                agent_info["progress"] = 100.0
+            
+            # Update the status to show task completion
+            self._current_status = "✅ Task completed successfully"
+            
+            # Perform final status panel update
+            if self.live and self.layout:
+                self._update_status_panel()
+                
+        except Exception as e:
+            print(f"Task completion error: {e}")

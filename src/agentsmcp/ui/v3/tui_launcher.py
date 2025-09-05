@@ -77,15 +77,9 @@ class TUILauncher:
             # Register renderers
             self.progressive_renderer.register_renderer("plain", PlainCLIRenderer, priority=10)
             
-            if self.capabilities.is_tty and self.capabilities.supports_rich:
-                # Rich TUI renderer available - import and register
-                from .rich_tui_renderer import RichTUIRenderer
-                self.progressive_renderer.register_renderer("rich_tui", RichTUIRenderer, priority=30)
-                # Console renderer as fallback
-                self.progressive_renderer.register_renderer("console", ConsoleRenderer, priority=20)
-            else:
-                # Console renderer not available
-                pass
+            # Always use plain text interface - Rich TUI disabled per user preference
+            # Only register console renderer as fallback to plain
+            self.progressive_renderer.register_renderer("console", ConsoleRenderer, priority=20)
             
             # Select renderer
             self.current_renderer = self.progressive_renderer.select_best_renderer()
@@ -143,6 +137,58 @@ class TUILauncher:
             # Handle streaming response update
             content = status[17:]  # Remove "streaming_update:" prefix
             self._handle_streaming_update(content)
+        elif status.startswith("thinking_step:"):
+            # Handle sequential thinking step update: "thinking_step:3/10:Current thought text"
+            try:
+                parts = status[14:].split(":", 2)  # Remove "thinking_step:" prefix
+                if len(parts) >= 2:
+                    step_info = parts[0]  # "3/10"
+                    thought_text = parts[1] if len(parts) > 1 else "Processing..."
+                    
+                    if "/" in step_info:
+                        step, total = map(int, step_info.split("/"))
+                        
+                        # Route to enhanced renderer if available
+                        if (self.current_renderer and 
+                            hasattr(self.current_renderer, 'handle_sequential_thinking_update')):
+                            self.current_renderer.handle_sequential_thinking_update(step, total, thought_text)
+                        else:
+                            # Fallback display
+                            print(f"🧠 Thinking Step {step}/{total}: {thought_text}")
+            except Exception as e:
+                print(f"Sequential thinking display error: {e}")
+        elif status.startswith("agent_activity:"):
+            # Handle agent activity update: "agent_activity:coder-1:Writing unit tests:0.75"
+            try:
+                parts = status[15:].split(":", 3)  # Remove "agent_activity:" prefix
+                if len(parts) >= 2:
+                    agent_name = parts[0]
+                    activity = parts[1]
+                    progress = float(parts[2]) if len(parts) > 2 and parts[2] else None
+                    
+                    # Route to enhanced renderer if available
+                    if (self.current_renderer and 
+                        hasattr(self.current_renderer, 'handle_agent_activity_update')):
+                        self.current_renderer.handle_agent_activity_update(agent_name, activity, progress)
+                    else:
+                        # Fallback display
+                        if progress is not None:
+                            print(f"🤖 {agent_name}: {activity} ({progress*100:.0f}%)")
+                        else:
+                            print(f"🤖 {agent_name}: {activity}")
+            except Exception as e:
+                print(f"Agent activity display error: {e}")
+        elif status.startswith("thinking_complete"):
+            # Handle sequential thinking completion
+            if (self.current_renderer and 
+                hasattr(self.current_renderer, 'complete_sequential_thinking')):
+                self.current_renderer.complete_sequential_thinking()
+        elif status.startswith("agent_complete:"):
+            # Handle agent completion: "agent_complete:coder-1"
+            agent_name = status[15:]  # Remove "agent_complete:" prefix
+            if (self.current_renderer and 
+                hasattr(self.current_renderer, 'clear_agent_activity')):
+                self.current_renderer.clear_agent_activity(agent_name)
         else:
             # Check if streaming is active via renderer's streaming manager
             streaming_active = False
@@ -156,6 +202,18 @@ class TUILauncher:
                 # Special case: "Ready" means streaming/processing is done, but don't show it
                 return
                 
+            # Detect task completion and call renderer cleanup
+            if (("completed successfully" in status.lower() or 
+                 "task completed" in status.lower() or 
+                 status.startswith("✅")) and 
+                self.current_renderer and hasattr(self.current_renderer, 'complete_task_display')):
+                
+                # Call the Rich TUI renderer's completion method to stop endless status updates
+                try:
+                    self.current_renderer.complete_task_display()
+                except Exception as e:
+                    print(f"Task completion error: {e}")
+            
             # Only show status if not streaming
             if self.current_renderer and hasattr(self.current_renderer, 'show_status'):
                 # Rich renderer - use Rich status display with enhanced formatting

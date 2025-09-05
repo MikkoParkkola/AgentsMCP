@@ -126,10 +126,12 @@ class TaskTracker:
         try:
             # Phase 1: Sequential Planning with timeout protection
             self._notify_status("🎯 Phase 1: Sequential thinking and planning...")
+            print(f"🐛 DEBUG TaskTracker: Starting sequential planning...")
             
             planning_start = time.time()
             
             try:
+                print(f"🐛 DEBUG TaskTracker: About to call sequential_planner.create_plan() - potential endless loop location")
                 # Add timeout protection to prevent infinite loops
                 plan = await asyncio.wait_for(
                     self.sequential_planner.create_plan(
@@ -140,8 +142,10 @@ class TaskTracker:
                     timeout=45.0  # 45-second timeout for planning
                 )
                 planning_duration = int((time.time() - planning_start) * 1000)
+                print(f"🐛 DEBUG TaskTracker: sequential_planner.create_plan() completed successfully in {planning_duration}ms")
                 
                 self.task_plans[task_id] = plan
+                print(f"🐛 DEBUG TaskTracker: Plan stored with {len(plan.steps)} steps")
                 self.logger.info(f"Created sequential plan for {task_id} with {len(plan.steps)} steps in {planning_duration}ms")
                 
             except asyncio.TimeoutError:
@@ -175,7 +179,9 @@ class TaskTracker:
             self._notify_status("🤖 Phase 2: Assigning agents and preparing execution...")
             self.progress_display.add_task_phase("agent_assignment")
             
-            agent_assignments = await self._assign_agents_to_plan(plan, context)
+            # Get the plan that was stored (could be regular plan or fallback_plan)
+            stored_plan = self.task_plans[task_id]
+            agent_assignments = await self._assign_agents_to_plan(stored_plan, context)
             self.task_assignments[task_id] = agent_assignments
             
             # Add agents to progress display
@@ -186,11 +192,23 @@ class TaskTracker:
                     assignment.estimated_duration_ms
                 )
             
-            # Phase 3: Ready for Execution
+            # Phase 3: Auto-execute task to prevent endless loops
+            print(f"🐛 DEBUG TaskTracker: Planning complete, starting auto-execution for task {task_id}")
             self.task_status[task_id] = TaskStatus.EXECUTING
-            self._notify_status("✅ Planning complete - ready for execution")
+            self._notify_status("🚀 Planning complete - starting execution...")
             
-            return task_id
+            # Automatically execute the task to prevent endless "ready for execution" loops
+            try:
+                execution_results = await self.execute_task(task_id)
+                print(f"🐛 DEBUG TaskTracker: Auto-execution completed successfully")
+                self.logger.info(f"Auto-execution completed for task {task_id}")
+                return task_id
+            except Exception as e:
+                print(f"🐛 DEBUG TaskTracker: Auto-execution failed: {e}")
+                self.logger.error(f"Auto-execution failed for task {task_id}: {e}")
+                self.task_status[task_id] = TaskStatus.FAILED
+                self.progress_display.update_orchestrator_status(f"❌ Auto-execution failed: {str(e)}")
+                raise
             
         except Exception as e:
             self.logger.error(f"Failed to start task {task_id}: {e}")
