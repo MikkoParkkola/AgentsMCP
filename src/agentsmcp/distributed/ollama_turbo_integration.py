@@ -601,7 +601,7 @@ def create_ollama_orchestrator(
 def get_ollama_config_from_env() -> Dict[str, Any]:
     """Load Ollama configuration from environment variables"""
     return {
-        "turbo_api_key": os.getenv("OLLAMA_TURBO_API_KEY"),
+        "turbo_api_key": os.getenv("OLLAMA_API_KEY"),
         "prefer_turbo": os.getenv("OLLAMA_PREFER_TURBO", "false").lower() == "true",
         "turbo_base_url": os.getenv("OLLAMA_TURBO_BASE_URL", "https://ollama.com"),
         "mode": OllamaMode(os.getenv("OLLAMA_MODE", "hybrid"))

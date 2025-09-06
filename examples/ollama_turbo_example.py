@@ -19,13 +19,13 @@ def setup_ollama_turbo():
     print("🔧 Setting up Ollama Turbo provider...")
     
     # 1. Set up environment variable (normally done in shell)
-    api_key = os.getenv("OLLAMA_TURBO_API_KEY")
+    api_key = os.getenv("OLLAMA_API_KEY")
     if not api_key:
-        print("⚠️  OLLAMA_TURBO_API_KEY environment variable not set")
-        print("   To use Ollama Turbo, set: export OLLAMA_TURBO_API_KEY=your_api_key")
+        print("⚠️  OLLAMA_API_KEY environment variable not set")
+        print("   To use Ollama Turbo, set: export OLLAMA_API_KEY=your_api_key")
         return False
     
-    print(f"✅ Found OLLAMA_TURBO_API_KEY: {api_key[:10]}...")
+    print(f"✅ Found OLLAMA_API_KEY: {api_key[:10]}...")
     return True
 
 def create_ollama_turbo_agents():
@@ -113,7 +113,7 @@ def usage_examples():
     """Show usage examples for ollama-turbo"""
     print("💡 Usage Examples:")
     print("\n1. Interactive CLI usage:")
-    print("   OLLAMA_TURBO_API_KEY=your_key PYTHONPATH=src python -m agentsmcp --mode interactive")
+    print("   OLLAMA_API_KEY=your_key PYTHONPATH=src python -m agentsmcp --mode interactive")
     
     print("\n2. Create ollama-turbo agent:")
     print("   User: 'Create a coding agent using ollama-turbo with deepseek-coder'")
@@ -124,7 +124,7 @@ def usage_examples():
     print("   AgentsMCP: Will delegate to cloud Ollama for efficient processing")
     
     print("\n4. Environment setup:")
-    print("   export OLLAMA_TURBO_API_KEY=your_api_key_here")
+    print("   export OLLAMA_API_KEY=your_api_key_here")
     print("   # Now all ollama-turbo agents will have access to cloud models")
 
 def main():
@@ -157,7 +157,7 @@ def main():
     print("\n🔧 Configuration Summary:")
     print("- Provider: ollama-turbo")
     print("- API Base: https://ollama.com")
-    print("- Auth: OLLAMA_TURBO_API_KEY environment variable")
+    print("- Auth: OLLAMA_API_KEY environment variable")
     print("- Models: gpt-oss:120b, gpt-oss:20b (dynamically discovered)")
     print("- Usage: Identical to local Ollama, but requires API key and may have rate limits")
 

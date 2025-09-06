@@ -763,9 +763,9 @@ class OrchestrationManager:
                     "command": "npx", 
                     "args": ["-y", "@anthropic/mcp-ollama-turbo"],
                     "env": {
-                        "OLLAMA_TURBO_HOST": "https://ollama-turbo.anthropic.com",
+                        "OLLAMA_TURBO_HOST": "https://ollama.com",
                         "OLLAMA_TURBO_MODEL": "gpt-oss:120b",
-                        "OLLAMA_TURBO_API_KEY": "${OLLAMA_TURBO_API_KEY}"
+                        "OLLAMA_API_KEY": "${OLLAMA_API_KEY}"
                     }
                 },
                 "github": {
@@ -834,7 +834,7 @@ class OrchestrationManager:
 # Required environment variables:
 # - ANTHROPIC_API_KEY: Your Anthropic API key for Claude
 # - GITHUB_TOKEN: Your GitHub personal access token
-# - OLLAMA_TURBO_API_KEY: Your Ollama Turbo API key (if using)
+# - OLLAMA_API_KEY: Your Ollama API key (if using)
 #
 # Auto-discovered paths:
 # - Node.js: {node_path}

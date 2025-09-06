@@ -278,7 +278,7 @@ def update_config_from_cli_args(**kwargs) -> ApprovalConfig:
 
 # Integration with existing retrospective system
 def integrate_with_retrospective_engine(retrospective_engine, 
-                                      approval_config = None) -> ApprovalOrchestrator:
+                                      approval_config: Optional['ApprovalConfig'] = None) -> ApprovalOrchestrator:
     """Integrate approval system with existing retrospective engine.
     
     Args:

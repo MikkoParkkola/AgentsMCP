@@ -248,7 +248,7 @@ def ollama_list_models(config: ProviderConfig) -> List[Model]:
 def ollama_turbo_list_models(config: ProviderConfig) -> List[Model]:
     """List models from cloud Ollama Turbo service using /api/tags.
 
-    - Requires API key for cloud access via OLLAMA_TURBO_API_KEY env var
+    - Requires API key for cloud access via OLLAMA_API_KEY env var
     - Uses https://ollama.com as default base URL
     - Same API spec as local Ollama but with authentication
     """
@@ -257,7 +257,7 @@ def ollama_turbo_list_models(config: ProviderConfig) -> List[Model]:
     headers = {"Accept": "application/json", **_bearer_headers(config.api_key)}
 
     if not config.api_key:
-        raise ProviderAuthError("Missing Ollama Turbo API key (set OLLAMA_TURBO_API_KEY)")
+        raise ProviderAuthError("Missing Ollama Turbo API key (set OLLAMA_API_KEY)")
 
     try:
         logger.debug("ollama_turbo.list_models.request", url=url)
