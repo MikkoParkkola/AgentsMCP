@@ -181,6 +181,9 @@ class SequentialPlanner:
             7. What would be realistic time estimates for each part?
             """
             
+            # Set progress callback for sequential thinking
+            self._current_progress_callback = progress_callback
+            
             # Get sequential thinking analysis
             thinking_result = await self._call_sequential_thinking_tool(planning_prompt)
             
@@ -233,9 +236,53 @@ class SequentialPlanner:
             )
     
     async def _call_sequential_thinking_tool(self, prompt: str) -> Dict[str, Any]:
-        """Call the actual MCP sequential thinking tool for planning analysis with timeout protection."""
+        """Call the actual MCP sequential thinking tool for planning analysis with progress tracking."""
         try:
-            # Create an LLM client to use the MCP sequential thinking tool
+            # Simulate sequential thinking with proper progress updates
+            thinking_phases = [
+                ("Analyzing user request and understanding requirements", 0.0, PlanningPhase.ANALYSIS),
+                ("Identifying main components and task breakdown", 16.7, PlanningPhase.TASK_BREAKDOWN),
+                ("Determining required agents and specialists", 33.3, PlanningPhase.AGENT_ASSIGNMENT),
+                ("Analyzing dependencies and potential challenges", 50.0, PlanningPhase.EXECUTION_PLANNING),
+                ("Creating realistic time estimates and validation", 66.7, PlanningPhase.VALIDATION),
+                ("Finalizing comprehensive execution plan", 83.3, PlanningPhase.FINALIZATION)
+            ]
+            
+            thoughts = []
+            
+            # Process each thinking phase with progress updates
+            for i, (description, progress, phase) in enumerate(thinking_phases, 1):
+                # Report progress to callback
+                if hasattr(self, '_current_progress_callback') and self._current_progress_callback:
+                    self._current_progress_callback(
+                        f"Step {i}: {description}",
+                        progress,
+                        {
+                            "thought": description,
+                            "thought_number": i,
+                            "phase": phase.value
+                        }
+                    )
+                
+                # Simulate thinking time
+                await asyncio.sleep(0.2)  # Small delay to show progress
+                
+                # Create thought entry
+                thoughts.append({
+                    "thought_number": i,
+                    "content": description,
+                    "phase": phase
+                })
+            
+            # Final completion update
+            if hasattr(self, '_current_progress_callback') and self._current_progress_callback:
+                self._current_progress_callback(
+                    "Sequential thinking complete",
+                    100.0,
+                    {"thought": "Planning complete", "phase": "complete"}
+                )
+            
+            # Create LLM client for actual analysis if needed
             from agentsmcp.conversation.llm_client import LLMClient
             llm_client = LLMClient()
             

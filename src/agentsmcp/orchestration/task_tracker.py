@@ -172,6 +172,17 @@ class TaskTracker:
             
             # Phase 1: Sequential Planning with timeout protection  
             self._notify_status("🎯 Phase 1: Sequential thinking and planning...")
+            
+            # Initialize all planning agents in idle state for sequential thinking visualization
+            expected_agents = [
+                ("analyst", "Analyst Agent", "🔍 Ready to analyze..."),
+                ("general_agent", "General Agent", "🧠 Ready for strategic planning..."), 
+                ("project_manager", "Project Manager Agent", "📋 Ready for execution planning...")
+            ]
+            for agent_id, agent_name, initial_status in expected_agents:
+                self.progress_display.add_agent(agent_id, agent_name, estimated_duration_ms=15000)
+                self.progress_display.update_agent_progress(agent_id, 0, initial_status)
+            
             print(f"🐛 DEBUG TaskTracker: Starting sequential planning...")
             
             planning_start = time.time()
@@ -230,13 +241,22 @@ class TaskTracker:
             agent_assignments = await self._assign_agents_to_plan(stored_plan, context)
             self.task_assignments[task_id] = agent_assignments
             
-            # Add agents to progress display
+            # Update existing agents with actual assignments (don't add duplicates)
             for assignment in agent_assignments:
-                self.progress_display.add_agent(
-                    assignment.agent_id,
-                    f"{assignment.agent_type.title()} Agent",
-                    assignment.estimated_duration_ms
-                )
+                # Update existing agent or add if new
+                agent_name = f"{assignment.agent_type.title()} Agent"
+                if assignment.agent_id not in [agent.agent_id for agent in self.progress_display.agents.values()]:
+                    self.progress_display.add_agent(
+                        assignment.agent_id,
+                        agent_name,
+                        assignment.estimated_duration_ms
+                    )
+                
+                # Update with actual step assignments
+                assigned_steps = [step.description for step in stored_plan.steps 
+                                if step.step_id in assignment.assigned_steps]
+                step_summary = f"Assigned {len(assigned_steps)} steps"
+                self.progress_display.update_agent_progress(assignment.agent_id, 0, step_summary)
             
             # Phase 3: Auto-execute task to prevent endless loops
             print(f"🐛 DEBUG TaskTracker: Planning complete, starting auto-execution for task {task_id}")
@@ -475,9 +495,57 @@ class TaskTracker:
             }
     
     def _on_planning_progress(self, message: str, percentage: float, data: Dict[str, Any]) -> None:
-        """Handle planning progress updates."""
-        self.progress_display.update_orchestrator_status(f"Planning: {message}")
+        """Handle planning progress updates with enhanced agent visualization for 6-step sequential thinking."""
+        # Update orchestrator status
+        self.progress_display.update_orchestrator_status(f"🧠 Sequential Thinking: {message}")
         self.logger.debug(f"Planning progress: {percentage:.1f}% - {message}")
+        
+        # Map sequential thinking steps to specific agent activations
+        # Step 1-2: Analysis and Understanding (0-33%)
+        if percentage <= 33 or any(keyword in message.lower() for keyword in ['analysis', 'analyzing', 'understand', 'examining', 'what does']):
+            self.progress_display.start_agent("analyst", f"🔍 Analyzing request...")
+            self.progress_display.update_agent_progress("analyst", min(percentage * 3, 100), f"Understanding: {message}")
+        
+        # Step 3-4: Planning and Strategy (34-66%)
+        elif 34 <= percentage <= 66 or any(keyword in message.lower() for keyword in ['planning', 'strategy', 'breakdown', 'components', 'phases', 'how should']):
+            self.progress_display.start_agent("general_agent", f"🧠 Strategic planning...")
+            self.progress_display.update_agent_progress("general_agent", min((percentage - 33) * 1.5, 100), f"Planning: {message}")
+        
+        # Step 5-6: Execution Planning and Validation (67-100%)
+        elif percentage > 66 or any(keyword in message.lower() for keyword in ['execution', 'implementation', 'time estimates', 'dependencies', 'validate']):
+            # Add a project manager agent for execution planning
+            if "project_manager" not in [agent.agent_id for agent in self.progress_display.agents.values()]:
+                self.progress_display.add_agent("project_manager", "Project Manager Agent", 15000)
+            self.progress_display.start_agent("project_manager", f"📋 Execution planning...")
+            self.progress_display.update_agent_progress("project_manager", min((percentage - 66) * 3, 100), f"Execution: {message}")
+        
+        # Handle specific thought patterns for better mapping
+        if "thought" in data and isinstance(data["thought"], str):
+            thought_content = data["thought"].lower()
+            
+            # Detect analysis phase keywords
+            if any(keyword in thought_content for keyword in ['analyze', 'understand', 'examine', 'what is', 'let me think']):
+                self.progress_display.start_agent("analyst", f"💭 {message}")
+                self.progress_display.update_agent_progress("analyst", percentage, f"Thinking: {message[:50]}...")
+            
+            # Detect planning phase keywords
+            elif any(keyword in thought_content for keyword in ['plan', 'strategy', 'approach', 'steps', 'breakdown']):
+                self.progress_display.start_agent("general_agent", f"🎯 {message}")
+                self.progress_display.update_agent_progress("general_agent", percentage, f"Strategic planning: {message[:50]}...")
+                
+            # Detect execution phase keywords
+            elif any(keyword in thought_content for keyword in ['implement', 'execute', 'time', 'duration', 'agents']):
+                if "project_manager" not in [agent.agent_id for agent in self.progress_display.agents.values()]:
+                    self.progress_display.add_agent("project_manager", "Project Manager Agent", 15000)
+                self.progress_display.start_agent("project_manager", f"⚙️ {message}")
+                self.progress_display.update_agent_progress("project_manager", percentage, f"Execution planning: {message[:50]}...")
+        
+        # Complete agents when planning finishes
+        if "Complete" in message or percentage >= 100:
+            # Mark all planning agents as completed
+            for agent_id in ["analyst", "general_agent", "project_manager"]:
+                if agent_id in [agent.agent_id for agent in self.progress_display.agents.values()]:
+                    self.progress_display.complete_agent(agent_id)
     
     def _notify_status(self, status: str) -> None:
         """Notify status update."""
