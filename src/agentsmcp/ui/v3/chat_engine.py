@@ -40,6 +40,7 @@ class ChatState:
     messages: List[ChatMessage] = field(default_factory=list)
     is_processing: bool = False
     last_error: Optional[str] = None
+    feature_showcase_displayed: bool = False
     session_id: str = field(default_factory=lambda: f"session_{int(time.time())}")
     
     def add_message(self, role: MessageRole, content: str, **metadata) -> ChatMessage:
@@ -147,6 +148,9 @@ class ChatEngine:
     def _display_feature_showcase(self, showcase_message: str) -> None:
         """Display feature showcase with Rich formatting via special system message."""
         try:
+            # Set the flag to prevent further LLM processing
+            self.state.feature_showcase_displayed = True
+            
             # Create a special system message for the showcase
             showcase_chat_message = ChatMessage(
                 role=MessageRole.SYSTEM, 
@@ -245,104 +249,114 @@ class ChatEngine:
                         has_recent_orchestration = True
                         break
         
-        # Enhanced routing logic
-        if word_count <= 4:
+        # Optimized routing logic - favor direct routing for better performance
+        if word_count <= 6:  # Increased from 4 to 6 - more prompts go direct
             if is_follow_up and has_recent_orchestration:
                 # Force orchestration for follow-up requests with recent context
                 route = "preprocessed"
                 self.logger.info(f"Context-aware routing: '{cleaned_input}' routed to orchestration (follow-up detected)")
             else:
-                # Standard direct routing for simple standalone requests
+                # Aggressive direct routing for better performance
                 route = "direct"
         else:
-            # Standard preprocessed routing for longer inputs
+            # Preprocessed routing for longer inputs
             route = "preprocessed"
             
         return route, word_count
     
     async def _handle_direct_llm(self, user_input: str) -> str:
         """Direct LLM call for short inputs - no preprocessing, no task tracking."""
-        if self._llm_client:
-            # Temporarily disable preprocessing for direct path
-            original_preprocessing = getattr(self._llm_client, 'preprocessing_enabled', True)
-            self._llm_client.preprocessing_enabled = False
-            
-            try:
-                self._notify_status("🤖 Generating direct response...")
-                response = await self._llm_client.send_message(user_input)
-                return response
-            finally:
-                # Restore original preprocessing setting
-                self._llm_client.preprocessing_enabled = original_preprocessing
-        return "LLM client not available"
+        if not self._llm_client:
+            return "❌ **LLM client not available**\n\nPlease check your configuration and try again."
+        
+        # Temporarily disable preprocessing for direct path
+        original_preprocessing = getattr(self._llm_client, 'preprocessing_enabled', True)
+        self._llm_client.preprocessing_enabled = False
+        
+        try:
+            self._notify_status("🤖 Generating direct response...")
+            response = await self._llm_client.send_message(user_input)
+            if not response or not response.strip():
+                return f"❌ **No response generated**\n\nThe LLM returned an empty response for: '{user_input}'\n\nTry rephrasing your request or use a longer, more descriptive prompt."
+            return response
+        except Exception as e:
+            self.logger.error(f"Direct LLM call failed: {e}")
+            return f"❌ **LLM call failed**\n\nError: {str(e)}\n\nTry again or use '/status' to check system status."
+        finally:
+            # Restore original preprocessing setting
+            self._llm_client.preprocessing_enabled = original_preprocessing
     
     async def _handle_preprocessed_llm(self, user_input: str) -> str:
-        """Preprocessed LLM call for longer inputs - full enhancement pipeline with sequential thinking and agent delegation."""
+        """Preprocessed LLM call for longer inputs - enhanced pipeline with sequential thinking and context."""
         if not self._llm_client:
-            return "LLM client not available"
+            return "❌ **LLM client not available**\n\nPlease check your configuration and try again."
             
         try:
-            # STEP 3: Re-enable TaskTracker with debug logging to trace sequential thinking issues
-            overall_task_id = f"preprocessed_{int(time.time())}"
-            if self.task_tracker:
-                print(f"🐛 DEBUG: About to call TaskTracker.start_task() - this may trigger endless loop")
-                await self.task_tracker.start_task(
-                    user_input,
-                    context={"complexity": "medium", "task_type": "enhanced_processing", "task_id": overall_task_id},
-                    estimated_duration_ms=45000
-                )
-                print(f"🐛 DEBUG: TaskTracker.start_task() completed successfully")
+            # Phase 0 feature detection already completed in main chat handler
+            # Now add sequential thinking for complex requests
             
-            # Phase 1: Step 3 testing - sequential thinking re-enabled with debug logging
-            self._notify_status("🧠 Step 3: Sequential thinking re-enabled with debug logging...")
+            word_count = len(user_input.split())
             
-            # Get conversation context
-            history_context = self._get_conversation_context()
-            directory_context = self._get_directory_context()
-            
-            # Skip MCP sequential thinking for Step 1 - use simple planning result
-            planning_result = "Basic planning: This is a product assessment request that should trigger agent coordination."
-            
-            # Phase 2: Agent delegation and orchestration
-            self._notify_status("🎯 Delegating to specialist agents...")
-            
-            # Analyze query for agent delegation opportunities
-            agent_delegation_result = await self._delegate_to_agents(user_input, planning_result, history_context, directory_context)
-            
-            # Phase 3: Execute planned approach with context and agent insights
-            self._notify_status("🚀 Executing enhanced response with agent coordination...")
-            
-            # STEP 2: Enable preprocessing while keeping sequential thinking disabled
-            # Keep preprocessing enabled (don't disable it)
-            
-            try:
-                # Create enhanced prompt with planning context and agent delegation results
-                enhanced_prompt = self._create_enhanced_prompt_with_agents(user_input, planning_result, agent_delegation_result, history_context, directory_context)
-                response = await self._llm_client.send_message(enhanced_prompt)
+            # Use sequential thinking for complex requests (>10 words)
+            if word_count > 10 and self.task_tracker:
+                self._notify_status("🧠 Using sequential thinking + preprocessing pipeline...")
                 
-                # STEP 4 FIX: Complete task tracking to stop the endless status update loop
-                if self.task_tracker and self.task_tracker.progress_display:
-                    self.task_tracker.progress_display.complete_task()
+                # Create lightweight task for sequential thinking
+                overall_task_id = f"preprocessed_{int(time.time())}"
                 
+                try:
+                    # Start task - let it use internal timeouts for proper sequential thinking
+                    task_id = await self.task_tracker.start_task(
+                        user_input,
+                        context={"complexity": "medium", "task_type": "enhanced_processing", "task_id": overall_task_id},
+                        estimated_duration_ms=45000  # Allow full sequential thinking time
+                    )
+                    
+                    # Sequential thinking completed, now use enhanced preprocessing
+                    self._notify_status("🚀 Executing with sequential planning + preprocessing...")
+                    
+                    # Complete task tracking
+                    if self.task_tracker and self.task_tracker.progress_display:
+                        self.task_tracker.progress_display.complete_task()
+                    
+                    # Use the LLMClient for preprocessing with enhanced context
+                    response = await self._llm_client.send_message(user_input)
+                    if not response or not response.strip():
+                        return f"❌ **No response generated**\n\nThe sequential thinking pipeline returned an empty response for: '{user_input}'\n\nTry rephrasing your request or using simpler language."
+                    return response
+                    
+                except (asyncio.TimeoutError, Exception) as e:
+                    # Sequential thinking failed or timed out - fall back to preprocessing only
+                    self.logger.warning(f"Sequential thinking failed: {e} - falling back to preprocessing only")
+                    self._notify_status("⚡ Sequential thinking incomplete - using preprocessing only...")
+                    response = await self._llm_client.send_message(user_input)
+                    if not response or not response.strip():
+                        return f"❌ **No response generated**\n\nThe preprocessing pipeline returned an empty response for: '{user_input}'\n\nTry rephrasing your request or using simpler language."
+                    return response
+                    
+            else:
+                # For simpler requests, just use enhanced preprocessing
+                self._notify_status("🧠 Using enhanced preprocessing pipeline...")
+                response = await self._llm_client.send_message(user_input)
+                if not response or not response.strip():
+                    return f"❌ **No response generated**\n\nThe preprocessing pipeline returned an empty response for: '{user_input}'\n\nTry rephrasing your request or using simpler language."
                 return response
-            finally:
-                # STEP 2: Preprocessing stays enabled (no restoration needed)
-                # Also ensure task completion in case of early returns
-                if self.task_tracker and self.task_tracker.progress_display:
-                    self.task_tracker.progress_display.complete_task()
                 
         except Exception as e:
             import traceback
             self.logger.error(f"Error in preprocessed LLM handling: {e}")
             self.logger.error(f"Full traceback: {traceback.format_exc()}")
             
-            # STEP 4 FIX: Ensure task completion even on exception paths to stop endless loop
+            # Ensure task completion even on exception
             if self.task_tracker and self.task_tracker.progress_display:
                 self.task_tracker.progress_display.complete_task()
             
             # Fallback to simple LLM call
             self._notify_status("⚠️ Falling back to direct response...")
-            return await self._handle_direct_llm(user_input)
+            fallback_response = await self._handle_direct_llm(user_input)
+            if not fallback_response or not fallback_response.strip():
+                return f"❌ **System Error**\n\nBoth the preprocessing pipeline and direct LLM failed for: '{user_input}'\n\nOriginal error: {str(e)}\n\nTry '/status' to check system health or restart the application."
+            return f"⚠️ **Preprocessing Failed - Using Fallback**\n\nOriginal error: {str(e)}\n\n---\n\n{fallback_response}"
 
     def _get_conversation_context(self) -> str:
         """Get recent conversation history for context."""
@@ -871,8 +885,54 @@ Response:"""
             return user_input  # Fallback to original input
     
     async def _handle_chat_message(self, user_input: str) -> bool:
-        """Simplified message handler - route by word count, always call LLM."""
+        """Simplified message handler - check feature detection first, then route by word count."""
+        # Performance tracking
+        start_time = time.time()
         try:
+            # PHASE -1: Check for common commands without slash prefix
+            single_word = user_input.strip().lower()
+            common_commands = {
+                'status': '/status',
+                'settings': '/config', 
+                'config': '/config',
+                'help': '/help'
+            }
+            
+            if single_word in common_commands:
+                self.logger.info(f"Converting bare command '{single_word}' to '{common_commands[single_word]}'")
+                return await self._handle_command(common_commands[single_word])
+            
+            # PHASE 0: Check for existing features ONLY for implementation-related requests (performance optimization)
+            # Skip feature detection for simple conversational prompts to improve response time
+            user_lower = user_input.lower()
+            feature_detection_keywords = ['add', 'create', 'implement', 'build', 'generate', '--', 'flag', 'option', 'command']
+            should_check_features = any(keyword in user_lower for keyword in feature_detection_keywords)
+            
+            if should_check_features:
+                self.logger.info(f"Phase 0: Checking for existing features for input: '{user_input}'")
+                try:
+                    feature_detection_result = await self.task_tracker.feature_detector.detect_cli_feature(user_input)
+                    if feature_detection_result.exists:
+                        self.logger.info(f"Feature detected: {feature_detection_result.feature_type} - displaying showcase")
+                        
+                        # Generate and display feature showcase
+                        showcase = await self.task_tracker.feature_detector.generate_feature_showcase(feature_detection_result)
+                        if showcase:
+                            # Display the feature showcase using FEATURE_SHOWCASE_FORMAT prefix
+                            showcase_message = self.state.add_message(MessageRole.SYSTEM, f"FEATURE_SHOWCASE_FORMAT:{showcase}")
+                            self._notify_message(showcase_message)
+                            
+                            # Set flag to prevent any LLM processing
+                            self.state.feature_showcase_displayed = True
+                            self.logger.info("Feature showcase displayed - skipping LLM processing")
+                            return True  # Exit early, feature already exists
+                    else:
+                        self.logger.info("No existing feature detected - proceeding with normal processing")
+                except Exception as e:
+                    self.logger.warning(f"Feature detection failed: {e} - proceeding with normal processing")
+            else:
+                self.logger.debug(f"Skipping feature detection for conversational prompt: '{user_input}'")
+            
             # Simple routing decision  
             route, word_count = self._route_input(user_input)
             
@@ -894,6 +954,12 @@ Response:"""
                     "percentage": usage.percentage
                 }
             )
+            
+            # Check if feature showcase was displayed and skip LLM processing
+            if self.state.feature_showcase_displayed:
+                self.state.feature_showcase_displayed = False  # Reset for next interaction
+                self.logger.info("Skipping LLM processing - feature showcase was displayed")
+                return True  # Continue chat session but skip LLM
             
             # Route to appropriate LLM handler
             if route == "direct":
@@ -923,10 +989,14 @@ Response:"""
                 ai_message = self.state.add_message(MessageRole.ASSISTANT, error_response)
                 self._notify_message(ai_message)
             
+            # Performance logging
+            total_time = time.time() - start_time
+            self.logger.info(f"Message processed in {total_time:.2f}s: '{user_input[:50]}...'")
             return True
             
         except Exception as e:
-            self.logger.error(f"Error processing message: {e}")
+            total_time = time.time() - start_time
+            self.logger.error(f"Error processing message in {total_time:.2f}s: {e}")
             error_message = f"⚠️ Error: {str(e)}"
             ai_message = self.state.add_message(MessageRole.ASSISTANT, error_message)
             self._notify_message(ai_message)

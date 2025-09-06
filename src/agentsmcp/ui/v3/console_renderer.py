@@ -103,10 +103,6 @@ class ConsoleRenderer(UIRenderer):
             if self.state.is_processing:
                 return None
             
-            # Simple Rich-styled prompt
-            if self.console:
-                self.console.print("💬 [yellow]>[/yellow] ", end="")
-            
             try:
                 # Get input with readline support for basic history/editing
                 import readline
@@ -119,7 +115,10 @@ class ConsoleRenderer(UIRenderer):
                 for item in self._input_history[-50:]:  # Last 50 items for performance
                     readline.add_history(item)
                 
-                user_input = input().strip()
+                # Add timestamp to prompt
+                import datetime
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                user_input = input(f"{timestamp} 💬 > ").strip()
                 
                 # Add to our history if not empty and different from last
                 if user_input and (not self._input_history or self._input_history[-1] != user_input):

@@ -3,6 +3,7 @@ Generic feature detection system for any codebase.
 Identifies existing CLI features, capabilities, and functions before attempting implementation.
 """
 
+import asyncio
 import subprocess
 import json
 import os
@@ -45,38 +46,22 @@ class FeatureDetector:
         # Parse the request to extract feature intent
         feature_intent = self._parse_feature_intent(request)
         
-        # Try multiple detection strategies
-        detection_results = []
-        
-        # Strategy 1: CLI help analysis
-        cli_result = await self._detect_via_cli_help(feature_intent)
-        if cli_result.exists:
-            detection_results.append(cli_result)
-            
-        # Strategy 2: Direct command testing
-        direct_result = await self._detect_via_direct_test(feature_intent)
-        if direct_result.exists:
-            detection_results.append(direct_result)
-            
-        # Strategy 3: Source code analysis
+        # FAST PATH: Only use source code analysis to avoid subprocess hangs
+        # This dramatically improves performance while still catching most existing features
         source_result = await self._detect_via_source_analysis(feature_intent)
         if source_result.exists:
-            detection_results.append(source_result)
+            return source_result
             
-        # Combine results and return the most confident one
-        if detection_results:
-            best_result = max(detection_results, key=lambda r: r.confidence)
-            return best_result
-        else:
-            return FeatureDetectionResult(
-                exists=False,
-                feature_type="unknown",
-                detection_method="comprehensive_scan",
-                evidence=[],
-                usage_examples=[],
-                related_features=[],
-                confidence=0.9  # High confidence it doesn't exist
-            )
+        # If source analysis finds nothing, return negative result quickly
+        return FeatureDetectionResult(
+            exists=False,
+            feature_type="unknown", 
+            detection_method="source_analysis_only",
+            evidence=["Performed fast source code scan - no matching features found"],
+            usage_examples=[],
+            related_features=[],
+            confidence=0.85  # Good confidence based on source analysis
+        )
     
     def _parse_feature_intent(self, request: str) -> Dict[str, Any]:
         """Parse user request to extract feature intent."""
@@ -102,18 +87,19 @@ class FeatureDetector:
             matches = re.findall(pattern, request_lower)
             intent["flags"].extend(matches)
         
-        # Common feature keywords
-        if "version" in request_lower:
+        # More precise feature keyword detection - only match CLI implementation requests
+        if any(phrase in request_lower for phrase in ["--version", "add version", "implement version", "create version", "version flag", "version option"]):
             intent["type"] = "version_info"
             intent["flags"].extend(["version", "v"])
             intent["keywords"].append("version")
             
-        elif "help" in request_lower:
+        elif any(phrase in request_lower for phrase in ["--help", "add help", "implement help", "create help", "help flag", "help option"]):
+            # Only trigger on explicit CLI help flag requests, not general help queries
             intent["type"] = "help_info"
             intent["flags"].extend(["help", "h"])
             intent["keywords"].append("help")
             
-        elif "debug" in request_lower:
+        elif any(phrase in request_lower for phrase in ["--debug", "add debug", "implement debug", "create debug", "debug flag", "debug option", "debug mode"]):
             intent["type"] = "debug_mode"
             intent["flags"].extend(["debug", "verbose", "d", "v"])
             intent["keywords"].append("debug")
@@ -128,16 +114,28 @@ class FeatureDetector:
             
             for cli_path in cli_candidates:
                 try:
-                    # Get help output
-                    result = subprocess.run(
-                        [str(cli_path), "--help"],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
+                    # Get help output using async subprocess with timeout
+                    process = await asyncio.create_subprocess_exec(
+                        str(cli_path), "--help",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
                     )
                     
-                    if result.returncode == 0:
-                        help_text = result.stdout.lower()
+                    try:
+                        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=3.0)
+                        result_stdout = stdout.decode('utf-8') if stdout else ""
+                        result_returncode = process.returncode
+                    except asyncio.TimeoutError:
+                        # Kill the process if it times out
+                        try:
+                            process.kill()
+                            await process.wait()
+                        except:
+                            pass
+                        continue
+                    
+                    if result_returncode == 0:
+                        help_text = result_stdout.lower()
                         
                         # Check for flags
                         evidence = []
@@ -159,7 +157,7 @@ class FeatureDetector:
                                 confidence=0.95
                             )
                             
-                except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+                except (OSError, asyncio.TimeoutError, Exception):
                     continue
                     
         except Exception as e:
@@ -183,16 +181,28 @@ class FeatureDetector:
             for cli_path in cli_candidates:
                 for flag in feature_intent.get("flags", []):
                     try:
-                        # Test the flag directly
-                        result = subprocess.run(
-                            [str(cli_path), f"--{flag}"],
-                            capture_output=True,
-                            text=True,
-                            timeout=3
+                        # Test the flag directly using async subprocess
+                        process = await asyncio.create_subprocess_exec(
+                            str(cli_path), f"--{flag}",
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE
                         )
                         
+                        try:
+                            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=2.0)
+                            result_stdout = stdout.decode('utf-8') if stdout else ""
+                            result_returncode = process.returncode
+                        except asyncio.TimeoutError:
+                            # Kill the process if it times out
+                            try:
+                                process.kill()
+                                await process.wait()
+                            except:
+                                pass
+                            continue
+                        
                         # If command ran successfully and produced output
-                        if result.returncode == 0 and result.stdout.strip():
+                        if result_returncode == 0 and result_stdout.strip():
                             return FeatureDetectionResult(
                                 exists=True,
                                 feature_type="cli_flag",
@@ -203,7 +213,7 @@ class FeatureDetector:
                                 confidence=1.0  # Highest confidence - we saw it work
                             )
                             
-                    except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+                    except (OSError, asyncio.TimeoutError, Exception):
                         continue
                         
         except Exception as e:

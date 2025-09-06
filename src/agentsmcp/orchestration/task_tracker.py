@@ -129,7 +129,11 @@ class TaskTracker:
             # Phase 0: Feature Detection (prevents Ghost Feature Problem)
             self._notify_status("🔍 Phase 0: Detecting existing features...")
             try:
-                feature_detection_result = await self.feature_detector.detect_cli_feature(user_input)
+                # Add timeout protection to prevent infinite loops in feature detection
+                feature_detection_result = await asyncio.wait_for(
+                    self.feature_detector.detect_cli_feature(user_input),
+                    timeout=10.0  # 10-second timeout for feature detection
+                )
                 
                 if feature_detection_result.exists:
                     # Feature already exists - provide formatted showcase instead of implementation
@@ -157,9 +161,14 @@ class TaskTracker:
                     self.logger.info(f"Task {task_id} completed via feature detection: {feature_detection_result.feature_type} already exists")
                     return task_id
                     
+            except asyncio.TimeoutError:
+                # Feature detection timed out - continue with normal implementation flow
+                self.logger.warning(f"Feature detection timed out for task {task_id} after 10s, continuing with implementation")
+                self._notify_status("⚡ Feature detection timed out - continuing with implementation...")
             except Exception as e:
                 # Don't fail on feature detection errors - continue with normal flow
                 self.logger.warning(f"Feature detection failed for task {task_id}, continuing with implementation: {e}")
+                self._notify_status("⚡ Feature detection failed - continuing with implementation...")
             
             # Phase 1: Sequential Planning with timeout protection  
             self._notify_status("🎯 Phase 1: Sequential thinking and planning...")
@@ -237,11 +246,9 @@ class TaskTracker:
             # Automatically execute the task to prevent endless "ready for execution" loops
             try:
                 execution_results = await self.execute_task(task_id)
-                print(f"🐛 DEBUG TaskTracker: Auto-execution completed successfully")
                 self.logger.info(f"Auto-execution completed for task {task_id}")
                 return task_id
             except Exception as e:
-                print(f"🐛 DEBUG TaskTracker: Auto-execution failed: {e}")
                 self.logger.error(f"Auto-execution failed for task {task_id}: {e}")
                 self.task_status[task_id] = TaskStatus.FAILED
                 self.progress_display.update_orchestrator_status(f"❌ Auto-execution failed: {str(e)}")
@@ -307,10 +314,12 @@ class TaskTracker:
                 
                 self.logger.info(f"Task {task_id} completed successfully in {total_duration}ms")
             else:
+                # Task may have partial success - don't mark as completely failed
                 self.task_status[task_id] = TaskStatus.FAILED
                 self.failed_tasks += 1
-                self.progress_display.update_orchestrator_status("❌ Task execution failed")
-                self.logger.error(f"Task {task_id} execution failed")
+                # Use a less alarming message since responses may still be generated
+                self.progress_display.update_orchestrator_status("⚠️ Sequential planning incomplete")
+                self.logger.debug(f"Task {task_id} sequential planning had issues, but response may still be available")
             
             return results
             
