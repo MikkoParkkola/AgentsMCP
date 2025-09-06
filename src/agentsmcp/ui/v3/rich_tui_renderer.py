@@ -324,6 +324,52 @@ class RichTUIRenderer(UIRenderer):
             Panel(footer_text, style="dim", padding=(0, 1), height=1)
         )
 
+    def _get_multiline_input(self, prompt: str) -> str:
+        """Get user input with multi-line paste support like Claude Code CLI."""
+        import datetime
+        timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+        
+        # Get initial input
+        user_input = input(f"{timestamp} {prompt}").strip()
+        
+        if not user_input:
+            return user_input
+            
+        # Check for multi-line input indicators
+        lines = [user_input]
+        continuation_triggers = [',', '.', 'and', ':', ';', ')', '}', ']', 'focusing on', 'include', 'with', 'then', 'also', 'but', 'however']
+        needs_continuation = (
+            len(user_input) > 80 or  # Lowered threshold for better detection
+            any(user_input.strip().endswith(trigger) for trigger in continuation_triggers) or
+            user_input.count('(') > user_input.count(')') or  # Unbalanced parens
+            user_input.count('[') > user_input.count(']') or  # Unbalanced brackets
+            user_input.count('{') > user_input.count('}') or  # Unbalanced braces
+            len(user_input.split()) > 15 or  # Long sentence likely to continue
+            user_input.endswith('\\')  # Explicit continuation character
+        )
+        
+        while needs_continuation and len(lines) < 15:  # Allow more lines
+            try:
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                continuation = input(f"{timestamp} ... ").strip()
+                if not continuation:  # Empty line signals end
+                    break
+                lines.append(continuation)
+                
+                # Re-evaluate if we still need continuation
+                needs_continuation = (
+                    continuation.endswith(',') or continuation.endswith('and') or 
+                    continuation.endswith(':') or continuation.endswith(';') or
+                    continuation.endswith('\\') or len(continuation.split()) > 15 or
+                    continuation.count('(') > continuation.count(')') or
+                    continuation.count('[') > continuation.count(']') or
+                    continuation.count('{') > continuation.count('}')
+                )
+            except (EOFError, KeyboardInterrupt):
+                break
+        
+        return " ".join(lines)
+
     def cleanup(self) -> None:
         """PHASE 3: Cleanup with Live display management."""
         if self._cleanup_called:
@@ -394,56 +440,19 @@ class RichTUIRenderer(UIRenderer):
                             try:
                                 import select
                                 import sys
-                                import datetime
                                 
                                 # Check if input is available with timeout
                                 if select.select([sys.stdin], [], [], 0.1)[0]:
-                                    timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                                    user_input = input(f"{timestamp} 💬 > ").strip()
+                                    user_input = self._get_multiline_input("💬 > ")
                                 else:
                                     # No immediate input available, return None to continue display
                                     return None
                             except (ImportError, OSError):
                                 # Fallback to blocking input if select not available
-                                import datetime
-                                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                                user_input = input(f"{timestamp} 💬 > ").strip()
+                                user_input = self._get_multiline_input("💬 > ")
                         else:
                             # Standard blocking input with multi-line support
-                            import datetime
-                            timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                            
-                            # Check for multi-line input (like Claude Code CLI)
-                            user_input = input(f"{timestamp} 💬 > ").strip()
-                            
-                            # If input seems incomplete (very long, ends with punctuation, or incomplete syntax), allow continuation  
-                            lines = [user_input]
-                            continuation_triggers = [',', '.', 'and', ':', ';', ')', '}', ']', 'focusing on', 'include', 'with']
-                            needs_continuation = (
-                                len(user_input) > 100 or  # Lowered threshold for better detection
-                                any(user_input.strip().endswith(trigger) for trigger in continuation_triggers) or
-                                user_input.count('(') > user_input.count(')') or  # Unbalanced parens
-                                user_input.count('[') > user_input.count(']') or  # Unbalanced brackets
-                                len(user_input.split()) > 20  # Long sentence likely to continue
-                            )
-                            
-                            while needs_continuation and len(lines) < 10:
-                                try:
-                                    continuation = input("... ").strip()
-                                    if not continuation:  # Empty line signals end
-                                        break
-                                    lines.append(continuation)
-                                    user_input = " ".join(lines)
-                                    
-                                    # Re-evaluate if we still need continuation
-                                    needs_continuation = (
-                                        continuation.endswith(',') or continuation.endswith('and') or 
-                                        continuation.endswith(':') or len(continuation.split()) > 15
-                                    )
-                                except (EOFError, KeyboardInterrupt):
-                                    break
-                            
-                            user_input = " ".join(lines)
+                            user_input = self._get_multiline_input("💬 > ")
                         
                     except ImportError:
                         # Fallback without readline
@@ -452,21 +461,15 @@ class RichTUIRenderer(UIRenderer):
                             try:
                                 import select
                                 import sys
-                                import datetime
                                 
                                 if select.select([sys.stdin], [], [], 0.1)[0]:
-                                    timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                                    user_input = input(f"{timestamp} 💬 > ").strip()
+                                    user_input = self._get_multiline_input("💬 > ")
                                 else:
                                     return None
                             except (ImportError, OSError):
-                                import datetime
-                                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                                user_input = input(f"{timestamp} 💬 > ").strip()
+                                user_input = self._get_multiline_input("💬 > ")
                         else:
-                            import datetime
-                            timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                            user_input = input(f"{timestamp} 💬 > ").strip()
+                            user_input = self._get_multiline_input("💬 > ")
                     
                     # Add to history
                     if user_input and (not self._input_history or self._input_history[-1] != user_input):
@@ -514,10 +517,8 @@ class RichTUIRenderer(UIRenderer):
                     except ImportError:
                         pass
                     
-                    # Add timestamp to user input prompt
-                    import datetime
-                    timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                    user_input = input(f"{timestamp} 💬 > ").strip()
+                    # Use centralized multi-line input method
+                    user_input = self._get_multiline_input("💬 > ")
                     
                     # Add to history
                     if user_input and (not self._input_history or self._input_history[-1] != user_input):

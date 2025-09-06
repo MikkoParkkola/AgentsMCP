@@ -271,20 +271,23 @@ class ProgressDisplay:
                 self.task_timing.add_phase(phase_name)
     
     def format_progress_display(self, include_timing: bool = True) -> str:
-        """Format the complete progress display."""
+        """Format the complete progress display with timestamps."""
+        import datetime
+        
         with self.lock:
             lines = []
+            timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
             
             # Task timing information
             if self.task_timing and include_timing:
                 elapsed = self.task_timing.format_elapsed()
                 remaining = self.task_timing.format_estimated_remaining()
-                lines.append(f"⏱️  Total Task Duration: {elapsed}")
+                lines.append(f"{timestamp} ⏱️  Total Task Duration: {elapsed}")
                 if self.is_running and self.task_timing.estimated_remaining_ms > 0:
-                    lines.append(f"📅 Estimated Remaining: {remaining}")
+                    lines.append(f"{timestamp} 📅 Estimated Remaining: {remaining}")
             
             # Orchestrator status
-            lines.append(f"🎯 Orchestrator: {self.orchestrator_status}")
+            lines.append(f"{timestamp} 🎯 Orchestrator: {self.orchestrator_status}")
             
             # Agent progress bars
             if self.agents:
@@ -294,7 +297,7 @@ class ProgressDisplay:
                     icon = agent.format_status_icon()
                     percentage = f"{agent.progress_percentage:.0f}%"
                     
-                    agent_line = f"{icon} {agent.agent_name:<15} {progress_bar} {percentage:>4}"
+                    agent_line = f"{timestamp} {icon} {agent.agent_name:<15} {progress_bar} {percentage:>4}"
                     
                     if agent.current_step:
                         step_display = agent.current_step[:30] + "..." if len(agent.current_step) > 30 else agent.current_step
@@ -318,14 +321,17 @@ class ProgressDisplay:
             return "\n".join(lines)
     
     def format_status_line(self) -> str:
-        """Format a compact status line for status bars."""
+        """Format a compact status line for status bars with timestamps."""
+        import datetime
+        
         with self.lock:
+            timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
             active_agents = sum(1 for a in self.agents.values() 
                               if a.status in [AgentStatus.IN_PROGRESS, AgentStatus.PLANNING])
             completed_agents = sum(1 for a in self.agents.values() 
                                  if a.status == AgentStatus.COMPLETED)
             
-            status_parts = []
+            status_parts = [timestamp]
             
             # Task timing
             if self.task_timing and self.is_running:
