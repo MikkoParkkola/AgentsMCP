@@ -374,7 +374,7 @@ class RichTUIRenderer(UIRenderer):
                         self.console.print("\n[dim yellow]⚠️  FORCE_RICH mode in non-TTY environment detected[/dim yellow]")
                         self.console.print("[dim]Input handling adapted for compatibility[/dim]")
                     
-                    self.console.print("\n💬 [yellow]>[/yellow] ", end="")
+                    # Timestamp-enabled prompt will be handled by input() calls below
                     
                     # Try to use readline for better input experience
                     try:
@@ -394,19 +394,41 @@ class RichTUIRenderer(UIRenderer):
                             try:
                                 import select
                                 import sys
+                                import datetime
                                 
                                 # Check if input is available with timeout
                                 if select.select([sys.stdin], [], [], 0.1)[0]:
-                                    user_input = input().strip()
+                                    timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                                    user_input = input(f"{timestamp} 💬 > ").strip()
                                 else:
                                     # No immediate input available, return None to continue display
                                     return None
                             except (ImportError, OSError):
                                 # Fallback to blocking input if select not available
-                                user_input = input().strip()
+                                import datetime
+                                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                                user_input = input(f"{timestamp} 💬 > ").strip()
                         else:
-                            # Standard blocking input
-                            user_input = input().strip()
+                            # Standard blocking input with multi-line support
+                            import datetime
+                            timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                            
+                            # Check for multi-line input (like Claude Code CLI)
+                            user_input = input(f"{timestamp} 💬 > ").strip()
+                            
+                            # If input seems incomplete (very long or ends with special chars), allow continuation
+                            lines = [user_input]
+                            while (len(user_input) > 200 or user_input.endswith(',') or user_input.endswith('.') or user_input.endswith('and')) and len(lines) < 10:
+                                try:
+                                    continuation = input("... ").strip()
+                                    if not continuation:  # Empty line signals end
+                                        break
+                                    lines.append(continuation)
+                                    user_input = " ".join(lines)
+                                except (EOFError, KeyboardInterrupt):
+                                    break
+                            
+                            user_input = " ".join(lines)
                         
                     except ImportError:
                         # Fallback without readline
@@ -415,15 +437,21 @@ class RichTUIRenderer(UIRenderer):
                             try:
                                 import select
                                 import sys
+                                import datetime
                                 
                                 if select.select([sys.stdin], [], [], 0.1)[0]:
-                                    user_input = input().strip()
+                                    timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                                    user_input = input(f"{timestamp} 💬 > ").strip()
                                 else:
                                     return None
                             except (ImportError, OSError):
-                                user_input = input().strip()
+                                import datetime
+                                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                                user_input = input(f"{timestamp} 💬 > ").strip()
                         else:
-                            user_input = input().strip()
+                            import datetime
+                            timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                            user_input = input(f"{timestamp} 💬 > ").strip()
                     
                     # Add to history
                     if user_input and (not self._input_history or self._input_history[-1] != user_input):
@@ -471,7 +499,10 @@ class RichTUIRenderer(UIRenderer):
                     except ImportError:
                         pass
                     
-                    user_input = input("💬 > ").strip()
+                    # Add timestamp to user input prompt
+                    import datetime
+                    timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                    user_input = input(f"{timestamp} 💬 > ").strip()
                     
                     # Add to history
                     if user_input and (not self._input_history or self._input_history[-1] != user_input):
