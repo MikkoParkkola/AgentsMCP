@@ -1,0 +1,64 @@
+{{- if and .Values.serviceAccount.create .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}-role
+  namespace: {{ include "agentsmcp.namespace" . }}
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: rbac
+rules:
+{{- with .Values.rbac.rules }}
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}-rolebinding
+  namespace: {{ include "agentsmcp.namespace" . }}
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "agentsmcp.fullname" . }}-role
+subjects:
+- kind: ServiceAccount
+  name: {{ include "agentsmcp.serviceAccountName" . }}
+  namespace: {{ include "agentsmcp.namespace" . }}
+{{- end }}
+
+{{- if and .Values.serviceAccount.create .Values.clusterRole.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}-cluster-reader
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: rbac
+rules:
+{{- with .Values.clusterRole.rules }}
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}-cluster-reader-binding
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "agentsmcp.fullname" . }}-cluster-reader
+subjects:
+- kind: ServiceAccount
+  name: {{ include "agentsmcp.serviceAccountName" . }}
+  namespace: {{ include "agentsmcp.namespace" . }}
+{{- end }}

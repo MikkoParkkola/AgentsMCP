@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}
+  namespace: {{ include "agentsmcp.namespace" . }}
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: service
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+  - name: http
+    port: {{ .Values.service.port }}
+    targetPort: {{ .Values.service.targetPort }}
+    protocol: TCP
+  {{- if eq .Values.service.type "LoadBalancer" }}
+  {{- with .Values.service.loadBalancerSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- end }}
+  selector:
+    {{- include "agentsmcp.selectorLabels" . | nindent 4 }}
+    component: api
+
+{{- if .Values.internalService.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}-internal
+  namespace: {{ include "agentsmcp.namespace" . }}
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: internal-service
+spec:
+  type: {{ .Values.internalService.type }}
+  ports:
+  - name: http
+    port: {{ .Values.internalService.port }}
+    targetPort: http
+    protocol: TCP
+  {{- if .Values.monitoring.enabled }}
+  - name: metrics
+    port: {{ .Values.internalService.metricsPort }}
+    targetPort: metrics
+    protocol: TCP
+  {{- end }}
+  selector:
+    {{- include "agentsmcp.selectorLabels" . | nindent 4 }}
+    component: api
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}-headless
+  namespace: {{ include "agentsmcp.namespace" . }}
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: headless-service
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: http
+    port: {{ .Values.internalService.port }}
+    targetPort: http
+    protocol: TCP
+  selector:
+    {{- include "agentsmcp.selectorLabels" . | nindent 4 }}
+    component: api
+{{- end }}

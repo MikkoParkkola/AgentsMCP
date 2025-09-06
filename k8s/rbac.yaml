@@ -1,0 +1,125 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentsmcp
+  labels:
+    name: agentsmcp
+    app.kubernetes.io/name: agentsmcp
+    app.kubernetes.io/instance: agentsmcp
+    app.kubernetes.io/component: namespace
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agentsmcp
+  namespace: agentsmcp
+  labels:
+    app: agentsmcp
+    component: serviceaccount
+  annotations:
+    # For cloud provider integration (AWS IAM roles, Azure managed identity, etc.)
+    # eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/AgentsMCP-ServiceRole"
+    # azure.workload.identity/client-id: "CLIENT-ID"
+    # iam.gke.io/gcp-service-account: "agentsmcp@PROJECT.iam.gserviceaccount.com"
+automountServiceAccountToken: false
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: agentsmcp-role
+  namespace: agentsmcp
+  labels:
+    app: agentsmcp
+    component: rbac
+rules:
+# Minimal permissions for pod introspection and service discovery
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+  resourceNames: [] # Can list pods in the namespace
+
+- apiGroups: [""]
+  resources: ["services", "endpoints"]
+  verbs: ["get", "list"]
+
+# ConfigMap access for runtime configuration updates
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch"]
+  resourceNames: ["agentsmcp-config", "agentsmcp-app-config"]
+
+# Secret access for runtime credential rotation
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+  resourceNames: ["agentsmcp-secrets"]
+
+# Events for debugging and monitoring
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: agentsmcp-rolebinding
+  namespace: agentsmcp
+  labels:
+    app: agentsmcp
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: agentsmcp-role
+subjects:
+- kind: ServiceAccount
+  name: agentsmcp
+  namespace: agentsmcp
+
+---
+# Cluster-level permissions (if needed for multi-namespace operations)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: agentsmcp-cluster-reader
+  labels:
+    app: agentsmcp
+    component: rbac
+rules:
+# Node information for resource awareness
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list"]
+
+# Custom Resource Definitions if using operators
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: ["get", "list"]
+
+# Metrics access for monitoring integration
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["nodes", "pods"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: agentsmcp-cluster-reader-binding
+  labels:
+    app: agentsmcp
+    component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: agentsmcp-cluster-reader
+subjects:
+- kind: ServiceAccount
+  name: agentsmcp
+  namespace: agentsmcp

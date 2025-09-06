@@ -1,0 +1,417 @@
+# Default values for AgentsMCP Helm chart
+# This is a YAML-formatted file.
+
+# Global configuration
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+  storageClass: ""
+
+# Application image configuration
+image:
+  registry: docker.io
+  repository: agentsmcp
+  tag: "1.0.0"
+  pullPolicy: Always
+  pullSecrets: []
+
+# Deployment configuration
+replicaCount: 3
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# Service configuration
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 8000
+  annotations: {}
+  loadBalancerSourceRanges: []
+
+# Internal service for cluster communication
+internalService:
+  enabled: true
+  type: ClusterIP
+  port: 8000
+  metricsPort: 8001
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: agentsmcp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: agentsmcp-tls
+      hosts:
+        - agentsmcp.example.com
+
+# Resource configuration
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+    ephemeral-storage: 1Gi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+    ephemeral-storage: 2Gi
+
+# Autoscaling configuration
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  
+  # Custom metrics scaling (optional)
+  customMetrics:
+    - type: Pods
+      metric:
+        name: http_requests_per_second
+      target:
+        type: AverageValue
+        averageValue: "100"
+  
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 50
+          periodSeconds: 30
+
+# Vertical Pod Autoscaler
+vpa:
+  enabled: false
+  updateMode: "Auto"  # Off, Initial, Auto
+  minAllowed:
+    cpu: 100m
+    memory: 128Mi
+  maxAllowed:
+    cpu: 2000m
+    memory: 4Gi
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  fsGroupChangePolicy: "OnRootMismatch"
+  seccompProfile:
+    type: RuntimeDefault
+
+podSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Service account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+  automountServiceAccountToken: false
+
+# RBAC configuration
+rbac:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "services", "endpoints"]
+      verbs: ["get", "list"]
+    - apiGroups: [""]
+      resources: ["configmaps"]
+      verbs: ["get", "list", "watch"]
+    - apiGroups: [""]
+      resources: ["secrets"]
+      verbs: ["get", "list"]
+    - apiGroups: [""]
+      resources: ["events"]
+      verbs: ["create", "patch"]
+
+clusterRole:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: ["nodes"]
+      verbs: ["get", "list"]
+    - apiGroups: ["metrics.k8s.io"]
+      resources: ["nodes", "pods"]
+      verbs: ["get", "list"]
+
+# Environment variables
+env:
+  AGENTSMCP_HOST: "0.0.0.0"
+  AGENTSMCP_PORT: "8000"
+  AGENTSMCP_LOG_LEVEL: "INFO"
+  AGENTSMCP_LOG_FORMAT: "json"
+  AGENTSMCP_ENVIRONMENT: "production"
+  AGENTSMCP_DEBUG: "false"
+  AGENTSMCP_PROMETHEUS_ENABLED: "true"
+  AGENTSMCP_DISCOVERY_ENABLED: "true"
+  AGENTSMCP_MCP_API_ENABLED: "true"
+  AGENTSMCP_UI_ENABLED: "true"
+  AGENTSMCP_RATE_LIMIT_ENABLED: "true"
+  AGENTSMCP_RATE_LIMIT_REQUESTS: "100"
+  AGENTSMCP_RATE_LIMIT_WINDOW: "60"
+
+# Configuration from ConfigMap
+config:
+  create: true
+  data:
+    agentsmcp.yaml: |
+      server:
+        host: "0.0.0.0"
+        port: 8000
+        cors_origins:
+          - "https://agentsmcp.example.com"
+      
+      agents:
+        coding:
+          type: "openai"
+          model: "gpt-4"
+          provider: "openai"
+          tools: ["filesystem", "terminal", "web"]
+          timeout: 300
+        
+        general:
+          type: "openai"
+          model: "gpt-3.5-turbo"
+          provider: "openai"
+          tools: ["web", "search"]
+          timeout: 180
+      
+      providers:
+        openai:
+          api_base: "https://api.openai.com/v1"
+      
+      storage:
+        type: "redis"
+        host: "redis"
+        port: 6379
+        db: 0
+        max_connections: 10
+      
+      orchestration:
+        mode: "simple"
+        max_concurrent_tasks: 5
+        default_timeout: 300
+        retry_attempts: 3
+      
+      monitoring:
+        prometheus_enabled: true
+        metrics_port: 8000
+        health_check_interval: 30
+
+# Secrets configuration
+secrets:
+  create: true
+  data: {}
+    # JWT_SECRET_KEY: ""
+    # OPENAI_API_KEY: ""
+    # ANTHROPIC_API_KEY: ""
+    # DATABASE_URL: ""
+    # REDIS_URL: ""
+
+# External secrets (if using external secret management)
+externalSecrets:
+  enabled: false
+  secretStore:
+    provider: aws
+    auth:
+      region: us-east-1
+      role: arn:aws:iam::ACCOUNT:role/AgentsMCP-SecretsRole
+  secrets: []
+
+# Probes configuration
+probes:
+  liveness:
+    enabled: true
+    path: /health/live
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  
+  readiness:
+    enabled: true
+    path: /health/ready
+    initialDelaySeconds: 15
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  
+  startup:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 12
+
+# Volume configuration
+volumes:
+  tmp:
+    enabled: true
+    sizeLimit: 100Mi
+  data:
+    enabled: true
+    sizeLimit: 500Mi
+  logs:
+    enabled: true
+    sizeLimit: 200Mi
+  temp:
+    enabled: true
+    sizeLimit: 100Mi
+
+# Persistent volume configuration
+persistence:
+  enabled: false
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 8Gi
+  annotations: {}
+
+# Network policies
+networkPolicy:
+  enabled: true
+  ingress:
+    enabled: true
+    from:
+      - namespaceSelector:
+          matchLabels:
+            name: ingress-nginx
+      - namespaceSelector:
+          matchLabels:
+            name: monitoring
+  egress:
+    enabled: true
+    to:
+      - namespaceSelector:
+          matchLabels:
+            name: redis
+      - namespaceSelector:
+          matchLabels:
+            name: database
+      - namespaceSelector:
+          matchLabels:
+            name: monitoring
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations:
+  - key: "node.kubernetes.io/not-ready"
+    operator: "Exists"
+    effect: "NoExecute"
+    tolerationSeconds: 300
+  - key: "node.kubernetes.io/unreachable"
+    operator: "Exists"
+    effect: "NoExecute"
+    tolerationSeconds: 300
+
+# Affinity rules
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: agentsmcp
+          topologyKey: kubernetes.io/hostname
+
+# Pod annotations
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"
+  prometheus.io/path: "/metrics"
+
+# Pod labels
+podLabels: {}
+
+# Monitoring and observability
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: 30s
+    path: /metrics
+    labels: {}
+  
+  prometheusRule:
+    enabled: true
+    namespace: monitoring
+    rules:
+      - alert: AgentsMCPDown
+        expr: up{job="agentsmcp"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AgentsMCP is down"
+          description: "AgentsMCP has been down for more than 1 minute."
+      
+      - alert: AgentsMCPHighCPU
+        expr: rate(container_cpu_usage_seconds_total{pod=~"agentsmcp-.*"}[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage"
+          description: "AgentsMCP CPU usage is above 80% for more than 5 minutes."
+      
+      - alert: AgentsMCPHighMemory
+        expr: container_memory_usage_bytes{pod=~"agentsmcp-.*"} / container_spec_memory_limit_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage"
+          description: "AgentsMCP memory usage is above 90% for more than 5 minutes."
+
+# Testing configuration
+tests:
+  enabled: true
+  image:
+    registry: docker.io
+    repository: curlimages/curl
+    tag: latest
+    pullPolicy: IfNotPresent
+
+# Development/debugging settings
+debug:
+  enabled: false
+  command:
+    - /bin/sh
+    - -c
+    - "while true; do sleep 3600; done"

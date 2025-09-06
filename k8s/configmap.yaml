@@ -1,0 +1,130 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentsmcp-config
+  namespace: agentsmcp
+  labels:
+    app: agentsmcp
+    component: config
+data:
+  # Server Configuration
+  AGENTSMCP_ENVIRONMENT: "production"
+  AGENTSMCP_DEBUG: "false"
+  AGENTSMCP_CORS_ORIGINS: "https://agentsmcp.example.com,https://app.agentsmcp.example.com"
+  
+  # Logging Configuration
+  AGENTSMCP_LOG_LEVEL: "INFO"
+  AGENTSMCP_LOG_FORMAT: "json"
+  
+  # Feature Flags
+  AGENTSMCP_PROMETHEUS_ENABLED: "true"
+  AGENTSMCP_DISCOVERY_ENABLED: "true"
+  AGENTSMCP_MCP_API_ENABLED: "true"
+  AGENTSMCP_UI_ENABLED: "true"
+  
+  # Performance Tuning
+  AGENTSMCP_MAX_WORKERS: "4"
+  AGENTSMCP_TIMEOUT: "300"
+  AGENTSMCP_MAX_REQUEST_SIZE: "10485760"  # 10MB
+  
+  # Security Configuration
+  AGENTSMCP_RATE_LIMIT_ENABLED: "true"
+  AGENTSMCP_RATE_LIMIT_REQUESTS: "100"
+  AGENTSMCP_RATE_LIMIT_WINDOW: "60"
+  
+  # Database Configuration (if applicable)
+  AGENTSMCP_DB_POOL_SIZE: "10"
+  AGENTSMCP_DB_MAX_OVERFLOW: "20"
+  AGENTSMCP_DB_POOL_TIMEOUT: "30"
+  
+  # Cache Configuration
+  AGENTSMCP_CACHE_TTL: "3600"
+  AGENTSMCP_CACHE_MAX_SIZE: "1000"
+  
+  # Orchestrator Configuration
+  AGENTSMCP_ORCHESTRATOR_MODE: "simple"
+  AGENTSMCP_ORCHESTRATOR_TIMEOUT: "300"
+  
+  # Health Check Configuration
+  AGENTSMCP_HEALTH_CHECK_INTERVAL: "30"
+  AGENTSMCP_HEALTH_CHECK_TIMEOUT: "10"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentsmcp-app-config
+  namespace: agentsmcp
+  labels:
+    app: agentsmcp
+    component: config
+data:
+  agentsmcp.yaml: |
+    # AgentsMCP Production Configuration
+    server:
+      host: "0.0.0.0"
+      port: 8000
+      cors_origins:
+        - "https://agentsmcp.example.com"
+        - "https://app.agentsmcp.example.com"
+      
+    # Agent Configuration
+    agents:
+      coding:
+        type: "openai"
+        model: "gpt-4"
+        provider: "openai"
+        tools: ["filesystem", "terminal", "web"]
+        timeout: 300
+      
+      general:
+        type: "openai"
+        model: "gpt-3.5-turbo"
+        provider: "openai"
+        tools: ["web", "search"]
+        timeout: 180
+    
+    # Provider Configuration
+    providers:
+      openai:
+        api_base: "https://api.openai.com/v1"
+        # API keys loaded from secrets
+      
+      ollama:
+        api_base: "http://ollama:11434"
+    
+    # Storage Configuration
+    storage:
+      type: "redis"
+      host: "redis"
+      port: 6379
+      db: 0
+      max_connections: 10
+    
+    # Orchestration Configuration
+    orchestration:
+      mode: "simple"
+      max_concurrent_tasks: 5
+      default_timeout: 300
+      retry_attempts: 3
+    
+    # Security Configuration
+    security:
+      jwt_secret_key: "{{ JWT_SECRET_KEY }}"  # Templated from secret
+      jwt_algorithm: "HS256"
+      jwt_expiration: 3600
+      cors_allow_credentials: true
+    
+    # Monitoring Configuration
+    monitoring:
+      prometheus_enabled: true
+      metrics_port: 8000
+      health_check_interval: 30
+    
+    # Feature Flags
+    features:
+      discovery_enabled: true
+      mcp_api_enabled: true
+      ui_enabled: true
+      cost_tracking_enabled: true
+      rag_enabled: false

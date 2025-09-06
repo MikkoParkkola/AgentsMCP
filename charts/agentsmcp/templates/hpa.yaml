@@ -1,0 +1,69 @@
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}-hpa
+  namespace: {{ include "agentsmcp.namespace" . }}
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: autoscaling
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "agentsmcp.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+  {{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+  {{- end }}
+  {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+  {{- end }}
+  {{- with .Values.autoscaling.customMetrics }}
+  {{- toYaml . | nindent 2 }}
+  {{- end }}
+  {{- if .Values.autoscaling.behavior }}
+  behavior:
+    {{- toYaml .Values.autoscaling.behavior | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+{{- if .Values.vpa.enabled }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}-vpa
+  namespace: {{ include "agentsmcp.namespace" . }}
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: autoscaling
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "agentsmcp.fullname" . }}
+  updatePolicy:
+    updateMode: {{ .Values.vpa.updateMode | quote }}
+  resourcePolicy:
+    containerPolicies:
+    - containerName: {{ .Chart.Name }}
+      minAllowed:
+        {{- toYaml .Values.vpa.minAllowed | nindent 8 }}
+      maxAllowed:
+        {{- toYaml .Values.vpa.maxAllowed | nindent 8 }}
+      controlledResources: ["cpu", "memory"]
+      controlledValues: RequestsAndLimits
+{{- end }}

@@ -1,0 +1,29 @@
+{{- if .Values.config.create }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agentsmcp.configMapName" . }}
+  namespace: {{ include "agentsmcp.namespace" . }}
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: config
+data:
+  {{- range $key, $value := .Values.env }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}-app-config
+  namespace: {{ include "agentsmcp.namespace" . }}
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    component: app-config
+data:
+  {{- range $key, $value := .Values.config.data }}
+  {{ $key }}: |
+    {{- $value | nindent 4 }}
+  {{- end }}
+{{- end }}

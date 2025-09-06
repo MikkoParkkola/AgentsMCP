@@ -1,0 +1,350 @@
+# Production values for AgentsMCP
+# Override default values for production deployment
+
+# Image configuration for production
+image:
+  registry: your-registry.io
+  repository: agentsmcp
+  tag: "1.0.0"
+  pullPolicy: Always
+
+# Production scaling
+replicaCount: 5
+
+# Production resources with higher limits
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+    ephemeral-storage: 2Gi
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+    ephemeral-storage: 4Gi
+
+# Aggressive autoscaling for production traffic
+autoscaling:
+  enabled: true
+  minReplicas: 5
+  maxReplicas: 50
+  targetCPUUtilizationPercentage: 60
+  targetMemoryUtilizationPercentage: 70
+  
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Percent
+          value: 5
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+
+# VPA enabled for production
+vpa:
+  enabled: true
+  updateMode: "Auto"
+
+# Production service configuration
+service:
+  type: LoadBalancer
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+    service.beta.kubernetes.io/aws-load-balancer-healthcheck-path: "/health"
+
+# Production ingress with real domain
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rate-limit: "1000"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+  hosts:
+    - host: api.agentsmcp.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: agentsmcp-tls-prod
+      hosts:
+        - api.agentsmcp.com
+
+# Production environment variables
+env:
+  AGENTSMCP_ENVIRONMENT: "production"
+  AGENTSMCP_LOG_LEVEL: "INFO"
+  AGENTSMCP_LOG_FORMAT: "json"
+  AGENTSMCP_DEBUG: "false"
+  AGENTSMCP_PROMETHEUS_ENABLED: "true"
+  AGENTSMCP_RATE_LIMIT_ENABLED: "true"
+  AGENTSMCP_RATE_LIMIT_REQUESTS: "1000"
+  AGENTSMCP_RATE_LIMIT_WINDOW: "60"
+  AGENTSMCP_CORS_ORIGINS: "https://agentsmcp.com,https://app.agentsmcp.com"
+
+# Production configuration
+config:
+  data:
+    agentsmcp.yaml: |
+      server:
+        host: "0.0.0.0"
+        port: 8000
+        cors_origins:
+          - "https://agentsmcp.com"
+          - "https://app.agentsmcp.com"
+      
+      agents:
+        coding:
+          type: "openai"
+          model: "gpt-4o"
+          provider: "openai"
+          tools: ["filesystem", "terminal", "web"]
+          timeout: 300
+        
+        general:
+          type: "openai"
+          model: "gpt-4o-mini"
+          provider: "openai"
+          tools: ["web", "search"]
+          timeout: 180
+        
+        specialist:
+          type: "anthropic"
+          model: "claude-3-5-sonnet-20241022"
+          provider: "anthropic"
+          tools: ["analysis", "reasoning"]
+          timeout: 600
+      
+      providers:
+        openai:
+          api_base: "https://api.openai.com/v1"
+        anthropic:
+          api_base: "https://api.anthropic.com"
+      
+      storage:
+        type: "redis"
+        host: "redis-cluster"
+        port: 6379
+        db: 0
+        max_connections: 20
+        password_from_secret: true
+      
+      orchestration:
+        mode: "distributed"
+        max_concurrent_tasks: 20
+        default_timeout: 300
+        retry_attempts: 3
+        circuit_breaker_enabled: true
+      
+      security:
+        jwt_expiration: 3600
+        cors_allow_credentials: true
+        rate_limiting_enabled: true
+      
+      monitoring:
+        prometheus_enabled: true
+        jaeger_enabled: true
+        health_check_interval: 15
+
+# Security hardening for production
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  fsGroupChangePolicy: "OnRootMismatch"
+  seccompProfile:
+    type: RuntimeDefault
+
+podSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Production network policies - strict
+networkPolicy:
+  enabled: true
+  ingress:
+    enabled: true
+    from:
+      - namespaceSelector:
+          matchLabels:
+            name: ingress-nginx
+      - namespaceSelector:
+          matchLabels:
+            name: monitoring
+      - podSelector:
+          matchLabels:
+            app: agentsmcp-frontend
+  egress:
+    enabled: true
+    to:
+      - namespaceSelector:
+          matchLabels:
+            name: redis
+      - namespaceSelector:
+          matchLabels:
+            name: database
+      - namespaceSelector:
+          matchLabels:
+            name: monitoring
+
+# Enable all monitoring for production
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: 15s
+    path: /metrics
+    labels:
+      environment: production
+  
+  prometheusRule:
+    enabled: true
+    namespace: monitoring
+    rules:
+      - alert: AgentsMCPDown
+        expr: up{job="agentsmcp"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          environment: production
+        annotations:
+          summary: "AgentsMCP is down in production"
+          description: "AgentsMCP has been down for more than 30 seconds."
+      
+      - alert: AgentsMCPHighCPU
+        expr: rate(container_cpu_usage_seconds_total{pod=~"agentsmcp-.*"}[5m]) > 0.7
+        for: 3m
+        labels:
+          severity: warning
+          environment: production
+        annotations:
+          summary: "High CPU usage in production"
+          description: "AgentsMCP CPU usage is above 70% for more than 3 minutes."
+      
+      - alert: AgentsMCPHighMemory
+        expr: container_memory_usage_bytes{pod=~"agentsmcp-.*"} / container_spec_memory_limit_bytes > 0.85
+        for: 3m
+        labels:
+          severity: warning
+          environment: production
+        annotations:
+          summary: "High memory usage in production"
+          description: "AgentsMCP memory usage is above 85% for more than 3 minutes."
+      
+      - alert: AgentsMCPHighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          environment: production
+        annotations:
+          summary: "High error rate in production"
+          description: "AgentsMCP error rate is above 5% for more than 2 minutes."
+
+# Pod disruption budget for high availability
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Anti-affinity to spread across nodes
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: agentsmcp
+      topologyKey: kubernetes.io/hostname
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: agentsmcp
+        topologyKey: topology.kubernetes.io/zone
+
+# Production node selector
+nodeSelector:
+  kubernetes.io/arch: amd64
+  node-type: production
+
+# Tolerations for dedicated nodes
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "agentsmcp"
+    effect: "NoSchedule"
+  - key: "node.kubernetes.io/not-ready"
+    operator: "Exists"
+    effect: "NoExecute"
+    tolerationSeconds: 180
+  - key: "node.kubernetes.io/unreachable"
+    operator: "Exists"
+    effect: "NoExecute"
+    tolerationSeconds: 180
+
+# Production volume configuration
+volumes:
+  tmp:
+    enabled: true
+    sizeLimit: 500Mi
+  data:
+    enabled: true
+    sizeLimit: 2Gi
+  logs:
+    enabled: true
+    sizeLimit: 1Gi
+  temp:
+    enabled: true
+    sizeLimit: 500Mi
+
+# Persistent storage for production
+persistence:
+  enabled: true
+  storageClass: "fast-ssd"
+  accessMode: ReadWriteOnce
+  size: 20Gi
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: kubernetes.io/aws-ebs
+    volume.kubernetes.io/storage-provisioner: kubernetes.io/aws-ebs
+
+# Production health checks - more frequent
+probes:
+  liveness:
+    enabled: true
+    path: /health/live
+    initialDelaySeconds: 15
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+  
+  readiness:
+    enabled: true
+    path: /health/ready
+    initialDelaySeconds: 10
+    periodSeconds: 3
+    timeoutSeconds: 2
+    failureThreshold: 2
+  
+  startup:
+    enabled: true
+    path: /health
+    initialDelaySeconds: 5
+    periodSeconds: 3
+    timeoutSeconds: 2
+    failureThreshold: 20

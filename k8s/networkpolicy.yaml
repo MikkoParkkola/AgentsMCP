@@ -1,0 +1,170 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentsmcp-default-deny-all
+  namespace: agentsmcp
+  labels:
+    app: agentsmcp
+    component: security
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentsmcp-ingress-allowed
+  namespace: agentsmcp
+  labels:
+    app: agentsmcp
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: agentsmcp
+      component: api
+  policyTypes:
+  - Ingress
+  ingress:
+  # Allow ingress from ingress controller
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 8000
+  
+  # Allow ingress from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 8000
+  
+  # Allow ingress from same namespace (pod-to-pod communication)
+  - from:
+    - podSelector:
+        matchLabels:
+          app: agentsmcp
+    ports:
+    - protocol: TCP
+      port: 8000
+  
+  # Allow health checks from kubelet
+  - from: []
+    ports:
+    - protocol: TCP
+      port: 8000
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentsmcp-egress-allowed
+  namespace: agentsmcp
+  labels:
+    app: agentsmcp
+    component: security
+spec:
+  podSelector:
+    matchLabels:
+      app: agentsmcp
+      component: api
+  policyTypes:
+  - Egress
+  egress:
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  
+  # Allow HTTPS to external APIs (OpenAI, Anthropic, etc.)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  
+  # Allow HTTP for health checks and APIs
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 80
+  
+  # Allow communication with Redis (if using external Redis)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: redis
+    ports:
+    - protocol: TCP
+      port: 6379
+  
+  # Allow communication with database (if using external database)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: database
+    ports:
+    - protocol: TCP
+      port: 5432  # PostgreSQL
+    - protocol: TCP
+      port: 3306  # MySQL
+  
+  # Allow communication with monitoring systems
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090  # Prometheus
+    - protocol: TCP
+      port: 3000  # Grafana
+  
+  # Allow pod-to-pod communication within namespace
+  - to:
+    - podSelector:
+        matchLabels:
+          app: agentsmcp
+    ports:
+    - protocol: TCP
+      port: 8000
+
+---
+# Network policy for development/staging environments (more permissive)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: agentsmcp-dev-policy
+  namespace: agentsmcp
+  labels:
+    app: agentsmcp
+    component: security
+    environment: development
+spec:
+  podSelector:
+    matchLabels:
+      app: agentsmcp
+      environment: development
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from: []  # Allow all ingress for development
+    ports:
+    - protocol: TCP
+      port: 8000
+  egress:
+  - to: []  # Allow all egress for development

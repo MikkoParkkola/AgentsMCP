@@ -1,0 +1,161 @@
+# Development values for AgentsMCP
+# Minimal configuration for development/testing
+
+# Image configuration
+image:
+  registry: docker.io
+  repository: agentsmcp
+  tag: "dev-latest"
+  pullPolicy: Always
+
+# Minimal scaling for development
+replicaCount: 1
+
+# Minimal resources for development
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+    ephemeral-storage: 512Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+    ephemeral-storage: 1Gi
+
+# Autoscaling disabled for development
+autoscaling:
+  enabled: false
+
+# Simple ClusterIP service for development
+service:
+  type: ClusterIP
+  port: 8000
+
+# No ingress for development (use port-forward)
+ingress:
+  enabled: false
+
+# Development environment variables
+env:
+  AGENTSMCP_ENVIRONMENT: "development"
+  AGENTSMCP_LOG_LEVEL: "DEBUG"
+  AGENTSMCP_LOG_FORMAT: "text"  # Human-readable logs for dev
+  AGENTSMCP_DEBUG: "true"
+  AGENTSMCP_PROMETHEUS_ENABLED: "false"  # Disable metrics in dev
+  AGENTSMCP_RATE_LIMIT_ENABLED: "false"  # No rate limiting in dev
+  AGENTSMCP_CORS_ORIGINS: "*"  # Allow all origins in dev
+
+# Development configuration
+config:
+  data:
+    agentsmcp.yaml: |
+      server:
+        host: "0.0.0.0"
+        port: 8000
+        cors_origins:
+          - "*"  # Allow all origins in development
+      
+      agents:
+        coding:
+          type: "ollama"
+          model: "codestral:22b"
+          provider: "ollama"
+          tools: ["filesystem", "terminal"]
+          timeout: 180
+        
+        general:
+          type: "ollama"
+          model: "llama3.1:8b"
+          provider: "ollama"
+          tools: ["web"]
+          timeout: 120
+      
+      providers:
+        ollama:
+          api_base: "http://ollama:11434"
+        openai:
+          api_base: "https://api.openai.com/v1"
+      
+      storage:
+        type: "memory"  # In-memory storage for development
+      
+      orchestration:
+        mode: "simple"
+        max_concurrent_tasks: 3
+        default_timeout: 180
+        retry_attempts: 1
+      
+      monitoring:
+        prometheus_enabled: false
+        health_check_interval: 60
+
+# Relaxed security for development
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+podSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false  # Allow writes for development
+  capabilities:
+    drop:
+      - ALL
+
+# No network policies for development
+networkPolicy:
+  enabled: false
+
+# No monitoring for development
+monitoring:
+  enabled: false
+
+# No pod disruption budget for development
+podDisruptionBudget:
+  enabled: false
+
+# No affinity rules for development
+affinity: {}
+
+# Relaxed health checks for development
+probes:
+  liveness:
+    enabled: false  # Disable to allow debugging
+  readiness:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 5
+  startup:
+    enabled: true
+    initialDelaySeconds: 20
+    periodSeconds: 10
+    failureThreshold: 10
+
+# Smaller volumes for development
+volumes:
+  tmp:
+    enabled: true
+    sizeLimit: 50Mi
+  data:
+    enabled: true
+    sizeLimit: 100Mi
+  logs:
+    enabled: true
+    sizeLimit: 50Mi
+  temp:
+    enabled: true
+    sizeLimit: 50Mi
+
+# No persistence for development
+persistence:
+  enabled: false
+
+# Enable debug mode
+debug:
+  enabled: false  # Set to true to enable debug container
+
+# Disable tests for faster development deployments
+tests:
+  enabled: false

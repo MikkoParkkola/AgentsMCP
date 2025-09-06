@@ -1,0 +1,178 @@
+# Staging values for AgentsMCP
+# Mid-scale configuration for staging environment
+
+# Image configuration
+image:
+  registry: your-registry.io
+  repository: agentsmcp
+  tag: "staging-latest"
+  pullPolicy: Always
+
+# Staging scaling
+replicaCount: 2
+
+# Moderate resources for staging
+resources:
+  requests:
+    cpu: 300m
+    memory: 384Mi
+    ephemeral-storage: 1Gi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+    ephemeral-storage: 3Gi
+
+# Moderate autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+# Staging service configuration
+service:
+  type: LoadBalancer
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+
+# Staging ingress
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rate-limit: "500"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+  hosts:
+    - host: staging-api.agentsmcp.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: agentsmcp-tls-staging
+      hosts:
+        - staging-api.agentsmcp.com
+
+# Staging environment variables
+env:
+  AGENTSMCP_ENVIRONMENT: "staging"
+  AGENTSMCP_LOG_LEVEL: "DEBUG"
+  AGENTSMCP_LOG_FORMAT: "json"
+  AGENTSMCP_DEBUG: "true"
+  AGENTSMCP_PROMETHEUS_ENABLED: "true"
+  AGENTSMCP_RATE_LIMIT_REQUESTS: "500"
+
+# Staging configuration
+config:
+  data:
+    agentsmcp.yaml: |
+      server:
+        host: "0.0.0.0"
+        port: 8000
+        cors_origins:
+          - "https://staging.agentsmcp.com"
+          - "https://staging-app.agentsmcp.com"
+      
+      agents:
+        coding:
+          type: "openai"
+          model: "gpt-4o-mini"
+          provider: "openai"
+          tools: ["filesystem", "terminal", "web"]
+          timeout: 300
+        
+        general:
+          type: "openai"
+          model: "gpt-3.5-turbo"
+          provider: "openai"
+          tools: ["web", "search"]
+          timeout: 180
+      
+      providers:
+        openai:
+          api_base: "https://api.openai.com/v1"
+      
+      storage:
+        type: "redis"
+        host: "redis-staging"
+        port: 6379
+        db: 1
+        max_connections: 10
+      
+      orchestration:
+        mode: "simple"
+        max_concurrent_tasks: 10
+        default_timeout: 300
+        retry_attempts: 3
+      
+      monitoring:
+        prometheus_enabled: true
+        health_check_interval: 30
+
+# Relaxed network policies for staging
+networkPolicy:
+  enabled: true
+  ingress:
+    enabled: true
+    from:
+      - namespaceSelector: {}  # Allow all namespaces in staging
+  egress:
+    enabled: true
+    to:
+      - namespaceSelector: {}  # Allow all egress in staging
+
+# Basic monitoring for staging
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: 30s
+    labels:
+      environment: staging
+  
+  prometheusRule:
+    enabled: true
+    namespace: monitoring
+    rules:
+      - alert: AgentsMCPStagingDown
+        expr: up{job="agentsmcp",environment="staging"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          environment: staging
+        annotations:
+          summary: "AgentsMCP staging is down"
+          description: "AgentsMCP staging has been down for more than 2 minutes."
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Prefer different nodes but not required
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: agentsmcp
+        topologyKey: kubernetes.io/hostname
+
+# Standard health checks
+probes:
+  liveness:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+  readiness:
+    enabled: true
+    initialDelaySeconds: 15
+    periodSeconds: 5
+  startup:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 5

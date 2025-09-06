@@ -1,0 +1,113 @@
+🚀 AgentsMCP has been deployed successfully!
+
+📋 Release Information:
+   Name:      {{ .Release.Name }}
+   Namespace: {{ .Release.Namespace }}
+   Version:   {{ .Chart.Version }}
+   App Version: {{ .Chart.AppVersion }}
+
+🌐 Access Information:
+{{- if .Values.ingress.enabled }}
+{{- range $host := .Values.ingress.hosts }}
+   External URL: http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .paths.path }}
+{{- end }}
+{{- else if contains "NodePort" .Values.service.type }}
+   Get the application URL by running these commands:
+     export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "agentsmcp.fullname" . }})
+     export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+     echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.service.type }}
+   NOTE: It may take a few minutes for the LoadBalancer IP to be available.
+         You can watch the status of by running 'kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "agentsmcp.fullname" . }}'
+   
+   Get the application URL by running these commands:
+     export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "agentsmcp.fullname" . }} --template "{{"{{ range (index .status.loadBalancer.ingress 0) }}{{.}}{{ end }}"}}")
+     echo http://$SERVICE_IP:{{ .Values.service.port }}
+{{- else if contains "ClusterIP" .Values.service.type }}
+   Get the application URL by running these commands:
+     kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "agentsmcp.fullname" . }} 8080:{{ .Values.service.port }}
+     echo "Visit http://127.0.0.1:8080 to use your application"
+{{- end }}
+
+🔍 Health Check Endpoints:
+   Health:     /health
+   Readiness:  /health/ready  
+   Liveness:   /health/live
+
+📊 API Endpoints:
+   Root:        /
+   Spawn:       POST /spawn
+   Status:      GET /status/{job_id}
+   Capabilities: GET /capabilities
+{{- if .Values.monitoring.enabled }}
+   Metrics:     /metrics
+{{- end }}
+
+🛠️ Useful Commands:
+
+   # Check pod status
+   kubectl get pods -l app.kubernetes.io/name={{ include "agentsmcp.name" . }} -n {{ .Release.Namespace }}
+
+   # View logs
+   kubectl logs -l app.kubernetes.io/name={{ include "agentsmcp.name" . }} -n {{ .Release.Namespace }} -f
+
+   # Get service details
+   kubectl get svc {{ include "agentsmcp.fullname" . }} -n {{ .Release.Namespace }}
+
+{{- if .Values.autoscaling.enabled }}
+   # Check HPA status
+   kubectl get hpa {{ include "agentsmcp.fullname" . }}-hpa -n {{ .Release.Namespace }}
+{{- end }}
+
+   # Run connection tests
+   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+⚡ Performance & Scaling:
+   Replicas:    {{ .Values.replicaCount }}
+{{- if .Values.autoscaling.enabled }}
+   Auto-scaling: {{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas
+   CPU Target:   {{ .Values.autoscaling.targetCPUUtilizationPercentage }}%
+   Memory Target: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}%
+{{- end }}
+
+🔒 Security Features:
+{{- if .Values.networkPolicy.enabled }}
+   ✅ Network policies enabled
+{{- end }}
+{{- if .Values.podDisruptionBudget.enabled }}
+   ✅ Pod disruption budget configured
+{{- end }}
+   ✅ Security contexts enforced
+   ✅ Read-only root filesystem
+   ✅ Non-root user (UID: 1000)
+   ✅ Dropped all capabilities
+
+{{- if .Values.monitoring.enabled }}
+📈 Monitoring:
+   ServiceMonitor: {{ if .Values.monitoring.serviceMonitor.enabled }}✅ Enabled{{ else }}❌ Disabled{{ end }}
+   PrometheusRule: {{ if .Values.monitoring.prometheusRule.enabled }}✅ Enabled{{ else }}❌ Disabled{{ end }}
+{{- end }}
+
+{{- if not .Values.secrets.create }}
+⚠️  IMPORTANT: Secrets not created by Helm chart.
+   Please ensure you have created the required secrets:
+   - {{ include "agentsmcp.secretName" . }}
+   
+   Required secret keys:
+   - JWT_SECRET_KEY
+   - OPENAI_API_KEY (if using OpenAI)
+   - ANTHROPIC_API_KEY (if using Anthropic)
+{{- end }}
+
+📚 Documentation:
+   - Chart: https://github.com/MikkoParkkola/AgentsMCP/tree/main/charts/agentsmcp
+   - Project: https://github.com/MikkoParkkola/AgentsMCP
+
+🎯 Next Steps:
+   1. Verify all pods are running: kubectl get pods -n {{ .Release.Namespace }}
+   2. Test the health endpoints to ensure the service is ready
+   3. Configure your secrets if not already done
+   4. Set up monitoring dashboards if using Prometheus/Grafana
+   5. Configure ingress/DNS if using custom domains
+
+Happy orchestrating! 🤖✨

@@ -1,0 +1,113 @@
+{{- include "agentsmcp.validateValues" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agentsmcp.fullname" . }}
+  namespace: {{ include "agentsmcp.namespace" . }}
+  labels:
+    {{- include "agentsmcp.labels" . | nindent 4 }}
+    app: {{ include "agentsmcp.name" . }}
+    component: api
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    {{- toYaml .Values.strategy | nindent 4 }}
+  selector:
+    matchLabels:
+      {{- include "agentsmcp.selectorLabels" . | nindent 6 }}
+      component: api
+  template:
+    metadata:
+      labels:
+        {{- include "agentsmcp.selectorLabels" . | nindent 8 }}
+        app: {{ include "agentsmcp.name" . }}
+        component: api
+        version: {{ .Chart.AppVersion }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "agentsmcp.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "agentsmcp.serviceAccountName" . }}
+      {{- include "agentsmcp.podSecurityContext" . | nindent 6 }}
+      containers:
+      - name: {{ .Chart.Name }}
+        image: {{ include "agentsmcp.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        {{- if .Values.debug.enabled }}
+        command:
+          {{- toYaml .Values.debug.command | nindent 10 }}
+        {{- end }}
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        {{- if .Values.monitoring.enabled }}
+        - name: metrics
+          containerPort: 8000
+          protocol: TCP
+        {{- end }}
+        env:
+        {{- include "agentsmcp.envVars" . | nindent 8 }}
+        {{- if .Values.config.create }}
+        envFrom:
+        - configMapRef:
+            name: {{ include "agentsmcp.configMapName" . }}
+        {{- end }}
+        {{- if .Values.secrets.create }}
+        - secretRef:
+            name: {{ include "agentsmcp.secretName" . }}
+        {{- end }}
+        {{- include "agentsmcp.resources" . | nindent 8 }}
+        {{- include "agentsmcp.containerSecurityContext" . | nindent 8 }}
+        {{- if and .Values.probes.liveness.enabled (not .Values.debug.enabled) }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.probes.liveness.path }}
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+          successThreshold: 1
+          failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+        {{- end }}
+        {{- if and .Values.probes.readiness.enabled (not .Values.debug.enabled) }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.probes.readiness.path }}
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+          successThreshold: 1
+          failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+        {{- end }}
+        {{- if and .Values.probes.startup.enabled (not .Values.debug.enabled) }}
+        startupProbe:
+          httpGet:
+            path: {{ .Values.probes.startup.path }}
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: {{ .Values.probes.startup.initialDelaySeconds }}
+          periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+          timeoutSeconds: {{ .Values.probes.startup.timeoutSeconds }}
+          successThreshold: 1
+          failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+        {{- end }}
+        volumeMounts:
+        {{- include "agentsmcp.volumeMounts" . | nindent 8 }}
+      volumes:
+      {{- include "agentsmcp.volumes" . | nindent 6 }}
+      {{- include "agentsmcp.nodeSelector" . | nindent 6 }}
+      {{- include "agentsmcp.tolerations" . | nindent 6 }}
+      {{- include "agentsmcp.affinity" . | nindent 6 }}
+      terminationGracePeriodSeconds: 30
+      restartPolicy: Always
