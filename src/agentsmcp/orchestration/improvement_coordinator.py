@@ -678,7 +678,7 @@ class ImprovementCoordinator:
         return True
 
     async def _execute_improvement_implementation(self, improvement_id: str) -> bool:
-        """Execute the implementation of an improvement with git-aware verification."""
+        """Execute the implementation of an improvement with mandatory verification enforcement."""
         logger.info(f"Executing implementation for improvement {improvement_id}")
         
         # Get improvement details
@@ -688,56 +688,60 @@ class ImprovementCoordinator:
         managed = self.managed_improvements[improvement_id]
         improvement = managed.improvement
         
-        # Pre-implementation verification: capture current state
-        from ..verification import GitAwareVerifier
-        verifier = GitAwareVerifier()
-        pre_implementation_status = verifier.get_git_status_summary()
+        # Import the verification enforcer
+        from ..verification import VerificationEnforcementError, enforce_improvement_verification
         
         try:
             # Execute the actual improvement (this would be replaced with real implementation)
-            # For documentation improvements, this might involve file operations
             success = await self._perform_actual_implementation(improvement)
             
             if not success:
                 logger.warning(f"Implementation of {improvement_id} failed at execution stage")
                 return False
             
-            # Post-implementation verification: verify claimed changes actually occurred
-            post_implementation_status = verifier.get_git_status_summary()
+            # MANDATORY VERIFICATION ENFORCEMENT
+            # This will raise VerificationEnforcementError with actionable steps if verification fails
             
-            # Verify any file operations that were claimed
+            # Get claimed changes from the improvement
             claimed_files = getattr(improvement, 'files_modified', [])
-            if claimed_files:
-                verification_result = verifier.verify_documentation_updates_complete(claimed_files)
-                
-                if not verification_result.success:
-                    logger.error(f"Verification failed for improvement {improvement_id}")
-                    logger.error(f"False claims: {verification_result.false_claims}")
-                    logger.error(f"Missing operations: {verification_result.missing_operations}")
-                    
-                    # Save verification report for debugging
-                    report_path = verifier.save_verification_report(f"failed_verification_{improvement_id}.json")
-                    logger.error(f"Detailed verification report saved to: {report_path}")
-                    
-                    return False
-                
-                logger.info(f"Verification passed for improvement {improvement_id}")
-                logger.info(f"Successfully verified files: {claimed_files}")
+            claimed_commits = getattr(improvement, 'commits_created', [])
+            claimed_features = getattr(improvement, 'features_implemented', [])
             
-            # Check for commits if this was supposed to create commits
-            if hasattr(improvement, 'should_commit') and improvement.should_commit:
-                # Verify that new commits exist
-                last_commit_before = pre_implementation_status.get('last_commit', {})
-                last_commit_after = post_implementation_status.get('last_commit', {})
-                
-                if last_commit_before.get('hash') == last_commit_after.get('hash'):
-                    logger.error(f"No new commit created for improvement {improvement_id} despite claiming to commit")
-                    return False
+            logger.info(f"Enforcing verification for improvement {improvement_id}")
+            logger.info(f"Claimed files: {claimed_files}")
+            logger.info(f"Claimed commits: {claimed_commits}")
+            logger.info(f"Claimed features: {claimed_features}")
+            
+            # This will raise an exception with actionable steps if verification fails
+            verification_result = enforce_improvement_verification(
+                improvement_id=improvement_id,
+                claimed_files=claimed_files,
+                claimed_commits=claimed_commits,
+                claimed_features=claimed_features,
+                claimed_by=f"ImprovementCoordinator:{improvement_id}"
+            )
+            
+            logger.info(f"✅ Verification PASSED for improvement {improvement_id}")
+            logger.info(f"Verified files: {claimed_files}")
+            logger.info(f"Verified commits: {claimed_commits}")
             
             return True
             
+        except VerificationEnforcementError as e:
+            # Log the user-friendly error message with actionable steps
+            logger.error(f"❌ VERIFICATION ENFORCEMENT FAILED for improvement {improvement_id}")
+            logger.error(e.get_user_friendly_message())
+            
+            # Also update the managed improvement with the error
+            managed.last_error = e.get_user_friendly_message()
+            managed.verification_failed = True
+            
+            # Return False to indicate failure
+            return False
+            
         except Exception as e:
             logger.error(f"Error during implementation of {improvement_id}: {e}")
+            managed.last_error = str(e)
             return False
     
     async def _perform_actual_implementation(self, improvement) -> bool:
