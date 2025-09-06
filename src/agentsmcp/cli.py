@@ -397,6 +397,69 @@ def init_group():
     """Getting started - discovery & first-time configuration."""
     pass
 
+@init_group.command("init")
+@click.option("--mode", type=click.Choice(["auto", "development", "production", "containerized"]), 
+              default="auto", help="Installation mode (auto-detected by default)")
+@click.option("--force", is_flag=True, help="Force fresh installation even if already installed")
+@click.option("--no-progress", is_flag=True, help="Disable progress indicators")
+@click.option("--non-interactive", is_flag=True, help="Run without user prompts")
+@click.option("--target-time", type=int, default=120, help="Target completion time in seconds")
+@click.pass_context
+@with_intelligent_suggestions
+def init_main(ctx, mode: str, force: bool, no_progress: bool, non_interactive: bool, target_time: int):
+    """🚀 One-command installation system - complete setup in under 2 minutes."""
+    from agentsmcp.setup import InstallationOrchestrator
+    
+    try:
+        # Create installation orchestrator
+        orchestrator = InstallationOrchestrator(
+            mode=mode,
+            show_progress=not no_progress,
+            interactive=not non_interactive,
+            force_reinstall=force,
+            target_time_seconds=target_time
+        )
+        
+        # Run the complete installation
+        click.echo("🚀 Starting AgentsMCP one-command installation...")
+        click.echo("=" * 60)
+        
+        result = orchestrator.run_installation()
+        
+        if result.success:
+            click.echo(f"\n✅ Installation completed successfully in {result.total_time_seconds:.1f} seconds!")
+            
+            # Show next steps
+            click.echo("\n📋 You're ready to go! Try these commands:")
+            click.echo(f"   • {click.style('agentsmcp run simple \"Hello world\"', fg='cyan')}")
+            click.echo(f"   • {click.style('agentsmcp monitor costs', fg='cyan')}")
+            click.echo(f"   • {click.style('agentsmcp run interactive', fg='cyan')}")
+            
+            if result.final_health_report and result.final_health_report.warning_checks > 0:
+                click.echo(f"\n💡 {result.final_health_report.warning_checks} optional features have warnings.")
+                click.echo(f"   Run {click.style('agentsmcp monitor dashboard', fg='cyan')} for details.")
+        else:
+            click.echo(f"\n❌ Installation failed: {result.error_message}")
+            
+            if result.recovery_plans and not non_interactive:
+                click.echo("\n🔧 Recovery options are available.")
+                if click.confirm("Would you like to see recovery suggestions?"):
+                    for i, plan in enumerate(result.recovery_plans, 1):
+                        click.echo(f"\n{i}. {plan.description}")
+                        click.echo(f"   Estimated time: {plan.estimated_total_time_minutes} minutes")
+                        click.echo(f"   Success probability: {int(plan.success_probability * 100)}%")
+            
+            ctx.exit(1)
+            
+    except KeyboardInterrupt:
+        click.echo("\n\n👋 Installation cancelled by user.")
+        ctx.exit(130)
+    except Exception as e:
+        click.echo(f"\n❌ Installation system error: {e}")
+        if ctx.find_root().params.get('debug'):
+            raise
+        ctx.exit(1)
+
 @init_group.command("setup")
 @click.option("--mode", type=click.Choice(["interactive", "quick", "advanced"]), 
               default="interactive", help="Setup mode")
@@ -404,8 +467,13 @@ def init_group():
 @click.pass_context
 @with_intelligent_suggestions
 def init_setup(ctx, mode: str, force: bool, advanced: bool = False):
-    """🛠️ Interactive wizard that creates a valid AgentsMCP configuration."""
+    """🛠️ Legacy interactive wizard that creates a valid AgentsMCP configuration."""
     from agentsmcp.onboarding import OnboardingWizard
+    
+    click.echo("💡 Consider using 'agentsmcp init' for a faster, more comprehensive setup.")
+    if not click.confirm("Continue with legacy setup wizard?", default=False):
+        ctx.invoke(init_main, mode="auto", force=force)
+        return
     
     wizard = OnboardingWizard(mode=mode)
     
