@@ -603,16 +603,36 @@ As a {agent_type.replace('-', ' ')} specialist, analyze this query and provide s
                         
                         # Use enhanced analysis with comprehensive context
                         try:
-                            # Create comprehensive analysis based on agent specialization
-                            agent_insight = await self._generate_comprehensive_agent_insight(
-                                agent_type, user_input, planning_result, directory_context, history_context
-                            )
-                            agent_insights.append(f"[{agent_type}] {agent_insight}")
+                            # ACTUAL TASK TOOL DELEGATION through LLM Client tools
+                            # Check if LLMClient has tool calling capability
+                            if hasattr(self._llm_client, 'call_tool'):
+                                # Use LLMClient's tool calling capability for real MCP delegation
+                                task_result = await self._llm_client.call_tool(
+                                    "Task",
+                                    {
+                                        "description": f"Analyze query from {agent_type} perspective",
+                                        "prompt": agent_prompt,
+                                        "subagent_type": subagent_type
+                                    }
+                                )
+                                
+                                # Extract actual content from task result
+                                if task_result:
+                                    content = task_result.get('content', str(task_result))
+                                    agent_insights.append(f"[{agent_type}] {content}")
+                                else:
+                                    raise Exception("Task tool returned empty result")
+                            else:
+                                # For now, indicate that real delegation would happen here
+                                self.logger.info(f"→→ ACTUAL-DELEGATE-TO-{subagent_type} (would execute if MCP tools available)")
+                                raise Exception("LLMClient tool calling not available")
                             
                         except Exception as delegation_error:
                             self.logger.warning(f"Task delegation failed for {agent_type}, falling back to enhanced analysis: {delegation_error}")
-                            # Fallback to enhanced analysis
-                            agent_insight = await self._generate_agent_insight(agent_type, user_input, planning_result, directory_context)
+                            # Fallback to enhanced analysis when Task tool fails
+                            agent_insight = await self._generate_comprehensive_agent_insight(
+                                agent_type, user_input, planning_result, directory_context, history_context
+                            )
                             agent_insights.append(f"[{agent_type}] {agent_insight}")
                         
                         # Update progress
