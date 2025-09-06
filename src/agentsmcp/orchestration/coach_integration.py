@@ -124,7 +124,8 @@ class CoachIntegrationManager:
         
         # Shutdown continuous improvement engine
         if self.continuous_improvement_engine:
-            await self.continuous_improvement_engine.shutdown()
+            await self.continuous_improvement_engine.stop_continuous_improvement()
+            self.continuous_improvement_engine.cleanup()
         
         self._is_initialized = False
         logger.info("CoachIntegrationManager shutdown complete")
@@ -169,6 +170,7 @@ class CoachIntegrationManager:
                 event_id=str(uuid.uuid4()),
                 event_type="task_completed",
                 source_system="chat_engine",
+                target_system="process_coach",
                 payload=task_result
             )
             await self.emit_event(event)
@@ -199,6 +201,7 @@ class CoachIntegrationManager:
                 event_id=str(uuid.uuid4()),
                 event_type="user_feedback",
                 source_system="ui_component",
+                target_system="feedback_system",
                 payload=feedback
             )
             await self.emit_event(event)
@@ -239,7 +242,7 @@ class CoachIntegrationManager:
             }
         
         if self.continuous_improvement_engine:
-            engine_status = await self.continuous_improvement_engine.get_system_status()
+            engine_status = await self.continuous_improvement_engine.get_system_evolution_status()
             status["components"]["improvement_engine"] = engine_status
         
         # Integration status

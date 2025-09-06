@@ -19,6 +19,11 @@ def data_dir() -> Path:
     return Path(os.path.expanduser("~/.agentsmcp"))
 
 
+def get_app_data_dir() -> Path:
+    """Alias for data_dir() to match expected interface."""
+    return data_dir()
+
+
 def subdirs() -> Tuple[Path, Path, Path, Path, Path]:
     base = data_dir()
     return (

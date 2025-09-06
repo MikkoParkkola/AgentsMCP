@@ -24,6 +24,11 @@ class TUILauncher:
         self._cleanup_called = False  # Guard against multiple cleanup calls
         self._goodbye_shown = False   # Ensure single goodbye message
         
+        # Self-improvement system components
+        self.coach_integration_manager = None
+        self.continuous_improvement_engine = None
+        self._improvement_task = None
+        
     def initialize(self) -> bool:
         """Initialize V3 TUI launcher - PHASE 2 COMPLETE: Rich renderer with proper EOF handling."""
         # Initialize TUI with minimal output
@@ -105,6 +110,9 @@ class TUILauncher:
             # Initialize progress display integration
             self._setup_progress_display_integration()
             
+            # Initialize continuous improvement system
+            self._initialize_continuous_improvement()
+            
             return True
             
         except Exception as e:
@@ -131,6 +139,65 @@ class TUILauncher:
                         
         except Exception as e:
             print(f"Progress display integration warning: {e}")
+    
+    def _initialize_continuous_improvement(self) -> None:
+        """Initialize the continuous improvement system for self-improving loops."""
+        try:
+            # Import improvement system components
+            from ...orchestration.coach_integration import initialize_coach_integration, get_integration_manager
+            
+            print("🔄 Initializing self-improvement system...")
+            
+            # Initialize coach integration asynchronously
+            import asyncio
+            loop = None
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No running loop, create a new one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Schedule the initialization
+            self._improvement_task = asyncio.create_task(self._async_initialize_improvement())
+            
+            print("✅ Self-improvement system initialization scheduled")
+            
+        except Exception as e:
+            print(f"⚠️ Self-improvement system initialization warning: {e}")
+            # Continue without self-improvement - not critical for basic functionality
+    
+    async def _async_initialize_improvement(self) -> None:
+        """Asynchronously initialize the continuous improvement system."""
+        try:
+            # Import improvement system components
+            from ...orchestration.coach_integration import initialize_coach_integration, get_integration_manager
+            
+            # Initialize coach integration
+            success = await initialize_coach_integration()
+            if success:
+                # Get the integration manager
+                self.coach_integration_manager = await get_integration_manager()
+                
+                # Get the continuous improvement engine
+                if (self.coach_integration_manager and 
+                    hasattr(self.coach_integration_manager, 'continuous_improvement_engine')):
+                    self.continuous_improvement_engine = self.coach_integration_manager.continuous_improvement_engine
+                    
+                    # Start continuous improvement
+                    if self.continuous_improvement_engine:
+                        await self.continuous_improvement_engine.start_continuous_improvement()
+                        print("✅ Self-improvement loops are now active")
+                    else:
+                        print("⚠️ Continuous improvement engine not available")
+                else:
+                    print("⚠️ Coach integration manager not fully initialized")
+            else:
+                print("⚠️ Coach integration initialization failed")
+                
+        except Exception as e:
+            print(f"⚠️ Async self-improvement initialization error: {e}")
+            # Log but don't crash - self-improvement is optional
     def _on_status_change(self, status: str) -> None:
         """Handle status change from chat engine, including streaming updates and orchestration visibility."""
         if status.startswith("streaming_update:"):
@@ -452,7 +519,34 @@ Let's start chatting!
         self._cleanup_called = True
         
         try:
-            # Clean up chat engine first
+            # Clean up continuous improvement system first
+            if self.continuous_improvement_engine:
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.create_task(self.continuous_improvement_engine.stop_continuous_improvement())
+                except RuntimeError:
+                    try:
+                        asyncio.run(self.continuous_improvement_engine.stop_continuous_improvement())
+                    except Exception:
+                        pass
+                        
+            if self.coach_integration_manager:
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    asyncio.create_task(self.coach_integration_manager.shutdown())
+                except RuntimeError:
+                    try:
+                        asyncio.run(self.coach_integration_manager.shutdown())
+                    except Exception:
+                        pass
+            
+            # Cancel improvement initialization task if still running
+            if self._improvement_task and not self._improvement_task.done():
+                self._improvement_task.cancel()
+                        
+            # Clean up chat engine
             if self.chat_engine and hasattr(self.chat_engine, 'cleanup'):
                 # Run async cleanup in a safe way
                 import asyncio

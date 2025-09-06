@@ -11,9 +11,10 @@ import asyncio
 import logging
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
-from ..orchestration.models import TeamComposition, TeamPerformanceMetrics
+if TYPE_CHECKING:
+    from ..orchestration.models import TeamComposition, TeamPerformanceMetrics
 from ..roles.base import RoleName
 from .data_models import (
     IndividualRetrospective,
@@ -68,8 +69,8 @@ class AgileCoachAnalyzer:
     async def analyze_retrospectives(
         self,
         individual_retrospectives: List[IndividualRetrospective],
-        team_composition: TeamComposition,
-        execution_metrics: TeamPerformanceMetrics,
+        team_composition: 'TeamComposition',
+        execution_metrics: 'TeamPerformanceMetrics',
         historical_data: Optional[List[ComprehensiveRetrospectiveReport]] = None,
     ) -> ComprehensiveRetrospectiveReport:
         """Analyze multiple individual retrospectives to generate comprehensive insights.
@@ -142,8 +143,8 @@ class AgileCoachAnalyzer:
     async def _execute_comprehensive_analysis(
         self,
         individual_retrospectives: List[IndividualRetrospective],
-        team_composition: TeamComposition,
-        execution_metrics: TeamPerformanceMetrics,
+        team_composition: 'TeamComposition',
+        execution_metrics: 'TeamPerformanceMetrics',
         historical_data: Optional[List[ComprehensiveRetrospectiveReport]],
     ) -> ComprehensiveRetrospectiveReport:
         """Execute the complete comprehensive analysis process."""
@@ -461,7 +462,7 @@ class AgileCoachAnalyzer:
     async def _analyze_cross_agent_interactions(
         self,
         retrospectives: List[IndividualRetrospective],
-        team_composition: TeamComposition,
+        team_composition: 'TeamComposition',
     ) -> CrossAgentInsights:
         """Analyze interactions and collaboration between agents."""
         
@@ -529,7 +530,7 @@ class AgileCoachAnalyzer:
         self,
         report: ComprehensiveRetrospectiveReport,
         retrospectives: List[IndividualRetrospective],
-        execution_metrics: TeamPerformanceMetrics,
+        execution_metrics: 'TeamPerformanceMetrics',
     ) -> None:
         """Synthesize overall team performance metrics."""
         

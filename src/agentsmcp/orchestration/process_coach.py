@@ -20,25 +20,26 @@ ensuring the AgentsMCP system rapidly learns and evolves.
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, TYPE_CHECKING
 from dataclasses import dataclass, field
 from enum import Enum
 import json
 
-from ..retrospective import (
-    AgileCoachAnalyzer,
-    OrchestratorEnforcementSystem, 
-    EnhancedRetrospectiveIntegration,
-    ExecutionLogCapture,
-    ComprehensiveRetrospectiveReport,
-    ActionPoint,
-    ImplementationStatus,
-    PriorityLevel
-)
-from ..retrospective.logging.log_schemas import LoggingConfig
-from ..retrospective.generation import ImprovementGenerator, ImprovementEngine
-from ..retrospective.approval import ApprovalOrchestrator
-from ..retrospective.safety import SafetyOrchestrator
+if TYPE_CHECKING:
+    from ..retrospective import (
+        AgileCoachAnalyzer,
+        OrchestratorEnforcementSystem, 
+        EnhancedRetrospectiveIntegration,
+        ExecutionLogCapture,
+        ComprehensiveRetrospectiveReport,
+        ActionPoint,
+        ImplementationStatus,
+        PriorityLevel
+    )
+    from ..retrospective.logging.log_schemas import LoggingConfig
+    from ..retrospective.generation import ImprovementGenerator, ImprovementEngine
+    from ..retrospective.approval import ApprovalOrchestrator
+    from ..retrospective.safety import SafetyOrchestrator
 from ..agents import AgentLoader
 from ..config import Config
 from .models import TaskResult, TeamPerformanceMetrics
@@ -79,11 +80,11 @@ class ImprovementCycle:
     started_at: datetime
     completed_at: Optional[datetime] = None
     execution_logs: List[Dict[str, Any]] = field(default_factory=list)
-    analysis_results: Optional[ComprehensiveRetrospectiveReport] = None
-    generated_improvements: List[ActionPoint] = field(default_factory=list)
-    approved_improvements: List[ActionPoint] = field(default_factory=list)
-    implemented_improvements: List[ActionPoint] = field(default_factory=list)
-    failed_improvements: List[ActionPoint] = field(default_factory=list)
+    analysis_results: Optional['ComprehensiveRetrospectiveReport'] = None
+    generated_improvements: List['ActionPoint'] = field(default_factory=list)
+    approved_improvements: List['ActionPoint'] = field(default_factory=list)
+    implemented_improvements: List['ActionPoint'] = field(default_factory=list)
+    failed_improvements: List['ActionPoint'] = field(default_factory=list)
     metrics: Dict[str, float] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
 
@@ -137,12 +138,13 @@ class ProcessCoach:
         self.is_active = True  # Always active, cannot be disabled
         self.current_cycles: Dict[str, ImprovementCycle] = {}
         self.completed_cycles: List[ImprovementCycle] = []
-        self.improvement_history: List[ActionPoint] = []
+        self.improvement_history: List['ActionPoint'] = []
         self.system_metrics: Dict[str, float] = {}
         self.agent_enhancements: Dict[str, List[Dict[str, Any]]] = {}
         
-        # Initialize core components
-        self._initialize_components()
+        # Initialize core components (disabled temporarily due to circular imports)
+        # self._initialize_components()
+        logger.warning("ProcessCoach components initialization disabled temporarily")
         
         # Track system state
         self.last_cycle_time = datetime.now()
@@ -154,6 +156,18 @@ class ProcessCoach:
     def _initialize_components(self):
         """Initialize all core orchestration components."""
         try:
+            # Import at runtime to avoid circular imports
+            from ..retrospective import (
+                AgileCoachAnalyzer,
+                OrchestratorEnforcementSystem, 
+                EnhancedRetrospectiveIntegration,
+                ExecutionLogCapture,
+            )
+            from ..retrospective.logging.log_schemas import LoggingConfig
+            from ..retrospective.generation import ImprovementGenerator, ImprovementEngine
+            from ..retrospective.approval import ApprovalOrchestrator
+            from ..retrospective.safety import SafetyOrchestrator
+            
             # Retrospective analysis components
             self.agile_coach = AgileCoachAnalyzer()
             self.enforcement_system = OrchestratorEnforcementSystem()
@@ -406,7 +420,7 @@ class ProcessCoach:
         
         logger.info(f"Successfully implemented {len(implemented)} improvements, {len(failed)} failed")
 
-    async def _implement_single_improvement(self, improvement: ActionPoint, cycle_id: str) -> bool:
+    async def _implement_single_improvement(self, improvement: 'ActionPoint', cycle_id: str) -> bool:
         """Implement a single improvement action."""
         try:
             # Determine improvement type and route to appropriate handler
@@ -423,7 +437,7 @@ class ProcessCoach:
             logger.error(f"Single improvement implementation failed: {e}")
             return False
 
-    async def _implement_agent_improvement(self, improvement: ActionPoint, cycle_id: str) -> bool:
+    async def _implement_agent_improvement(self, improvement: 'ActionPoint', cycle_id: str) -> bool:
         """Implement agent-related improvements (roles, capabilities, etc.)."""
         try:
             # Extract agent modification details from improvement
@@ -555,21 +569,21 @@ class ProcessCoach:
             logger.error(f"Agent removal failed: {e}")
             return False
 
-    async def _implement_process_improvement(self, improvement: ActionPoint, cycle_id: str) -> bool:
+    async def _implement_process_improvement(self, improvement: 'ActionPoint', cycle_id: str) -> bool:
         """Implement process-related improvements."""
         # Implementation depends on specific process improvement type
         # This would integrate with workflow orchestration, timing adjustments, etc.
         logger.info(f"Process improvement implementation: {improvement.title}")
         return True
 
-    async def _implement_system_improvement(self, improvement: ActionPoint, cycle_id: str) -> bool:
+    async def _implement_system_improvement(self, improvement: 'ActionPoint', cycle_id: str) -> bool:
         """Implement system-level improvements."""
         # Implementation depends on specific system improvement type
         # This would integrate with configuration updates, resource adjustments, etc.
         logger.info(f"System improvement implementation: {improvement.title}")
         return True
 
-    async def _implement_generic_improvement(self, improvement: ActionPoint, cycle_id: str) -> bool:
+    async def _implement_generic_improvement(self, improvement: 'ActionPoint', cycle_id: str) -> bool:
         """Implement generic improvements."""
         logger.info(f"Generic improvement implementation: {improvement.title}")
         return True
