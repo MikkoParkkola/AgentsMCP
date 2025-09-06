@@ -6,7 +6,9 @@
 ![Semgrep](https://github.com/MikkoParkkola/AgentsMCP/actions/workflows/semgrep.yml/badge.svg)
 [![Coverage](https://codecov.io/gh/MikkoParkkola/AgentsMCP/branch/main/graph/badge.svg)](https://codecov.io/gh/MikkoParkkola/AgentsMCP)
 
-Production-ready multi-agent development platform that orchestrates specialized AI agents for complete software development workflows. Supporting 16 development roles from business analysis to ML engineering with validated performance at scale.
+> ⚠️ **Security Notice** – *Never enable* `insecure_mode` *in production environments.* See the [Security Documentation](docs/SECURITY.md) for details.
+
+Production-ready multi‑agent development platform that orchestrates specialized AI agents for complete software development workflows. **The out‑of‑the‑box provider is `ollama‑turbo` (model `gpt‑oss:120b`).** Switching to other providers is possible via the `--provider` flag or environment variables (see [Providers Guide](docs/PROVIDERS.md)).
 
 ## 🚀 Quick Start for Development Teams
 
@@ -16,7 +18,7 @@ Production-ready multi-agent development platform that orchestrates specialized 
 pip install -e ".[dev,rag]"
 agentsmcp server start
 
-# Launch a complete feature development team
+# Launch a complete feature development team (default provider = ollama)
 agentsmcp agent spawn business-analyst "Create user authentication system with OAuth2"
 agentsmcp agent spawn backend-engineer "Implement authentication API endpoints"
 agentsmcp agent spawn web-frontend-engineer "Build login/registration UI"
@@ -58,6 +60,31 @@ curl http://localhost:8000/spawn -H "Content-Type: application/json" \
 ## 🏗️ Development Roles & Capabilities
 
 AgentsMCP orchestrates specialized AI agents across the complete software development lifecycle:
+
+<details><summary>🗂️ Role Alias Table (CLI)</summary>
+
+| CLI name (hyphen) | Internal name (underscore) |
+|-------------------|-----------------------------|
+| business-analyst | business_analyst |
+| architect | architect |
+| backend-engineer | backend_engineer |
+| api-engineer | api_engineer |
+| web-frontend-engineer | web_frontend_engineer |
+| tui-frontend-engineer | tui_frontend_engineer |
+| backend-qa-engineer | backend_qa_engineer |
+| web-frontend-qa-engineer | web_frontend_qa_engineer |
+| tui-frontend-qa-engineer | tui_frontend_qa_engineer |
+| chief-qa-engineer | chief_qa_engineer |
+| ci-cd-engineer | ci_cd_engineer |
+| dev-tooling-engineer | dev_tooling_engineer |
+| data-analyst | data_analyst |
+| data-scientist | data_scientist |
+| ml-scientist | ml_scientist |
+| ml-engineer | ml_engineer |
+| it-lawyer | it_lawyer |
+| marketing-manager | marketing_manager |
+
+</details>
 
 ### **Analysis & Design Team**
 - **Business Analyst** - Requirements elicitation, acceptance criteria, scope definition
