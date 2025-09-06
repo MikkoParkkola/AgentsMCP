@@ -314,7 +314,8 @@ class ProgressDisplay:
                 lines.append("")  # Separator
                 success_rate = (self.completed_tasks / max(1, self.total_tasks)) * 100
                 avg_duration = TaskTiming("", "", 0, 0).format_duration(self.average_task_duration_ms)
-                lines.append(f"📊 Tasks: {self.completed_tasks}/{self.total_tasks} | "
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                lines.append(f"{timestamp} 📊 Tasks: {self.completed_tasks}/{self.total_tasks} | "
                            f"Success: {success_rate:.1f}% | "
                            f"Avg: {avg_duration}")
             

@@ -202,12 +202,15 @@ class TaskTracker:
                 self.progress_display.add_agent(agent_id, agent_name, estimated_duration_ms=15000)
                 self.progress_display.update_agent_progress(agent_id, 0, initial_status)
             
-            print(f"🐛 DEBUG TaskTracker: Starting sequential planning...")
+            import datetime
+            timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+            print(f"{timestamp} 🐛 DEBUG TaskTracker: Starting sequential planning...")
             
             planning_start = time.time()
             
             try:
-                print(f"🐛 DEBUG TaskTracker: About to call sequential_planner.create_plan() - potential endless loop location")
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                print(f"{timestamp} 🐛 DEBUG TaskTracker: About to call sequential_planner.create_plan() - potential endless loop location")
                 # Add timeout protection to prevent infinite loops
                 plan = await asyncio.wait_for(
                     self.sequential_planner.create_plan(
@@ -218,10 +221,12 @@ class TaskTracker:
                     timeout=45.0  # 45-second timeout for planning
                 )
                 planning_duration = int((time.time() - planning_start) * 1000)
-                print(f"🐛 DEBUG TaskTracker: sequential_planner.create_plan() completed successfully in {planning_duration}ms")
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                print(f"{timestamp} 🐛 DEBUG TaskTracker: sequential_planner.create_plan() completed successfully in {planning_duration}ms")
                 
                 self.task_plans[task_id] = plan
-                print(f"🐛 DEBUG TaskTracker: Plan stored with {len(plan.steps)} steps")
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                print(f"{timestamp} 🐛 DEBUG TaskTracker: Plan stored with {len(plan.steps)} steps")
                 self.logger.info(f"Created sequential plan for {task_id} with {len(plan.steps)} steps in {planning_duration}ms")
                 
             except asyncio.TimeoutError:
@@ -278,7 +283,8 @@ class TaskTracker:
                 self.progress_display.update_agent_progress(assignment.agent_id, 0, step_summary)
             
             # Phase 3: Auto-execute task to prevent endless loops
-            print(f"🐛 DEBUG TaskTracker: Planning complete, starting auto-execution for task {task_id}")
+            timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+            print(f"{timestamp} 🐛 DEBUG TaskTracker: Planning complete, starting auto-execution for task {task_id}")
             self.task_status[task_id] = TaskStatus.EXECUTING
             self._notify_status("🚀 Planning complete - starting execution...")
             

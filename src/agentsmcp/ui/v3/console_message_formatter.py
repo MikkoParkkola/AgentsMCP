@@ -61,6 +61,21 @@ class ConsoleMessageFormatter:
     def _display_wrapped_content(self, content: str, style: str) -> None:
         """Display content with proper text wrapping and indentation."""
         try:
+            # Check if content contains markdown formatting (for assistant messages)
+            has_markdown = any(marker in content for marker in ['**', '##', '###', '```', '*', '- ', '1. ', '|'])
+            
+            if has_markdown and style == "white":  # Assistant message with markdown
+                try:
+                    from rich.markdown import Markdown
+                    # Create markdown with indentation
+                    markdown_content = textwrap.indent(content, "  ")
+                    md = Markdown(markdown_content)
+                    self.console.print(md)
+                    return
+                except Exception:
+                    # Fall back to regular text processing if markdown fails
+                    pass
+            
             # Handle existing line breaks first
             content_lines = content.split('\n')
             

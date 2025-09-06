@@ -97,6 +97,7 @@ class ConsoleRenderer(UIRenderer):
         """No frame rendering needed for console style."""
         pass
     
+    
     def handle_input(self) -> Optional[str]:
         """Handle user input with Rich prompt styling and basic history support."""
         try:
@@ -115,7 +116,7 @@ class ConsoleRenderer(UIRenderer):
                 for item in self._input_history[-50:]:  # Last 50 items for performance
                     readline.add_history(item)
                 
-                # Add timestamp to prompt
+                # Add timestamp to prompt  
                 import datetime
                 timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
                 user_input = input(f"{timestamp} 💬 > ").strip()

@@ -82,58 +82,15 @@ class PlainCLIRenderer(UIRenderer):
         except Exception as e:
             print(f"Render error: {e}")
     
-    def _get_multiline_input(self, prompt: str) -> str:
-        """Get user input with multi-line paste support like Claude Code CLI."""
-        import datetime
-        timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-        
-        # Get initial input
-        user_input = input(f"{timestamp} {prompt}").strip()
-        
-        if not user_input:
-            return user_input
-            
-        # Check for multi-line input indicators
-        lines = [user_input]
-        continuation_triggers = [',', '.', 'and', ':', ';', ')', '}', ']', 'focusing on', 'include', 'with', 'then', 'also', 'but', 'however']
-        needs_continuation = (
-            len(user_input) > 80 or  # Lowered threshold for better detection
-            any(user_input.strip().endswith(trigger) for trigger in continuation_triggers) or
-            user_input.count('(') > user_input.count(')') or  # Unbalanced parens
-            user_input.count('[') > user_input.count(']') or  # Unbalanced brackets
-            user_input.count('{') > user_input.count('}') or  # Unbalanced braces
-            len(user_input.split()) > 15 or  # Long sentence likely to continue
-            user_input.endswith('\\')  # Explicit continuation character
-        )
-        
-        while needs_continuation and len(lines) < 15:  # Allow more lines
-            try:
-                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                continuation = input(f"{timestamp} ... ").strip()
-                if not continuation:  # Empty line signals end
-                    break
-                lines.append(continuation)
-                
-                # Re-evaluate if we still need continuation
-                needs_continuation = (
-                    continuation.endswith(',') or continuation.endswith('and') or 
-                    continuation.endswith(':') or continuation.endswith(';') or
-                    continuation.endswith('\\') or len(continuation.split()) > 15 or
-                    continuation.count('(') > continuation.count(')') or
-                    continuation.count('[') > continuation.count(']') or
-                    continuation.count('{') > continuation.count('}')
-                )
-            except (EOFError, KeyboardInterrupt):
-                break
-        
-        return " ".join(lines)
 
     def handle_input(self) -> Optional[str]:
         """Handle user input in BARE-BONES plain CLI mode with multi-line support."""
         try:
-            # Enhanced input handling with multi-line detection
+            # Standard input handling with timestamps
             try:
-                user_input = self._get_multiline_input("> ")
+                import datetime
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                user_input = input(f"{timestamp} > ").strip()
                 return user_input if user_input else None
             except (EOFError, KeyboardInterrupt):
                 return "/quit"
@@ -589,40 +546,6 @@ class SimpleTUIRenderer(UIRenderer):
         except Exception as e:
             print(f"Render error: {e}")
     
-    def handle_input(self) -> Optional[str]:
-        """Handle user input in simple TUI mode with multi-line support."""
-        try:
-            if not self.capabilities.is_tty:
-                # Fallback to plain input with multi-line detection
-                user_input = self._get_multiline_input("💬 > ")
-                return user_input if user_input else None
-            
-            # For TTY mode, use multi-line input with proper line handling
-            try:
-                # Position cursor at input line
-                input_line = self._screen_height - 1
-                print(f"\033[{input_line};1H\033[K", end="", flush=True)
-                
-                # Use multi-line input - this handles complex prompts correctly
-                user_input = self._get_multiline_input("💬 > ")
-                
-                if user_input:
-                    # Update state for potential rendering
-                    self.state.current_input = ""  # Clear since we got the input
-                    return user_input
-                
-                return None
-                
-            except (EOFError, KeyboardInterrupt):
-                return "/quit"
-            
-        except Exception as e:
-            print(f"Input error: {e}")
-            # Ultimate fallback to multi-line input
-            try:
-                return self._get_multiline_input("💬 > ") or None
-            except (EOFError, KeyboardInterrupt):
-                return "/quit"
     
     def show_message(self, message: str, level: str = "info") -> None:
         """Show a message in simple TUI."""
