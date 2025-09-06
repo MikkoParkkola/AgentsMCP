@@ -82,13 +82,58 @@ class PlainCLIRenderer(UIRenderer):
         except Exception as e:
             print(f"Render error: {e}")
     
-    def handle_input(self) -> Optional[str]:
-        """Handle user input in BARE-BONES plain CLI mode."""
-        try:
-            # SIMPLIFIED input handling - no complex state management
-            # Just use standard input() function - most reliable
+    def _get_multiline_input(self, prompt: str) -> str:
+        """Get user input with multi-line paste support like Claude Code CLI."""
+        import datetime
+        timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+        
+        # Get initial input
+        user_input = input(f"{timestamp} {prompt}").strip()
+        
+        if not user_input:
+            return user_input
+            
+        # Check for multi-line input indicators
+        lines = [user_input]
+        continuation_triggers = [',', '.', 'and', ':', ';', ')', '}', ']', 'focusing on', 'include', 'with', 'then', 'also', 'but', 'however']
+        needs_continuation = (
+            len(user_input) > 80 or  # Lowered threshold for better detection
+            any(user_input.strip().endswith(trigger) for trigger in continuation_triggers) or
+            user_input.count('(') > user_input.count(')') or  # Unbalanced parens
+            user_input.count('[') > user_input.count(']') or  # Unbalanced brackets
+            user_input.count('{') > user_input.count('}') or  # Unbalanced braces
+            len(user_input.split()) > 15 or  # Long sentence likely to continue
+            user_input.endswith('\\')  # Explicit continuation character
+        )
+        
+        while needs_continuation and len(lines) < 15:  # Allow more lines
             try:
-                user_input = input("> ").strip()
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                continuation = input(f"{timestamp} ... ").strip()
+                if not continuation:  # Empty line signals end
+                    break
+                lines.append(continuation)
+                
+                # Re-evaluate if we still need continuation
+                needs_continuation = (
+                    continuation.endswith(',') or continuation.endswith('and') or 
+                    continuation.endswith(':') or continuation.endswith(';') or
+                    continuation.endswith('\\') or len(continuation.split()) > 15 or
+                    continuation.count('(') > continuation.count(')') or
+                    continuation.count('[') > continuation.count(']') or
+                    continuation.count('{') > continuation.count('}')
+                )
+            except (EOFError, KeyboardInterrupt):
+                break
+        
+        return " ".join(lines)
+
+    def handle_input(self) -> Optional[str]:
+        """Handle user input in BARE-BONES plain CLI mode with multi-line support."""
+        try:
+            # Enhanced input handling with multi-line detection
+            try:
+                user_input = self._get_multiline_input("> ")
                 return user_input if user_input else None
             except (EOFError, KeyboardInterrupt):
                 return "/quit"
@@ -145,8 +190,13 @@ class PlainCLIRenderer(UIRenderer):
             self._last_status = None  # Reset status tracking
 
     def display_chat_message(self, role: str, content: str, timestamp: str = None) -> None:
-        """Display a chat message with plain text formatting."""
+        """Display a chat message with plain text formatting and consistent timestamps."""
         try:
+            # Always ensure we have a timestamp
+            if not timestamp:
+                import datetime
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+            
             # Clear any status line before showing chat message
             self._clear_status_line()
             # If we were streaming and this is the final assistant message
@@ -166,17 +216,10 @@ class PlainCLIRenderer(UIRenderer):
                 # Use markdown formatting for assistant responses
                 if role == "assistant":
                     formatted_content = self.markdown_formatter.format_text(content)
-                    if timestamp:
-                        print(f"{timestamp} {symbol} {role_name}:")
-                        print(formatted_content)
-                    else:
-                        print(f"{symbol} {role_name}:")
-                        print(formatted_content)
+                    print(f"{timestamp} {symbol} {role_name}:")
+                    print(formatted_content)
                 else:
-                    if timestamp:
-                        print(f"{timestamp} {symbol} {role_name}: {content}")
-                    else:
-                        print(f"{symbol} {role_name}: {content}")
+                    print(f"{timestamp} {symbol} {role_name}: {content}")
                 return
             
             # Format messages based on role with emojis and timestamp
@@ -192,18 +235,11 @@ class PlainCLIRenderer(UIRenderer):
             if role == "assistant":
                 # Format the content using markdown formatter
                 formatted_content = self.markdown_formatter.format_text(content)
-                if timestamp:
-                    print(f"{timestamp} {symbol} {role_name}:")
-                    print(formatted_content)
-                else:
-                    print(f"{symbol} {role_name}:")
-                    print(formatted_content)
+                print(f"{timestamp} {symbol} {role_name}:")
+                print(formatted_content)
             else:
                 # Plain text for user and system messages
-                if timestamp:
-                    print(f"{timestamp} {symbol} {role_name}: {content}")
-                else:
-                    print(f"{symbol} {role_name}: {content}")
+                print(f"{timestamp} {symbol} {role_name}: {content}")
         except Exception as e:
             print(f"Chat message display error: {e}")
     
@@ -554,28 +590,21 @@ class SimpleTUIRenderer(UIRenderer):
             print(f"Render error: {e}")
     
     def handle_input(self) -> Optional[str]:
-        """Handle user input in simple TUI mode."""
+        """Handle user input in simple TUI mode with multi-line support."""
         try:
             if not self.capabilities.is_tty:
-                # Fallback to plain input
-                # Add timestamp to user input prompt
-                import datetime
-                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                user_input = input(f"{timestamp} 💬 > ").strip()
+                # Fallback to plain input with multi-line detection
+                user_input = self._get_multiline_input("💬 > ")
                 return user_input if user_input else None
             
-            # For TTY mode, use blocking input with proper line handling
-            # This is simpler and more reliable than character-by-character input
+            # For TTY mode, use multi-line input with proper line handling
             try:
                 # Position cursor at input line
                 input_line = self._screen_height - 1
-                # Add timestamp to TTY input prompt
-                import datetime
-                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                print(f"\033[{input_line};1H\033[K{timestamp} 💬 > ", end="", flush=True)
+                print(f"\033[{input_line};1H\033[K", end="", flush=True)
                 
-                # Use blocking input - this works correctly with terminal
-                user_input = input("").strip()
+                # Use multi-line input - this handles complex prompts correctly
+                user_input = self._get_multiline_input("💬 > ")
                 
                 if user_input:
                     # Update state for potential rendering
@@ -589,12 +618,9 @@ class SimpleTUIRenderer(UIRenderer):
             
         except Exception as e:
             print(f"Input error: {e}")
-            # Ultimate fallback to basic input
+            # Ultimate fallback to multi-line input
             try:
-                # Add timestamp to fallback input prompt
-                import datetime
-                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
-                return input(f"{timestamp} 💬 > ").strip() or None
+                return self._get_multiline_input("💬 > ") or None
             except (EOFError, KeyboardInterrupt):
                 return "/quit"
     
