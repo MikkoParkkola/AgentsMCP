@@ -431,9 +431,15 @@ def init_main(ctx, mode: str, force: bool, no_progress: bool, non_interactive: b
             
             # Show next steps
             click.echo("\n📋 You're ready to go! Try these commands:")
-            click.echo(f"   • {click.style('agentsmcp run simple \"Hello world\"', fg='cyan')}")
-            click.echo(f"   • {click.style('agentsmcp monitor costs', fg='cyan')}")
-            click.echo(f"   • {click.style('agentsmcp run interactive', fg='cyan')}")
+            
+            # Extract styled commands to avoid f-string backslash issues
+            cmd1 = click.style('agentsmcp run simple "Hello world"', fg='cyan')
+            cmd2 = click.style('agentsmcp monitor costs', fg='cyan') 
+            cmd3 = click.style('agentsmcp run interactive', fg='cyan')
+            
+            click.echo(f"   • {cmd1}")
+            click.echo(f"   • {cmd2}")
+            click.echo(f"   • {cmd3}")
             
             if result.final_health_report and result.final_health_report.warning_checks > 0:
                 click.echo(f"\n💡 {result.final_health_report.warning_checks} optional features have warnings.")
