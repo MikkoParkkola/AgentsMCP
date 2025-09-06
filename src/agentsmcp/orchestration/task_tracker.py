@@ -85,6 +85,15 @@ class TaskTracker:
         self.successful_tasks = 0
         self.failed_tasks = 0
         self.average_task_duration_ms = 0
+        
+        # Performance optimization: Caching layer
+        self._feature_detection_cache: Dict[str, FeatureDetectionResult] = {}
+        self._plan_cache: Dict[str, SequentialPlan] = {}
+        self._agent_assignment_cache: Dict[str, List[AgentAssignment]] = {}
+        
+        # Reduce redundant operations
+        self._last_progress_update_time = 0
+        self._progress_update_throttle_ms = 100  # Throttle progress updates to every 100ms
     
     async def start_task(self, 
                         user_input: str,
@@ -126,14 +135,24 @@ class TaskTracker:
         self.progress_display.update_orchestrator_status("Starting sequential planning...")
         
         try:
-            # Phase 0: Feature Detection (prevents Ghost Feature Problem)
+            # Phase 0: Feature Detection with caching (prevents Ghost Feature Problem)
             self._notify_status("🔍 Phase 0: Detecting existing features...")
             try:
-                # Add timeout protection to prevent infinite loops in feature detection
-                feature_detection_result = await asyncio.wait_for(
-                    self.feature_detector.detect_cli_feature(user_input),
-                    timeout=10.0  # 10-second timeout for feature detection
-                )
+                # Performance optimization: Check cache first
+                cache_key = f"feature_{hash(user_input) % 10000}"
+                feature_detection_result = self._feature_detection_cache.get(cache_key)
+                
+                if feature_detection_result is None:
+                    # Add timeout protection to prevent infinite loops in feature detection
+                    feature_detection_result = await asyncio.wait_for(
+                        self.feature_detector.detect_cli_feature(user_input),
+                        timeout=10.0  # 10-second timeout for feature detection
+                    )
+                    # Cache the result for future use
+                    self._feature_detection_cache[cache_key] = feature_detection_result
+                    self.logger.debug(f"Cached feature detection result for key {cache_key}")
+                else:
+                    self.logger.debug(f"Using cached feature detection result for key {cache_key}")
                 
                 if feature_detection_result.exists:
                     # Feature already exists - provide formatted showcase instead of implementation
@@ -496,6 +515,12 @@ class TaskTracker:
     
     def _on_planning_progress(self, message: str, percentage: float, data: Dict[str, Any]) -> None:
         """Handle planning progress updates with enhanced agent visualization for 6-step sequential thinking."""
+        # Performance optimization: Throttle progress updates to reduce UI spam
+        current_time = time.time() * 1000  # Convert to milliseconds
+        if (current_time - self._last_progress_update_time) < self._progress_update_throttle_ms:
+            return  # Skip this update to avoid UI flooding
+        self._last_progress_update_time = current_time
+        
         # Update orchestrator status
         self.progress_display.update_orchestrator_status(f"🧠 Sequential Thinking: {message}")
         self.logger.debug(f"Planning progress: {percentage:.1f}% - {message}")
@@ -618,7 +643,7 @@ class TaskTracker:
         }
     
     def cleanup_completed_tasks(self, max_age_hours: int = 24) -> int:
-        """Clean up old completed tasks."""
+        """Clean up old completed tasks and optimize caches."""
         current_time = time.time()
         max_age_seconds = max_age_hours * 3600
         
@@ -640,10 +665,32 @@ class TaskTracker:
             if task_id in self.task_status:
                 del self.task_status[task_id]
         
+        # Performance optimization: Clean up caches to prevent memory leaks
+        cache_cleanup_count = 0
+        
+        # Clean feature detection cache if too large
+        if len(self._feature_detection_cache) > 100:
+            # Keep only the 50 most recent entries
+            cache_items = list(self._feature_detection_cache.items())
+            self._feature_detection_cache = dict(cache_items[-50:])
+            cache_cleanup_count += len(cache_items) - 50
+        
+        # Clean plan cache if too large  
+        if len(self._plan_cache) > 50:
+            cache_items = list(self._plan_cache.items())
+            self._plan_cache = dict(cache_items[-25:])
+            cache_cleanup_count += len(cache_items) - 25
+            
+        # Clean agent assignment cache if too large
+        if len(self._agent_assignment_cache) > 50:
+            cache_items = list(self._agent_assignment_cache.items())
+            self._agent_assignment_cache = dict(cache_items[-25:])
+            cache_cleanup_count += len(cache_items) - 25
+        
         # Clean up progress display
         self.progress_display.cleanup_completed_agents()
         
-        if tasks_to_remove:
-            self.logger.info(f"Cleaned up {len(tasks_to_remove)} completed tasks")
+        if tasks_to_remove or cache_cleanup_count:
+            self.logger.info(f"Cleaned up {len(tasks_to_remove)} completed tasks and {cache_cleanup_count} cache entries")
         
         return len(tasks_to_remove)

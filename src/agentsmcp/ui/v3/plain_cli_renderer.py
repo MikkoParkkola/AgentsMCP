@@ -73,7 +73,10 @@ class PlainCLIRenderer(UIRenderer):
                 if self.state.status_message:
                     print(f"Status: {self.state.status_message}")
                 
-                print(f"💬 > {self.state.current_input}", end="", flush=True)
+                # Add timestamp to prompt display
+                import datetime
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                print(f"{timestamp} 💬 > {self.state.current_input}", end="", flush=True)
                 self._last_prompt_shown = True
                 
         except Exception as e:
@@ -151,7 +154,7 @@ class PlainCLIRenderer(UIRenderer):
                 # Complete the streaming session first
                 self.streaming_manager.complete_streaming_session()
                 
-                # Display the complete final message
+                # Display the complete final message with markdown formatting
                 role_symbols = {
                     "user": "👤",
                     "assistant": "🤖", 
@@ -160,10 +163,20 @@ class PlainCLIRenderer(UIRenderer):
                 symbol = role_symbols.get(role, "❓")
                 role_name = role.title()
                 
-                if timestamp:
-                    print(f"{timestamp} {symbol} {role_name}: {content}")
+                # Use markdown formatting for assistant responses
+                if role == "assistant":
+                    formatted_content = self.markdown_formatter.format_text(content)
+                    if timestamp:
+                        print(f"{timestamp} {symbol} {role_name}:")
+                        print(formatted_content)
+                    else:
+                        print(f"{symbol} {role_name}:")
+                        print(formatted_content)
                 else:
-                    print(f"{symbol} {role_name}: {content}")
+                    if timestamp:
+                        print(f"{timestamp} {symbol} {role_name}: {content}")
+                    else:
+                        print(f"{symbol} {role_name}: {content}")
                 return
             
             # Format messages based on role with emojis and timestamp
@@ -175,11 +188,22 @@ class PlainCLIRenderer(UIRenderer):
             symbol = role_symbols.get(role, "❓")
             role_name = role.title()
             
-            if timestamp:
-                print(f"{timestamp} {symbol} {role_name}: {content}")
+            # Use markdown formatting for assistant responses
+            if role == "assistant":
+                # Format the content using markdown formatter
+                formatted_content = self.markdown_formatter.format_text(content)
+                if timestamp:
+                    print(f"{timestamp} {symbol} {role_name}:")
+                    print(formatted_content)
+                else:
+                    print(f"{symbol} {role_name}:")
+                    print(formatted_content)
             else:
-                # Fallback without timestamp
-                print(f"{symbol} {role_name}: {content}")
+                # Plain text for user and system messages
+                if timestamp:
+                    print(f"{timestamp} {symbol} {role_name}: {content}")
+                else:
+                    print(f"{symbol} {role_name}: {content}")
         except Exception as e:
             print(f"Chat message display error: {e}")
     
@@ -534,7 +558,10 @@ class SimpleTUIRenderer(UIRenderer):
         try:
             if not self.capabilities.is_tty:
                 # Fallback to plain input
-                user_input = input("💬 > ").strip()
+                # Add timestamp to user input prompt
+                import datetime
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                user_input = input(f"{timestamp} 💬 > ").strip()
                 return user_input if user_input else None
             
             # For TTY mode, use blocking input with proper line handling
@@ -542,7 +569,10 @@ class SimpleTUIRenderer(UIRenderer):
             try:
                 # Position cursor at input line
                 input_line = self._screen_height - 1
-                print(f"\033[{input_line};1H\033[K💬 > ", end="", flush=True)
+                # Add timestamp to TTY input prompt
+                import datetime
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                print(f"\033[{input_line};1H\033[K{timestamp} 💬 > ", end="", flush=True)
                 
                 # Use blocking input - this works correctly with terminal
                 user_input = input("").strip()
@@ -561,7 +591,10 @@ class SimpleTUIRenderer(UIRenderer):
             print(f"Input error: {e}")
             # Ultimate fallback to basic input
             try:
-                return input("💬 > ").strip() or None
+                # Add timestamp to fallback input prompt
+                import datetime
+                timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                return input(f"{timestamp} 💬 > ").strip() or None
             except (EOFError, KeyboardInterrupt):
                 return "/quit"
     
@@ -615,7 +648,10 @@ class SimpleTUIRenderer(UIRenderer):
             if not self.capabilities.is_tty:
                 # Non-TTY fallback
                 if self.state.current_input:
-                    print(f"💬 > {self.state.current_input}", end="", flush=True)
+                    # Add timestamp to input area display
+                    import datetime
+                    timestamp = datetime.datetime.now().strftime("[%H:%M:%S]")
+                    print(f"{timestamp} 💬 > {self.state.current_input}", end="", flush=True)
                     
         except Exception as e:
             print(f"Input area draw error: {e}")
