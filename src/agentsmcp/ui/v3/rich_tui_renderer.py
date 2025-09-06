@@ -122,18 +122,17 @@ class RichTUIRenderer(UIRenderer):
     
     def _update_conversation_panel(self) -> None:
         """Update the conversation panel with message history and markdown rendering."""
+        from rich.console import Group
+        
         if not self._conversation_history:
             content = Text("No messages yet. Start a conversation!", style="dim italic")
         else:
             # Show last 10 messages to keep it manageable
             recent_messages = self._conversation_history[-10:]
-            content = Text()
+            elements = []
             
             # More accurate width calculation for conversation panel
-            # The layout is conversation (ratio=3) : status (ratio=1), so conversation gets 75% of body width
             console_width = self.console.size.width
-            # Account for: panel borders (2 chars each side = 4), padding (2 chars each side = 4 total)
-            # The Rich layout automatically handles the separation between conversation and status panels
             conversation_width = int(console_width * 0.75) - 6  # Panel borders + padding
             
             for msg_data in recent_messages:
@@ -146,68 +145,40 @@ class RichTUIRenderer(UIRenderer):
                     
                     # Format role header with timestamp
                     if role == "user":
-                        role_header = f"{time_prefix}[bold blue]👤 You:[/bold blue] "
+                        role_header = f"{time_prefix}[bold blue]👤 You:[/bold blue]"
                     elif role == "assistant":
-                        role_header = f"{time_prefix}[bold green]🤖 AI:[/bold green] "
+                        role_header = f"{time_prefix}[bold green]🤖 AI:[/bold green]"
                     elif role == "system":
-                        role_header = f"{time_prefix}[dim yellow]ℹ️ System:[/dim yellow] "
+                        role_header = f"{time_prefix}[dim yellow]ℹ️ System:[/dim yellow]"
                     else:
-                        role_header = f"{time_prefix}[dim]❓ {role}:[/dim] "
+                        role_header = f"{time_prefix}[dim]❓ {role}:[/dim]"
                     
-                    # Add role header
-                    content.append(role_header)
-                    
-                    # For AI responses with markdown, preserve markdown for rendering
-                    if role == "assistant" and is_markdown:
-                        # Keep markdown content for Rich rendering
-                        # We'll render it properly in the display below
-                        pass
+                    # Add role header as Text object
+                    elements.append(Text.from_markup(role_header))
                     
                     # Handle markdown content vs plain text content
                     if role == "assistant" and is_markdown:
                         try:
-                            # Create markdown object for Rich rendering with width constraints
+                            # Create markdown object for Rich rendering
                             markdown_obj = Markdown(msg_content)
-                            # Add the markdown object directly to content
-                            content.append(markdown_obj)
-                            content.append("\n")
+                            elements.append(markdown_obj)
                         except Exception:
                             # Fallback to plain text if markdown parsing fails
-                            msg_lines = msg_content.split('\n')
-                            for msg_line in msg_lines:
-                                if len(msg_line) > conversation_width:
-                                    import textwrap
-                                    wrapped_lines = textwrap.wrap(msg_line, width=conversation_width)
-                                    for line in wrapped_lines:
-                                        content.append(f"{line}\n")
-                                else:
-                                    content.append(f"{msg_line}\n")
+                            elements.append(Text(msg_content))
                     else:
-                        # Handle regular text content with line wrapping
-                        msg_lines = msg_content.split('\n')
-                        for msg_line in msg_lines:
-                            if len(msg_line) > conversation_width:
-                                import textwrap
-                                wrapped_lines = textwrap.wrap(msg_line, width=conversation_width)
-                                for line in wrapped_lines:
-                                    content.append(f"{line}\n")
-                            else:
-                                content.append(f"{msg_line}\n")
+                        # Handle regular text content
+                        elements.append(Text(msg_content))
+                    
+                    # Add spacing between messages
+                    elements.append(Text(""))  # Empty line
                     
                 else:
                     # Handle legacy string format for backward compatibility
-                    msg_lines = msg_data.split('\n')
-                    for msg_line in msg_lines:
-                        if len(msg_line) > conversation_width:
-                            import textwrap
-                            wrapped_lines = textwrap.wrap(msg_line, width=conversation_width)
-                            for line in wrapped_lines:
-                                content.append(f"{line}\n")
-                        else:
-                            content.append(f"{msg_line}\n")
-                
-                # Add separator between messages
-                content.append("\n")
+                    elements.append(Text(str(msg_data)))
+                    elements.append(Text(""))  # Empty line
+            
+            # Create Group with all elements for proper rendering
+            content = Group(*elements)
         
         self.layout["conversation"].update(
             Panel(content, title="[bold white]Conversation", border_style="green", padding=(0, 1))
