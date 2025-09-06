@@ -1085,21 +1085,13 @@ Remember: Be truthful about the system's current state rather than creating fals
                 # Prepare messages for LLM with auto-detected capabilities
                 messages = await self._prepare_messages()
                 
-                # Use real MCP ollama client based on provider
+                # Use real MCP ollama client based on provider with fallback logic
                 await progress_tracker.update_phase(ProcessingPhase.PROCESSING_RESULTS)
-                response = await self._call_llm_via_mcp(messages)
+                response = await self._call_llm_with_fallback(messages)
+                
                 if not response:
-                    # More specific error message based on configuration
-                    config_status = self.get_configuration_status()
-                    provider_status = config_status["providers"].get(self.provider, {})
-                    
-                    if not provider_status.get("configured"):
-                        if self.provider == "ollama":
-                            return "❌ Ollama not running. Start it with: ollama serve"
-                        else:
-                            return f"❌ {self.provider.upper()} API key not configured. Set {self._get_api_key_env_name(self.provider)} environment variable"
-                    else:
-                        return f"❌ Failed to connect to {self.provider}. Check your network connection and try again."
+                    # All fallback options exhausted
+                    return "❌ All LLM providers failed. Please check your configuration and network connection."
                 
                 # Check for tool calls in response
                 tool_calls = self._extract_tool_calls(response)
@@ -2391,6 +2383,70 @@ Remember: Be truthful about the system's current state rather than creating fals
             logger.error(f"Error in _call_codex: {e}")
             return await self._fallback_response(messages)
     
+    async def _call_llm_with_fallback(self, messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+        """Call LLM with intelligent provider fallback and retry logic."""
+        # Define provider fallback order with their requirements
+        fallback_order = []
+        
+        # Check which providers are actually available
+        config_status = self.get_configuration_status()
+        
+        # Start with current provider
+        if config_status["providers"].get(self.provider, {}).get("configured"):
+            fallback_order.append(self.provider)
+        
+        # Add other available providers as fallbacks
+        available_providers = [
+            provider for provider, status in config_status["providers"].items()
+            if status.get("configured") and provider != self.provider
+        ]
+        
+        # Prioritize local providers first (no API limits), then cloud providers
+        local_providers = [p for p in available_providers if p == "ollama"]
+        cloud_providers = [p for p in available_providers if p != "ollama"]
+        
+        fallback_order.extend(local_providers)
+        fallback_order.extend(cloud_providers)
+        
+        if not fallback_order:
+            logger.warning("No configured providers available for fallback")
+            return None
+        
+        original_provider = self.provider
+        
+        for provider in fallback_order:
+            try:
+                if provider != self.provider:
+                    logger.info(f"Falling back to {provider} provider")
+                    self.provider = provider
+                
+                # Attempt call with retries
+                for attempt in range(3):  # 3 retry attempts per provider
+                    try:
+                        response = await self._call_llm_via_mcp(messages)
+                        if response:
+                            if provider != original_provider:
+                                logger.info(f"Successfully used fallback provider: {provider}")
+                            return response
+                    except Exception as e:
+                        if "rate" in str(e).lower() or "quota" in str(e).lower():
+                            logger.warning(f"Rate limit on {provider}, attempt {attempt + 1}/3: {e}")
+                            if attempt < 2:  # Don't wait on last attempt
+                                await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s
+                        else:
+                            logger.warning(f"Provider {provider} failed attempt {attempt + 1}/3: {e}")
+                            if attempt < 2:
+                                await asyncio.sleep(0.5)  # Brief pause for other errors
+                            break  # Don't retry non-rate-limit errors
+                
+            except Exception as e:
+                logger.warning(f"Provider {provider} completely failed: {e}")
+                continue
+        
+        # Restore original provider
+        self.provider = original_provider
+        return None
+
     async def _fallback_response(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         """Generate error message when LLM connection fails - no generic responses."""
         # Check configuration status to provide specific error

@@ -416,15 +416,30 @@ class RichTUIRenderer(UIRenderer):
                             # Check for multi-line input (like Claude Code CLI)
                             user_input = input(f"{timestamp} 💬 > ").strip()
                             
-                            # If input seems incomplete (very long or ends with special chars), allow continuation
+                            # If input seems incomplete (very long, ends with punctuation, or incomplete syntax), allow continuation  
                             lines = [user_input]
-                            while (len(user_input) > 200 or user_input.endswith(',') or user_input.endswith('.') or user_input.endswith('and')) and len(lines) < 10:
+                            continuation_triggers = [',', '.', 'and', ':', ';', ')', '}', ']', 'focusing on', 'include', 'with']
+                            needs_continuation = (
+                                len(user_input) > 100 or  # Lowered threshold for better detection
+                                any(user_input.strip().endswith(trigger) for trigger in continuation_triggers) or
+                                user_input.count('(') > user_input.count(')') or  # Unbalanced parens
+                                user_input.count('[') > user_input.count(']') or  # Unbalanced brackets
+                                len(user_input.split()) > 20  # Long sentence likely to continue
+                            )
+                            
+                            while needs_continuation and len(lines) < 10:
                                 try:
                                     continuation = input("... ").strip()
                                     if not continuation:  # Empty line signals end
                                         break
                                     lines.append(continuation)
                                     user_input = " ".join(lines)
+                                    
+                                    # Re-evaluate if we still need continuation
+                                    needs_continuation = (
+                                        continuation.endswith(',') or continuation.endswith('and') or 
+                                        continuation.endswith(':') or len(continuation.split()) > 15
+                                    )
                                 except (EOFError, KeyboardInterrupt):
                                     break
                             
