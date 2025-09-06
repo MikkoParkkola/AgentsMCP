@@ -678,16 +678,86 @@ class ImprovementCoordinator:
         return True
 
     async def _execute_improvement_implementation(self, improvement_id: str) -> bool:
-        """Execute the implementation of an improvement."""
-        # This is a placeholder - actual implementation would depend on the improvement type
+        """Execute the implementation of an improvement with git-aware verification."""
         logger.info(f"Executing implementation for improvement {improvement_id}")
         
-        # Simulate implementation delay
+        # Get improvement details
+        if improvement_id not in self.managed_improvements:
+            return False
+        
+        managed = self.managed_improvements[improvement_id]
+        improvement = managed.improvement
+        
+        # Pre-implementation verification: capture current state
+        from ..verification import GitAwareVerifier
+        verifier = GitAwareVerifier()
+        pre_implementation_status = verifier.get_git_status_summary()
+        
+        try:
+            # Execute the actual improvement (this would be replaced with real implementation)
+            # For documentation improvements, this might involve file operations
+            success = await self._perform_actual_implementation(improvement)
+            
+            if not success:
+                logger.warning(f"Implementation of {improvement_id} failed at execution stage")
+                return False
+            
+            # Post-implementation verification: verify claimed changes actually occurred
+            post_implementation_status = verifier.get_git_status_summary()
+            
+            # Verify any file operations that were claimed
+            claimed_files = getattr(improvement, 'files_modified', [])
+            if claimed_files:
+                verification_result = verifier.verify_documentation_updates_complete(claimed_files)
+                
+                if not verification_result.success:
+                    logger.error(f"Verification failed for improvement {improvement_id}")
+                    logger.error(f"False claims: {verification_result.false_claims}")
+                    logger.error(f"Missing operations: {verification_result.missing_operations}")
+                    
+                    # Save verification report for debugging
+                    report_path = verifier.save_verification_report(f"failed_verification_{improvement_id}.json")
+                    logger.error(f"Detailed verification report saved to: {report_path}")
+                    
+                    return False
+                
+                logger.info(f"Verification passed for improvement {improvement_id}")
+                logger.info(f"Successfully verified files: {claimed_files}")
+            
+            # Check for commits if this was supposed to create commits
+            if hasattr(improvement, 'should_commit') and improvement.should_commit:
+                # Verify that new commits exist
+                last_commit_before = pre_implementation_status.get('last_commit', {})
+                last_commit_after = post_implementation_status.get('last_commit', {})
+                
+                if last_commit_before.get('hash') == last_commit_after.get('hash'):
+                    logger.error(f"No new commit created for improvement {improvement_id} despite claiming to commit")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during implementation of {improvement_id}: {e}")
+            return False
+    
+    async def _perform_actual_implementation(self, improvement) -> bool:
+        """Perform the actual implementation based on improvement type."""
+        # This is where the real implementation logic would go
+        # For now, simulate with delay and mostly successful outcomes
         await asyncio.sleep(1)
         
-        # For now, return success (90% success rate simulation)
+        # Simulate different success rates based on improvement category
         import random
-        return random.random() > 0.1
+        success_rate = 0.9  # Default 90% success rate
+        
+        if hasattr(improvement, 'category'):
+            category = getattr(improvement, 'category', 'general')
+            if 'documentation' in category.lower():
+                success_rate = 0.95  # Higher success for docs
+            elif 'performance' in category.lower():
+                success_rate = 0.8   # Lower success for complex performance changes
+        
+        return random.random() < success_rate
 
     async def _execute_improvement_validation(self, improvement_id: str) -> Dict[str, Any]:
         """Execute validation for an implemented improvement."""
